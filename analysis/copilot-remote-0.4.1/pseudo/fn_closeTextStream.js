@@ -1,0 +1,1 @@
+closeTextStream(){this.currentTextStream&&(this.ws.sendStreamEnd(this.currentTextStream),this.currentTextStream=null)}

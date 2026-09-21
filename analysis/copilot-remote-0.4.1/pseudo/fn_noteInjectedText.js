@@ -1,0 +1,1 @@
+noteInjectedText(t){this.recentPhoneInjects.push({text:t.trim(),at:Date.now()}),this.recentPhoneInjects.length>20&&this.recentPhoneInjects.shift()}

@@ -1,0 +1,1 @@
+function hS({msg:e}

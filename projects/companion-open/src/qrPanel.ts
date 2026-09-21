@@ -1,0 +1,265 @@
+import * as vscode from 'vscode';
+import * as QRCode from 'qrcode';
+
+export interface QrPanelState {
+  bridgeUrl: string | null;
+  publicUrl: string | null;
+  phoneConnected: boolean;
+  tunnelEnabled: boolean;
+  port: number | null;
+  tokenHint: string | null;
+  logLines: string[];
+}
+
+/**
+ * Sidebar panel: local/public URL + QR generated on extension host (no CDN).
+ */
+export class QrPanelProvider implements vscode.WebviewViewProvider {
+  public static readonly viewType = 'copilotSidecar.qrPanel';
+  private view?: vscode.WebviewView;
+  public state: QrPanelState = {
+    bridgeUrl: null,
+    publicUrl: null,
+    phoneConnected: false,
+    tunnelEnabled: false,
+    port: null,
+    tokenHint: null,
+    logLines: [],
+  };
+  private qrGen = 0;
+
+  resolveWebviewView(webviewView: vscode.WebviewView) {
+    this.view = webviewView;
+    webviewView.webview.options = { enableScripts: true };
+    webviewView.webview.html = this.buildHtml();
+    webviewView.webview.onDidReceiveMessage(async (msg) => {
+      if (msg?.type === 'ready') this.replay();
+      if (msg?.type === 'copy' && typeof msg.text === 'string') {
+        await vscode.env.clipboard.writeText(msg.text);
+        vscode.window.showInformationMessage('已复制 URL');
+      }
+      if (msg?.type === 'open' && typeof msg.text === 'string' && msg.text) {
+        await vscode.env.openExternal(vscode.Uri.parse(msg.text));
+      }
+      if (msg?.type === 'startTunnel') {
+        await vscode.commands.executeCommand('copilotSidecar.startTunnel');
+      }
+      if (msg?.type === 'stopTunnel') {
+        await vscode.commands.executeCommand('copilotSidecar.stopTunnel');
+      }
+      if (msg?.type === 'copyToken') {
+        await vscode.commands.executeCommand('copilotSidecar.copyToken');
+      }
+    });
+    this.replay();
+  }
+
+  setBridgeUrl(url: string | null) {
+    this.state.bridgeUrl = url;
+    this.post({ type: 'state', key: 'bridgeUrl', value: url });
+    void this.postQr();
+  }
+
+  setPublicUrl(url: string | null) {
+    this.state.publicUrl = url;
+    this.post({ type: 'state', key: 'publicUrl', value: url });
+    void this.postQr();
+  }
+
+  setPhoneConnected(v: boolean) {
+    this.state.phoneConnected = v;
+    this.post({ type: 'state', key: 'phoneConnected', value: v });
+  }
+
+  setTunnelEnabled(v: boolean) {
+    this.state.tunnelEnabled = v;
+    this.post({ type: 'state', key: 'tunnelEnabled', value: v });
+  }
+
+  setPort(port: number | null) {
+    this.state.port = port;
+    this.post({ type: 'state', key: 'port', value: port });
+  }
+
+  setTokenHint(hint: string | null) {
+    this.state.tokenHint = hint;
+    this.post({ type: 'state', key: 'tokenHint', value: hint });
+  }
+
+  addLog(line: string) {
+    this.state.logLines.push(line);
+    if (this.state.logLines.length > 40) this.state.logLines.shift();
+    this.post({ type: 'log', line });
+  }
+
+  private async postQr() {
+    const url = this.state.publicUrl || this.state.bridgeUrl;
+    const gen = ++this.qrGen;
+    this.post({ type: 'state', key: 'qrUrl', value: url });
+    if (!url) {
+      this.post({ type: 'state', key: 'qrDataUrl', value: null });
+      return;
+    }
+    try {
+      const dataUrl = await QRCode.toDataURL(url, { width: 220, margin: 1 });
+      if (gen !== this.qrGen) return;
+      this.post({ type: 'state', key: 'qrDataUrl', value: dataUrl });
+    } catch (e: any) {
+      this.post({ type: 'log', line: `QR failed: ${e?.message || e}` });
+      this.post({ type: 'state', key: 'qrDataUrl', value: null });
+    }
+  }
+
+  private replay() {
+    this.post({ type: 'state', key: 'bridgeUrl', value: this.state.bridgeUrl });
+    this.post({ type: 'state', key: 'publicUrl', value: this.state.publicUrl });
+    this.post({ type: 'state', key: 'phoneConnected', value: this.state.phoneConnected });
+    this.post({ type: 'state', key: 'tunnelEnabled', value: this.state.tunnelEnabled });
+    this.post({ type: 'state', key: 'port', value: this.state.port });
+    this.post({ type: 'state', key: 'tokenHint', value: this.state.tokenHint });
+    void this.postQr();
+    for (const line of this.state.logLines) this.post({ type: 'log', line });
+  }
+
+  private post(msg: unknown) {
+    this.view?.webview.postMessage(msg);
+  }
+
+  private buildHtml(): string {
+    return `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root { color-scheme: dark; }
+    body {
+      font-family: var(--vscode-font-family);
+      color: var(--vscode-foreground);
+      background: transparent;
+      margin: 0; padding: 12px;
+    }
+    h2 { font-size: 13px; margin: 0 0 8px; }
+    .row { margin: 8px 0; font-size: 12px; word-break: break-all; }
+    .muted { opacity: 0.75; }
+    .ok { color: #3dd68c; }
+    .bad { color: #ff6b6b; }
+    #qr { width: 220px; height: 220px; margin: 10px 0; background: #fff; border-radius: 8px; display:flex; align-items:center; justify-content:center; overflow:hidden; }
+    #qr img { width: 200px; height: 200px; }
+    button {
+      background: var(--vscode-button-background);
+      color: var(--vscode-button-foreground);
+      border: none; padding: 6px 10px; border-radius: 4px; cursor: pointer; margin-right: 6px; margin-top: 6px;
+    }
+    #log {
+      margin-top: 12px; max-height: 180px; overflow: auto;
+      font-family: var(--vscode-editor-font-family); font-size: 11px;
+      border-top: 1px solid var(--vscode-widget-border); padding-top: 8px;
+    }
+    .logline { opacity: 0.85; margin: 2px 0; }
+  </style>
+</head>
+<body>
+  <h2>Copilot Lazy Ass</h2>
+  <div class="row">手机连接: <span id="phone" class="bad">否</span></div>
+  <div class="row muted">端口: <span id="port">—</span></div>
+  <div class="row muted">本地: <span id="local">—</span></div>
+  <div class="row muted">公网: <span id="pub">—</span></div>
+  <div class="row muted">Token: <span id="tok">—</span></div>
+  <div class="row muted" id="hint">公网默认关闭。点「开启隧道」后才会有 trycloudflare 地址与 token。</div>
+  <div id="qr"><span class="muted">等待 URL…</span></div>
+  <div>
+    <button id="startTun">开启隧道</button>
+    <button id="stopTun">停止隧道</button>
+  </div>
+  <div>
+    <button id="copy">复制 URL</button>
+    <button id="copyTok">复制 Token</button>
+    <button id="open">打开 PWA</button>
+  </div>
+  <div id="log"></div>
+  <script>
+    const vscode = acquireVsCodeApi();
+    const state = { bridgeUrl: null, publicUrl: null, qrUrl: null };
+    const phoneEl = document.getElementById('phone');
+    const localEl = document.getElementById('local');
+    const pubEl = document.getElementById('pub');
+    const portEl = document.getElementById('port');
+    const tokEl = document.getElementById('tok');
+    const qrEl = document.getElementById('qr');
+    const logEl = document.getElementById('log');
+
+    function activeUrl() {
+      return state.publicUrl || state.bridgeUrl || state.qrUrl;
+    }
+
+    function renderQrData(dataUrl, fallbackUrl) {
+      qrEl.innerHTML = '';
+      if (dataUrl) {
+        const img = document.createElement('img');
+        img.src = dataUrl;
+        img.alt = 'QR';
+        qrEl.appendChild(img);
+        return;
+      }
+      if (fallbackUrl) {
+        const s = document.createElement('span');
+        s.className = 'muted';
+        s.style.padding = '8px';
+        s.style.fontSize = '11px';
+        s.style.wordBreak = 'break-all';
+        s.textContent = fallbackUrl;
+        qrEl.appendChild(s);
+        return;
+      }
+      qrEl.innerHTML = '<span class="muted">等待 URL…</span>';
+    }
+
+    window.addEventListener('message', (ev) => {
+      const msg = ev.data || {};
+      if (msg.type === 'log') {
+        const d = document.createElement('div');
+        d.className = 'logline';
+        d.textContent = msg.line;
+        logEl.appendChild(d);
+        logEl.scrollTop = logEl.scrollHeight;
+        return;
+      }
+      if (msg.type !== 'state') return;
+      if (msg.key === 'bridgeUrl') { state.bridgeUrl = msg.value; localEl.textContent = msg.value || '—'; }
+      if (msg.key === 'publicUrl') {
+        state.publicUrl = msg.value;
+        pubEl.textContent = msg.value || '—';
+        const hint = document.getElementById('hint');
+        if (hint) hint.textContent = msg.value
+          ? '隧道已就绪：手机扫 QR 或打开公网 URL（带 token）'
+          : '公网未启动。点「开启隧道」生成 trycloudflare 地址与 token。';
+      }
+      if (msg.key === 'port') { portEl.textContent = msg.value != null ? String(msg.value) : '—'; }
+      if (msg.key === 'tokenHint') { tokEl.textContent = msg.value || '—'; }
+      if (msg.key === 'qrUrl') { state.qrUrl = msg.value; }
+      if (msg.key === 'qrDataUrl') { renderQrData(msg.value, activeUrl()); }
+      if (msg.key === 'phoneConnected') {
+        phoneEl.textContent = msg.value ? '是' : '否';
+        phoneEl.className = msg.value ? 'ok' : 'bad';
+      }
+    });
+
+    document.getElementById('copy').onclick = () => {
+      const u = activeUrl();
+      if (u) vscode.postMessage({ type: 'copy', text: u });
+      else vscode.postMessage({ type: 'copy', text: '' });
+    };
+    document.getElementById('open').onclick = () => {
+      const u = activeUrl();
+      if (u) vscode.postMessage({ type: 'open', text: u });
+    };
+    document.getElementById('startTun').onclick = () => vscode.postMessage({ type: 'startTunnel' });
+    document.getElementById('stopTun').onclick = () => vscode.postMessage({ type: 'stopTunnel' });
+    document.getElementById('copyTok').onclick = () => vscode.postMessage({ type: 'copyToken' });
+    vscode.postMessage({ type: 'ready' });
+  </script>
+</body>
+</html>`;
+  }
+}

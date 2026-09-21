@@ -1,0 +1,1 @@
+function aS({msg:e}){return P.jsx("div",{className:"flex justify-end animate-fade-in",children:P.jsx("div",{className:"max-w-[80%] bg-blue-600 text-white rounded-2xl rounded-br-sm px-4 py-2.5 text-sm leading-relaxed shadow-md whitespace-pre-wrap",children:e.text})})}

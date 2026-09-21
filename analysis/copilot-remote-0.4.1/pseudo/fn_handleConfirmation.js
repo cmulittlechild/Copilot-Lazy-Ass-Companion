@@ -1,0 +1,1 @@
+async handleConfirmation(t){const e=t.toLowerCase().includes("cancel")?"chat.action.rejectToolConfirmation":"chat.action.acceptToolConfirmation";await u.commands.executeCommand(e)}

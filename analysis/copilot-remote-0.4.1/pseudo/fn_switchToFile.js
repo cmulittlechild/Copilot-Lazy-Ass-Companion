@@ -1,0 +1,1 @@
+switchToFile(t,e=!1){if(this.stopWatching(),this.currentJsonlPath=t,this.lastByteOffset=0,e){const e=r(9896);try{this.lastByteOffset=e.statSync(t).size}catch{}}this.clearMaps(),this.startWatching(t),this.processNewLines()}

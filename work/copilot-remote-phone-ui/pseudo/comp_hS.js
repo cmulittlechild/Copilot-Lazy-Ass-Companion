@@ -1,0 +1,1 @@
+function hS({msg:e}){return P.jsx("div",{className:"text-center animate-fade-in",children:P.jsx("span",{className:"text-[11px] text-slate-500 font-mono bg-slate-900 px-2 py-0.5 rounded-full",children:e.text})})}const mS=[{id:"agent",label:"Agent",color:"text-emerald-400"},{id:"ask",label:"Ask",color:"text-blue-400"},{id:"edit",label:"Edit",color:"text-purple-400"}];

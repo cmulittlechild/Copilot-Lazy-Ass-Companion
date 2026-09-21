@@ -1,0 +1,3571 @@
+{
+  "file": "/Users/xin/Library/Application Support/Code/User/workspaceStorage/4cfb0b6fc59d641b94989f31b1b09c06/chatSessions/eab05fee-0bc4-450d-a5da-4ec5a62783dd.jsonl",
+  "size": 7361013,
+  "lines": 288,
+  "parse_err": 0,
+  "kind_counter": [
+    [
+      1,
+      224
+    ],
+    [
+      2,
+      63
+    ],
+    [
+      0,
+      1
+    ]
+  ],
+  "k0_counter": [
+    [
+      "requests",
+      252
+    ],
+    [
+      "inputState",
+      35
+    ]
+  ],
+  "k_path_patterns": [
+    [
+      "requests/#/response",
+      49
+    ],
+    [
+      "requests/#/completionTokens",
+      40
+    ],
+    [
+      "requests/#/promptTokens",
+      40
+    ],
+    [
+      "requests/#/promptTokenDetails",
+      36
+    ],
+    [
+      "inputState/selections",
+      18
+    ],
+    [
+      "inputState/inputText",
+      17
+    ],
+    [
+      "requests",
+      14
+    ],
+    [
+      "requests/#/result",
+      13
+    ],
+    [
+      "requests/#/followups",
+      13
+    ],
+    [
+      "requests/#/modelState",
+      13
+    ],
+    [
+      "requests/#/elapsedMs",
+      13
+    ],
+    [
+      "requests/#/outputBuffer",
+      10
+    ],
+    [
+      "requests/#/responseMarkdownInfo",
+      9
+    ],
+    [
+      "requests/#/contentReferences",
+      2
+    ]
+  ],
+  "response_part_kinds": [
+    [
+      "thinking",
+      145
+    ],
+    [
+      "toolInvocationSerialized",
+      87
+    ],
+    [
+      "text_value",
+      62
+    ],
+    [
+      "inlineReference",
+      31
+    ]
+  ],
+  "user_fields": [
+    [
+      "message.text",
+      14
+    ],
+    [
+      "message.parts",
+      14
+    ],
+    [
+      "req.requestId",
+      14
+    ],
+    [
+      "req.timestamp",
+      14
+    ],
+    [
+      "req.agent",
+      14
+    ],
+    [
+      "req.modelId",
+      14
+    ],
+    [
+      "req.responseId",
+      14
+    ],
+    [
+      "req.responseTimestamp",
+      14
+    ],
+    [
+      "req.modelState",
+      14
+    ],
+    [
+      "req.contentReferences",
+      14
+    ],
+    [
+      "req.codeCitations",
+      14
+    ],
+    [
+      "req.timeSpentWaiting",
+      14
+    ],
+    [
+      "req.modeInfo",
+      14
+    ],
+    [
+      "req.response",
+      14
+    ],
+    [
+      "req.message",
+      14
+    ],
+    [
+      "req.variableData",
+      14
+    ],
+    [
+      "req.completionTokens",
+      4
+    ],
+    [
+      "req.promptTokens",
+      4
+    ],
+    [
+      "req.outputBuffer",
+      4
+    ],
+    [
+      "req.promptTokenDetails",
+      4
+    ]
+  ],
+  "event_type_counts": [
+    [
+      "TOOL_CALL",
+      87
+    ],
+    [
+      "STREAM_SET",
+      62
+    ],
+    [
+      "FINALIZE",
+      26
+    ],
+    [
+      "USER_MESSAGE",
+      14
+    ]
+  ],
+  "events_sample": [
+    [
+      "USER_MESSAGE",
+      "看一下 https://github.com/Davidobot/vscode-copilot-chat-sidecar 这个要如何使用\n是额外安装一个插件还是会覆盖现有的 copilot 插件"
+    ],
+    [
+      "STREAM_SET",
+      "我先查看这个仓库的说明和安装方式，确认它是额外插件还是会覆盖现有 Copilot。 "
+    ],
+    [
+      "TOOL_CALL",
+      "copilot_fetchWebPage"
+    ],
+    [
+      "TOOL_CALL",
+      "正在提取 https://github.com/Davidobot/vscode-copilot-chat-sidecar"
+    ],
+    [
+      "TOOL_CALL",
+      "正在运行 List branches"
+    ],
+    [
+      "TOOL_CALL",
+      "Searching 'Davidobot/vscode-copilot-chat-sidecar' for relevant code snippets"
+    ],
+    [
+      "TOOL_CALL",
+      "copilot_fetchWebPage"
+    ],
+    [
+      "TOOL_CALL",
+      "正在提取 2 资源"
+    ],
+    [
+      "TOOL_CALL",
+      "Searching 'Davidobot/vscode-copilot-chat-sidecar' for 'filename:package.json \"na"
+    ],
+    [
+      "TOOL_CALL",
+      "Searching 'Davidobot/vscode-copilot-chat-sidecar' for relevant code snippets"
+    ],
+    [
+      "FINALIZE",
+      0,
+      "result"
+    ],
+    [
+      "FINALIZE",
+      0,
+      "elapsedMs"
+    ],
+    [
+      "STREAM_SET",
+      "结论先说：\n\n**不是“额外再装一个独立插件就能和官方并存”**，而是**用改过的 GitHub Copilot Chat 去覆盖官方 Chat 扩展**。\n\n"
+    ],
+    [
+      "USER_MESSAGE",
+      "https://marketplace.visualstudio.com/items?itemName=atulhritik.copilot-remote\n\n这个插件也类似吗？还是用了不同的方法？"
+    ],
+    [
+      "FINALIZE",
+      1,
+      "result"
+    ],
+    [
+      "FINALIZE",
+      1,
+      "elapsedMs"
+    ],
+    [
+      "STREAM_SET",
+      "**目标类似，实现方式不同。**  \n`Copilot Remote Control` 是**额外插件**，挂在官方 Copilot 外面；不是像 Sideca"
+    ],
+    [
+      "USER_MESSAGE",
+      "这个花钱的，是不是就是参考  Sidecar 实现的？只是改进做成了插件的形式"
+    ],
+    [
+      "STREAM_SET",
+      "我再核对两边的时间线、实现路径和公开说明，看有没有“参考 Sidecar 再做成插件”的证据。 "
+    ],
+    [
+      "TOOL_CALL",
+      "copilot_fetchWebPage"
+    ],
+    [
+      "TOOL_CALL",
+      "正在提取 3 资源"
+    ],
+    [
+      "TOOL_CALL",
+      "正在 Web 上搜索“atulhritik copilot-remote sidecar Davidobot vscode-copilot-chat-sidec"
+    ],
+    [
+      "TOOL_CALL",
+      "正在 Web 上搜索“\"Copilot Remote Control\" cloudflared JSONL Atul Srivastava”"
+    ],
+    [
+      "TOOL_CALL",
+      "正在 Web 上搜索“\"Copilot Remote Control\" cloudflared JSONL Atul Srivastava”"
+    ],
+    [
+      "TOOL_CALL",
+      "正在 Web 上搜索“\"Copilot Remote Control\" cloudflared JSONL Atul Srivastava”"
+    ],
+    [
+      "STREAM_SET",
+      "**不太像。**  \n公开材料看，更像是**同一类需求下的另一条实现路线**，不是“把 Sidecar 改成付费插件”。\n\n## 结论\n\n"
+    ],
+    [
+      "FINALIZE",
+      2,
+      "result"
+    ],
+    [
+      "FINALIZE",
+      2,
+      "elapsedMs"
+    ],
+    [
+      "TOOL_CALL",
+      "正在 Web 上搜索“\"Copilot Remote Control\" cloudflared JSONL Atul Srivastava”"
+    ],
+    [
+      "TOOL_CALL",
+      "正在 Web 上搜索“\"Copilot Remote Control\" cloudflared JSONL Atul Srivastava”"
+    ],
+    [
+      "STREAM_SET",
+      "**不太像。**  \n公开材料看，更像是**同一类需求下的另一条实现路线**，不是“把 Sidecar 改成付费插件”。\n\n## 结论\n\n"
+    ],
+    [
+      "STREAM_SET",
+      "**不太像。**  \n公开材料看，更像是**同一类需求下的另一条实现路线**，不是“把 Sidecar 改成付费插件”。\n\n## 结论\n\n没有证据表明 `Cop"
+    ],
+    [
+      "USER_MESSAGE",
+      "1 你现在理解 remote 是如何实现的吗？\n2 对于 **Sidecar** ，有办法参考其实现进行改进吗？达到不替换 官方copilot ，能远程操控\n3 继续搜索github，是否有别的远程操控 copilot 的项目\n4 搜索 r"
+    ],
+    [
+      "STREAM_SET",
+      "先联网检索相关实现与同类项目，再综合判断这 4 项能不能做、做到什么程度。 "
+    ],
+    [
+      "TOOL_CALL",
+      "正在 Web 上搜索“GitHub remote control VS Code Copilot agent phone mobile tunnel”"
+    ],
+    [
+      "STREAM_SET",
+      "先联网检索相关实现与同类项目，再综合判断这 4 项能不能做、做到什么程度。 "
+    ],
+    [
+      "TOOL_CALL",
+      "正在 Web 上搜索“GitHub remote control VS Code Copilot agent phone mobile tunnel”"
+    ],
+    [
+      "TOOL_CALL",
+      "正在 Web 上搜索“GitHub remote control VS Code Copilot agent phone mobile tunnel”"
+    ],
+    [
+      "TOOL_CALL",
+      "正在 Web 上搜索“GitHub Claude Code remote control mobile phone tunnel PWA”"
+    ],
+    [
+      "STREAM_SET",
+      "先联网检索相关实现与同类项目，再综合判断这 4 项能不能做、做到什么程度。 "
+    ]
+  ],
+  "samples": {
+    "requests_replace": [
+      {
+        "n": 1,
+        "first_keys": [
+          "requestId",
+          "timestamp",
+          "agent",
+          "modelId",
+          "responseId",
+          "responseTimestamp",
+          "modelState",
+          "contentReferences",
+          "codeCitations",
+          "timeSpentWaiting",
+          "modeInfo",
+          "response",
+          "message",
+          "variableData"
+        ]
+      },
+      {
+        "n": 1,
+        "first_keys": [
+          "requestId",
+          "timestamp",
+          "agent",
+          "modelId",
+          "responseId",
+          "responseTimestamp",
+          "modelState",
+          "contentReferences",
+          "codeCitations",
+          "timeSpentWaiting",
+          "completionTokens",
+          "promptTokens",
+          "outputBuffer",
+          "promptTokenDetails",
+          "modeInfo",
+          "response",
+          "message",
+          "variableData"
+        ]
+      },
+      {
+        "n": 1,
+        "first_keys": [
+          "requestId",
+          "timestamp",
+          "agent",
+          "modelId",
+          "responseId",
+          "responseTimestamp",
+          "modelState",
+          "contentReferences",
+          "codeCitations",
+          "timeSpentWaiting",
+          "modeInfo",
+          "response",
+          "message",
+          "variableData"
+        ]
+      }
+    ],
+    "response_replace": [
+      {
+        "k": [
+          "requests",
+          0,
+          "response"
+        ],
+        "i": null,
+        "v_len": 18,
+        "parts": [
+          {
+            "keys": [
+              "kind",
+              "value",
+              "id",
+              "reasoningDurationMs"
+            ],
+            "kind": "thinking",
+            "value_prefix": "The user wants to understand how to use the GitHub repositor"
+          },
+          {
+            "keys": [
+              "kind",
+              "value",
+              "id",
+              "metadata"
+            ],
+            "kind": "thinking",
+            "value_prefix": ""
+          },
+          {
+            "keys": [
+              "kind",
+              "value",
+              "id",
+              "metadata"
+            ],
+            "kind": "thinking",
+            "value_prefix": ""
+          },
+          {
+            "keys": [
+              "value",
+              "supportThemeIcons",
+              "supportHtml",
+              "baseUri"
+            ],
+            "kind": null,
+            "value_prefix": "我先查看这个仓库的说明和安装方式，确认它是额外插件还是会覆盖现有 Copilot。 "
+          },
+          {
+            "keys": [
+              "kind",
+              "value",
+              "id",
+              "metadata"
+            ],
+            "kind": "thinking",
+            "value_prefix": ""
+          }
+        ]
+      },
+      {
+        "k": [
+          "requests",
+          0,
+          "response"
+        ],
+        "i": null,
+        "v_len": 4,
+        "parts": [
+          {
+            "keys": [
+              "kind",
+              "value",
+              "id",
+              "reasoningDurationMs"
+            ],
+            "kind": "thinking",
+            "value_prefix": "I have enough information to answer the user's question clea"
+          },
+          {
+            "keys": [
+              "kind",
+              "value",
+              "id",
+              "metadata"
+            ],
+            "kind": "thinking",
+            "value_prefix": ""
+          },
+          {
+            "keys": [
+              "kind",
+              "value",
+              "id",
+              "metadata"
+            ],
+            "kind": "thinking",
+            "value_prefix": ""
+          },
+          {
+            "keys": [
+              "value",
+              "supportThemeIcons",
+              "supportHtml",
+              "baseUri"
+            ],
+            "kind": null,
+            "value_prefix": "结论先说：\n\n**不是“额外再装一个独立插件就能和官方并存”**，而是**用改过的 GitHub Copilot Cha"
+          }
+        ]
+      },
+      {
+        "k": [
+          "requests",
+          1,
+          "response"
+        ],
+        "i": null,
+        "v_len": 1,
+        "parts": [
+          {
+            "keys": [
+              "value",
+              "supportThemeIcons",
+              "supportHtml",
+              "baseUri"
+            ],
+            "kind": null,
+            "value_prefix": "**目标类似，实现方式不同。**  \n`Copilot Remote Control` 是**额外插件**，挂在官方 C"
+          }
+        ]
+      },
+      {
+        "k": [
+          "requests",
+          2,
+          "response"
+        ],
+        "i": null,
+        "v_len": 9,
+        "parts": [
+          {
+            "keys": [
+              "kind",
+              "value",
+              "id",
+              "reasoningDurationMs"
+            ],
+            "kind": "thinking",
+            "value_prefix": "The user is asking whether the paid Copilot Remote extension"
+          },
+          {
+            "keys": [
+              "kind",
+              "value",
+              "id",
+              "metadata"
+            ],
+            "kind": "thinking",
+            "value_prefix": ""
+          },
+          {
+            "keys": [
+              "kind",
+              "value",
+              "id",
+              "metadata"
+            ],
+            "kind": "thinking",
+            "value_prefix": ""
+          },
+          {
+            "keys": [
+              "value",
+              "supportThemeIcons",
+              "supportHtml",
+              "baseUri"
+            ],
+            "kind": null,
+            "value_prefix": "我再核对两边的时间线、实现路径和公开说明，看有没有“参考 Sidecar 再做成插件”的证据。 "
+          },
+          {
+            "keys": [
+              "kind",
+              "value",
+              "id",
+              "metadata"
+            ],
+            "kind": "thinking",
+            "value_prefix": ""
+          }
+        ]
+      },
+      {
+        "k": [
+          "requests",
+          2,
+          "response"
+        ],
+        "i": null,
+        "v_len": 1,
+        "parts": [
+          {
+            "keys": [
+              "kind",
+              "invocationMessage",
+              "isConfirmed",
+              "isComplete",
+              "source",
+              "toolCallId",
+              "toolId"
+            ],
+            "kind": "toolInvocationSerialized",
+            "value_prefix": null
+          }
+        ]
+      },
+      {
+        "k": [
+          "requests",
+          3,
+          "response"
+        ],
+        "i": null,
+        "v_len": 7,
+        "parts": [
+          {
+            "keys": [
+              "kind",
+              "value",
+              "id",
+              "reasoningDurationMs"
+            ],
+            "kind": "thinking",
+            "value_prefix": "The user wants me to comprehensively evaluate whether severa"
+          },
+          {
+            "keys": [
+              "kind",
+              "value",
+              "id",
+              "metadata"
+            ],
+            "kind": "thinking",
+            "value_prefix": ""
+          },
+          {
+            "keys": [
+              "kind",
+              "value",
+              "id",
+              "metadata"
+            ],
+            "kind": "thinking",
+            "value_prefix": ""
+          },
+          {
+            "keys": [
+              "value",
+              "supportThemeIcons",
+              "supportHtml",
+              "baseUri"
+            ],
+            "kind": null,
+            "value_prefix": "先联网检索相关实现与同类项目，再综合判断这 4 项能不能做、做到什么程度。 "
+          },
+          {
+            "keys": [
+              "kind",
+              "value",
+              "id",
+              "metadata"
+            ],
+            "kind": "thinking",
+            "value_prefix": ""
+          }
+        ]
+      }
+    ],
+    "response_splice": [
+      {
+        "k": [
+          "requests",
+          2,
+          "response"
+        ],
+        "i": 10,
+        "v_len": 2,
+        "parts": [
+          {
+            "keys": [
+              "kind",
+              "invocationMessage",
+              "isConfirmed",
+              "isComplete",
+              "source",
+              "resultDetails",
+              "toolCallId",
+              "toolId"
+            ],
+            "kind": "toolInvocationSerialized",
+            "value_prefix": null
+          },
+          {
+            "keys": [
+              "value",
+              "supportThemeIcons",
+              "supportHtml",
+              "baseUri"
+            ],
+            "kind": null,
+            "value_prefix": "**不太像。**  \n公开材料看，更像是**同一类需求下的另一条实现路线**，不是“把 Sidecar 改成付费插件”。"
+          }
+        ]
+      },
+      {
+        "k": [
+          "requests",
+          2,
+          "response"
+        ],
+        "i": 11,
+        "v_len": 1,
+        "parts": [
+          {
+            "keys": [
+              "value",
+              "supportThemeIcons",
+              "supportHtml",
+              "baseUri"
+            ],
+            "kind": null,
+            "value_prefix": "**不太像。**  \n公开材料看，更像是**同一类需求下的另一条实现路线**，不是“把 Sidecar 改成付费插件”。"
+          }
+        ]
+      },
+      {
+        "k": [
+          "requests",
+          3,
+          "response"
+        ],
+        "i": 7,
+        "v_len": 2,
+        "parts": [
+          {
+            "keys": [
+              "kind",
+              "invocationMessage",
+              "isConfirmed",
+              "isComplete",
+              "source",
+              "resultDetails",
+              "toolCallId",
+              "toolId"
+            ],
+            "kind": "toolInvocationSerialized",
+            "value_prefix": null
+          },
+          {
+            "keys": [
+              "kind",
+              "invocationMessage",
+              "isConfirmed",
+              "isComplete",
+              "source",
+              "toolCallId",
+              "toolId"
+            ],
+            "kind": "toolInvocationSerialized",
+            "value_prefix": null
+          }
+        ]
+      },
+      {
+        "k": [
+          "requests",
+          3,
+          "response"
+        ],
+        "i": 8,
+        "v_len": 2,
+        "parts": [
+          {
+            "keys": [
+              "kind",
+              "invocationMessage",
+              "isConfirmed",
+              "isComplete",
+              "source",
+              "resultDetails",
+              "toolCallId",
+              "toolId"
+            ],
+            "kind": "toolInvocationSerialized",
+            "value_prefix": null
+          },
+          {
+            "keys": [
+              "kind",
+              "invocationMessage",
+              "isConfirmed",
+              "isComplete",
+              "source",
+              "toolCallId",
+              "toolId"
+            ],
+            "kind": "toolInvocationSerialized",
+            "value_prefix": null
+          }
+        ]
+      },
+      {
+        "k": [
+          "requests",
+          3,
+          "response"
+        ],
+        "i": 9,
+        "v_len": 3,
+        "parts": [
+          {
+            "keys": [
+              "kind",
+              "invocationMessage",
+              "isConfirmed",
+              "isComplete",
+              "source",
+              "resultDetails",
+              "toolCallId",
+              "toolId"
+            ],
+            "kind": "toolInvocationSerialized",
+            "value_prefix": null
+          },
+          {
+            "keys": [
+              "kind",
+              "invocationMessage",
+              "isConfirmed",
+              "isComplete",
+              "source",
+              "resultDetails",
+              "toolCallId",
+              "toolId"
+            ],
+            "kind": "toolInvocationSerialized",
+            "value_prefix": null
+          },
+          {
+            "keys": [
+              "kind",
+              "invocationMessage",
+              "pastTenseMessage",
+              "isConfirmed",
+              "isComplete",
+              "source",
+              "resultDetails",
+              "toolCallId",
+              "toolId"
+            ],
+            "kind": "toolInvocationSerialized",
+            "value_prefix": null
+          }
+        ]
+      },
+      {
+        "k": [
+          "requests",
+          4,
+          "response"
+        ],
+        "i": 9,
+        "v_len": 1,
+        "parts": [
+          {
+            "keys": [
+              "kind",
+              "invocationMessage",
+              "isConfirmed",
+              "isComplete",
+              "source",
+              "toolSpecificData",
+              "toolCallId",
+              "toolId"
+            ],
+            "kind": "toolInvocationSerialized",
+            "value_prefix": null
+          }
+        ]
+      }
+    ],
+    "finalize": [
+      {
+        "k": [
+          "requests",
+          0,
+          "result"
+        ],
+        "kind": 1,
+        "v_type": "dict",
+        "v": "{'timings': {'firstProgress': 9172, 'totalElapsed': 68154}, 'metadata': {'codeBlocks': [{'code': 'git clone https://gith"
+      },
+      {
+        "k": [
+          "requests",
+          0,
+          "elapsedMs"
+        ],
+        "kind": 1,
+        "v_type": "int",
+        "v": 68230
+      },
+      {
+        "k": [
+          "requests",
+          1,
+          "result"
+        ],
+        "kind": 1,
+        "v_type": "dict",
+        "v": "{'timings': {'firstProgress': 9275, 'totalElapsed': 61793}, 'metadata': {'codeBlocks': [{'code': 'atulhritik.copilot-rem"
+      },
+      {
+        "k": [
+          "requests",
+          1,
+          "elapsedMs"
+        ],
+        "kind": 1,
+        "v_type": "int",
+        "v": 61917
+      },
+      {
+        "k": [
+          "requests",
+          2,
+          "result"
+        ],
+        "kind": 1,
+        "v_type": "dict",
+        "v": "{'timings': {'firstProgress': 61892, 'totalElapsed': 226596}, 'metadata': {'codeBlocks': [{'code': '本机 bridge + 临时隧道 + 手"
+      },
+      {
+        "k": [
+          "requests",
+          2,
+          "elapsedMs"
+        ],
+        "kind": 1,
+        "v_type": "int",
+        "v": 227168
+      },
+      {
+        "k": [
+          "requests",
+          3,
+          "result"
+        ],
+        "kind": 1,
+        "v_type": "dict",
+        "v": "{'timings': {'firstProgress': 15051, 'totalElapsed': 205061}, 'metadata': {'codeBlocks': [{'code': '官方 Copilot Chat（原样运行"
+      },
+      {
+        "k": [
+          "requests",
+          3,
+          "elapsedMs"
+        ],
+        "kind": 1,
+        "v_type": "int",
+        "v": 205285
+      }
+    ],
+    "user": [
+      {
+        "requestId": "request_32417da4-6ac0-4f87-873f-a7c7cee975f3",
+        "keys": [
+          "requestId",
+          "timestamp",
+          "agent",
+          "modelId",
+          "responseId",
+          "responseTimestamp",
+          "modelState",
+          "contentReferences",
+          "codeCitations",
+          "timeSpentWaiting",
+          "modeInfo",
+          "response",
+          "message",
+          "variableData"
+        ],
+        "message_keys": [
+          "text",
+          "parts"
+        ],
+        "text": "看一下 https://github.com/Davidobot/vscode-copilot-chat-sidecar 这个要如何使用\n是额外安装一个插件还是会覆盖现有的 copilot 插件"
+      },
+      {
+        "requestId": "request_24d0e334-954d-4af3-8680-de4a146d9494",
+        "keys": [
+          "requestId",
+          "timestamp",
+          "agent",
+          "modelId",
+          "responseId",
+          "responseTimestamp",
+          "modelState",
+          "contentReferences",
+          "codeCitations",
+          "timeSpentWaiting",
+          "completionTokens",
+          "promptTokens",
+          "outputBuffer",
+          "promptTokenDetails",
+          "modeInfo",
+          "response",
+          "message",
+          "variableData"
+        ],
+        "message_keys": [
+          "text",
+          "parts"
+        ],
+        "text": "https://marketplace.visualstudio.com/items?itemName=atulhritik.copilot-remote\n\n这个插件也类似吗？还是用了不同的方法？"
+      },
+      {
+        "requestId": "request_5b7e007f-f9e7-4e08-9ceb-03049d625cc7",
+        "keys": [
+          "requestId",
+          "timestamp",
+          "agent",
+          "modelId",
+          "responseId",
+          "responseTimestamp",
+          "modelState",
+          "contentReferences",
+          "codeCitations",
+          "timeSpentWaiting",
+          "modeInfo",
+          "response",
+          "message",
+          "variableData"
+        ],
+        "message_keys": [
+          "text",
+          "parts"
+        ],
+        "text": "这个花钱的，是不是就是参考  Sidecar 实现的？只是改进做成了插件的形式"
+      },
+      {
+        "requestId": "request_0580771a-cab1-4da7-a2e5-3f57d2c73a15",
+        "keys": [
+          "requestId",
+          "timestamp",
+          "agent",
+          "modelId",
+          "responseId",
+          "responseTimestamp",
+          "modelState",
+          "contentReferences",
+          "codeCitations",
+          "timeSpentWaiting",
+          "modeInfo",
+          "response",
+          "message",
+          "variableData"
+        ],
+        "message_keys": [
+          "text",
+          "parts"
+        ],
+        "text": "1 你现在理解 remote 是如何实现的吗？\n2 对于 **Sidecar** ，有办法参考其实现进行改进吗？达到不替换 官方copilot ，能远程操控\n3 继续搜索github，是否有别的远程操控 copilot 的项目\n4 搜索 remote 和 Sidecar 的相同实现逻辑的产品，不一定是 copilot 的，将有用的都克隆到 /Users/xin/Desktop/sidecar_re"
+      },
+      {
+        "requestId": "request_f10409b5-a560-4f55-b52a-b0ac1e994fb9",
+        "keys": [
+          "requestId",
+          "timestamp",
+          "agent",
+          "modelId",
+          "responseId",
+          "responseTimestamp",
+          "modelState",
+          "contentReferences",
+          "codeCitations",
+          "timeSpentWaiting",
+          "modeInfo",
+          "response",
+          "message",
+          "variableData"
+        ],
+        "message_keys": [
+          "text",
+          "parts"
+        ],
+        "text": "将上面提到的相关项目克隆到  /Users/xin/Desktop/sidecar_remote 做参考 "
+      }
+    ],
+    "tool": [
+      {
+        "kind": "toolInvocationSerialized",
+        "presentation": "hidden",
+        "invocationMessage": "",
+        "isConfirmed": {
+          "type": 1
+        },
+        "isComplete": true,
+        "source": {
+          "type": "internal",
+          "label": "Built-In"
+        },
+        "toolCallId": "call-e5cca32e-43c2-4b35-8a5a-bedd82912416-0",
+        "toolId": "copilot_fetchWebPage"
+      },
+      {
+        "kind": "toolInvocationSerialized",
+        "invocationMessage": {
+          "value": "正在提取 https://github.com/Davidobot/vscode-copilot-chat-sidecar",
+          "isTrusted": false,
+          "supportThemeIcons": false,
+          "supportHtml": false,
+          "supportAlertSyntax": false
+        },
+        "pastTenseMessage": {
+          "value": "已提取 https://github.com/Davidobot/vscode-copilot-chat-sidecar",
+          "isTrusted": false,
+          "supportThemeIcons": false,
+          "supportHtml": false,
+          "supportAlertSyntax": false
+        },
+        "isConfirmed": {
+          "type": 1,
+          "reason": "已自动批准，因为 URL 出现在提示中"
+        },
+        "isComplete": true,
+        "source": {
+          "type": "internal",
+          "label": "Built-In"
+        },
+        "resultDetails": [
+          {
+            "$mid": 1,
+            "path": "/Davidobot/vscode-copilot-chat-sidecar",
+            "scheme": "https",
+            "authority": "github.com"
+          }
+        ],
+        "toolCallId": "call-e5cca32e-43c2-4b35-8a5a-bedd82912416-0",
+        "toolId": "vscode_fetchWebPage_internal"
+      },
+      {
+        "kind": "toolInvocationSerialized",
+        "invocationMessage": {
+          "value": "正在运行 List branches",
+          "isTrusted": false,
+          "supportThemeIcons": false,
+          "supportHtml": false,
+          "supportAlertSyntax": false
+        },
+        "pastTenseMessage": {
+          "value": "已运行 List branches",
+          "isTrusted": false,
+          "supportThemeIcons": false,
+          "supportHtml": false,
+          "supportAlertSyntax": false
+        },
+        "originMessage": "io.github.github/github-mcp-server (MCP 服务器)",
+        "isConfirmed": {
+          "type": 1
+        },
+        "isComplete": true,
+        "source": {
+          "type": "mcp",
+          "serverLabel": "GitHub MCP Server",
+          "instructions": "The GitHub MCP Server provides tools to interact with GitHub platform.\n\nTool selection guidance:\n\t1. Use 'list_*' tools for broad, simple retrieval and pagination of all items of a type (e.g., all issues, all PRs, all branches) with basic filtering.\n\t2. Use 'search_*' tools for targeted queries with specific criteria, keywords, or complex filters (e.g., issues with certain text, PRs by author, code containing functions).\n\nContext management:\n\t1. Use pagination whenever possible with batches of 5-10 items.\n\t2. Use minimal_output parameter set to true if the full information is not needed to accomplish a task.\n\nTool usage guidance:\n\t1. For 'search_*' tools: Use separate 'sort' and 'order' parameters if available for sorting results - do not include 'sort:' syntax in query strings. Query strings should contain only search criteria (e.g., 'org:google language:python'), not sorting instructions. Always call 'get_me' first to understand current user permissions and context. ## Issues\n\nCheck 'list_issue_types' first for organizations to use proper issue types. Use 'search_issues' before creating new issues to avoid duplicates. Always set 'state_reason' when closing issues. ## Pull Requests\n\nPR review workflow: Always use 'pull_request_review_write' with method 'create' to create a pending review, then 'add_comment_to_pending_review' to add comments, and finally 'pull_request_review_write' with method 'submit_pending' to submit the review for complex reviews with line-specific comments.\n\nBefore creating a pull request, search for pull request templates in the repository. Template files are called pull_request_template.md or they're located in '.github/PULL_REQUEST_TEMPLATE' directory. Use the template content to structure the PR description and then call create_pull_request tool.",
+          "label": "io.github.github/github-mcp-server",
+          "collectionId": "mcp.config.usrlocal",
+          "definitionId": "mcp.config.usrlocal.io.github.github/github-mcp-server"
+        },
+        "resultDetails": {
+          "input": "{\n  \"owner\": \"Davidobot\",\n  \"repo\": \"vscode-copilot-chat-sidecar\"\n}",
+          "output": [
+            {
+              "type": "embed",
+              "isText": true,
+              "value": "[{\"name\":\"main\",\"sha\":\"9e668cb12144c701cf0f2c6b3458c00fe3da20f1\",\"protected\":false},{\"name\":\"sidecar\",\"sha\":\"2ff42551e8afcce45117119862efc66d8d40020e\",\"protected\":false}]"
+            }
+          ],
+          "isError": false
+        },
+        "toolSpecificData": {
+          "kind": "input",
+          "rawInput": {
+            "owner": "Davidobot",
+            "repo": "vscode-copilot-chat-sidecar"
+          }
+        },
+        "toolCallId": "call-e5cca32e-43c2-4b35-8a5a-bedd82912416-2",
+        "toolId": "mcp_github_mcp_se_list_branches"
+      },
+      {
+        "kind": "toolInvocationSerialized",
+        "invocationMessage": "Searching 'Davidobot/vscode-copilot-chat-sidecar' for relevant code snippets",
+        "pastTenseMessage": {
+          "value": "Searched davidobot/vscode-copilot-chat-sidecar for \"README installation usage how it works relationship to official Copilot Chat extension\", 64 results",
+          "supportThemeIcons": false,
+          "supportHtml": false,
+          "supportAlertSyntax": false,
+          "uris": {}
+        },
+        "isConfirmed": {
+          "type": 1
+        },
+        "isComplete": true,
+        "source": {
+          "type": "internal",
+          "label": "Built-In"
+        },
+        "resultDetails": [
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/CHANGELOG.md#L1004-L1010",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/CHANGELOG.md",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L1004-L1010"
+            },
+            "range": {
+              "startLineNumber": 1005,
+              "startColumn": 1,
+              "endLineNumber": 1011,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/CHANGELOG.md#L1098-L1106",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/CHANGELOG.md",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L1098-L1106"
+            },
+            "range": {
+              "startLineNumber": 1099,
+              "startColumn": 1,
+              "endLineNumber": 1107,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/CHANGELOG.md#L1168-L1169",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/CHANGELOG.md",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L1168-L1169"
+            },
+            "range": {
+              "startLineNumber": 1169,
+              "startColumn": 1,
+              "endLineNumber": 1170,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/CHANGELOG.md#L1792-L1793",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/CHANGELOG.md",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L1792-L1793"
+            },
+            "range": {
+              "startLineNumber": 1793,
+              "startColumn": 1,
+              "endLineNumber": 1794,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/chat-lib/README.md#L0-L13",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/chat-lib/README.md",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L0-L13"
+            },
+            "range": {
+              "startLineNumber": 1,
+              "startColumn": 1,
+              "endLineNumber": 14,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/CONTRIBUTING.md#L187-L199",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/CONTRIBUTING.md",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L187-L199"
+            },
+            "range": {
+              "startLineNumber": 188,
+              "startColumn": 1,
+              "endLineNumber": 200,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/CONTRIBUTING.md#L284-L294",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/CONTRIBUTING.md",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L284-L294"
+            },
+            "range": {
+              "startLineNumber": 285,
+              "startColumn": 1,
+              "endLineNumber": 295,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/CONTRIBUTING.md#L371-L383",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/CONTRIBUTING.md",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L371-L383"
+            },
+            "range": {
+              "startLineNumber": 372,
+              "startColumn": 1,
+              "endLineNumber": 384,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/README.md#L139-L141",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/README.md",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L139-L141"
+            },
+            "range": {
+              "startLineNumber": 140,
+              "startColumn": 1,
+              "endLineNumber": 142,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/README.md#L142-L151",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/README.md",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L142-L151"
+            },
+            "range": {
+              "startLineNumber": 143,
+              "startColumn": 1,
+              "endLineNumber": 152,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/README.md#L2-L147",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/README.md",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L2-L147"
+            },
+            "range": {
+              "startLineNumber": 3,
+              "startColumn": 1,
+              "endLineNumber": 148,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/README.md#L24-L48",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/README.md",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L24-L48"
+            },
+            "range": {
+              "startLineNumber": 25,
+              "startColumn": 1,
+              "endLineNumber": 49,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/README.md#L49-L50",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/README.md",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L49-L50"
+            },
+            "range": {
+              "startLineNumber": 50,
+              "startColumn": 1,
+              "endLineNumber": 51,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/README.md#L53-L65",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/README.md",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L53-L65"
+            },
+            "range": {
+              "startLineNumber": 54,
+              "startColumn": 1,
+              "endLineNumber": 66,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/README.md#L53-L94",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/README.md",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L53-L94"
+            },
+            "range": {
+              "startLineNumber": 54,
+              "startColumn": 1,
+              "endLineNumber": 95,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/README.md#L65-L71",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/README.md",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L65-L71"
+            },
+            "range": {
+              "startLineNumber": 66,
+              "startColumn": 1,
+              "endLineNumber": 72,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/README.md#L71-L93",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/README.md",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L71-L93"
+            },
+            "range": {
+              "startLineNumber": 72,
+              "startColumn": 1,
+              "endLineNumber": 94,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/README.md#L8-L22",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/README.md",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L8-L22"
+            },
+            "range": {
+              "startLineNumber": 9,
+              "startColumn": 1,
+              "endLineNumber": 23,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/README.md#L95-L121",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/README.md",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L95-L121"
+            },
+            "range": {
+              "startLineNumber": 96,
+              "startColumn": 1,
+              "endLineNumber": 122,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/claude/common/slashCommands/index.ts#L0-L7",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/claude/common/slashCommands/index.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L0-L7"
+            },
+            "range": {
+              "startLineNumber": 1,
+              "startColumn": 1,
+              "endLineNumber": 8,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/claude/node/sessionParser/README.md#L84-L114",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/claude/node/sessionParser/README.md",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L84-L114"
+            },
+            "range": {
+              "startLineNumber": 85,
+              "startColumn": 1,
+              "endLineNumber": 115,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/copilotcli/common/copilotCLITools.ts#L1060-L1069",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/copilotcli/common/copilotCLITools.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L1060-L1069"
+            },
+            "range": {
+              "startLineNumber": 1061,
+              "startColumn": 1,
+              "endLineNumber": 1070,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/copilotcli/common/copilotCLITools.ts#L1104-L1112",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/copilotcli/common/copilotCLITools.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L1104-L1112"
+            },
+            "range": {
+              "startLineNumber": 1105,
+              "startColumn": 1,
+              "endLineNumber": 1113,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/copilotcli/common/copilotCLITools.ts#L73-L113",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/copilotcli/common/copilotCLITools.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L73-L113"
+            },
+            "range": {
+              "startLineNumber": 74,
+              "startColumn": 1,
+              "endLineNumber": 114,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/copilotcli/node/copilotCli.ts#L453-L494",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/copilotcli/node/copilotCli.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L453-L494"
+            },
+            "range": {
+              "startLineNumber": 454,
+              "startColumn": 1,
+              "endLineNumber": 495,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/copilotcli/node/copilotCli.ts#L455-L466",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/copilotcli/node/copilotCli.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L455-L466"
+            },
+            "range": {
+              "startLineNumber": 456,
+              "startColumn": 1,
+              "endLineNumber": 467,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/copilotcli/node/copilotcliSession.ts#L1059-L1075",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/copilotcli/node/copilotcliSession.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L1059-L1075"
+            },
+            "range": {
+              "startLineNumber": 1060,
+              "startColumn": 1,
+              "endLineNumber": 1076,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/copilotcli/node/copilotcliSession.ts#L1139-L1143",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/copilotcli/node/copilotcliSession.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L1139-L1143"
+            },
+            "range": {
+              "startLineNumber": 1140,
+              "startColumn": 1,
+              "endLineNumber": 1144,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/copilotcli/node/copilotcliSession.ts#L1146-L1157",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/copilotcli/node/copilotcliSession.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L1146-L1157"
+            },
+            "range": {
+              "startLineNumber": 1147,
+              "startColumn": 1,
+              "endLineNumber": 1158,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/chatSessions.ts#L91-L297",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/chatSessions.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L91-L297"
+            },
+            "range": {
+              "startLineNumber": 92,
+              "startColumn": 1,
+              "endLineNumber": 298,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCLIPythonEnvironmentApi.ts#L567-L600",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCLIPythonEnvironmentApi.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L567-L600"
+            },
+            "range": {
+              "startLineNumber": 568,
+              "startColumn": 1,
+              "endLineNumber": 601,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCLIShim.ps1#L0-L25",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCLIShim.ps1",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L0-L25"
+            },
+            "range": {
+              "startLineNumber": 1,
+              "startColumn": 1,
+              "endLineNumber": 26,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCLIShim.ps1#L110-L134",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCLIShim.ps1",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L110-L134"
+            },
+            "range": {
+              "startLineNumber": 111,
+              "startColumn": 1,
+              "endLineNumber": 135,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCLIShim.ps1#L134-L159",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCLIShim.ps1",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L134-L159"
+            },
+            "range": {
+              "startLineNumber": 135,
+              "startColumn": 1,
+              "endLineNumber": 160,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCLIShim.ps1#L159-L187",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCLIShim.ps1",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L159-L187"
+            },
+            "range": {
+              "startLineNumber": 160,
+              "startColumn": 1,
+              "endLineNumber": 188,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCLIShim.ps1#L208-L232",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCLIShim.ps1",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L208-L232"
+            },
+            "range": {
+              "startLineNumber": 209,
+              "startColumn": 1,
+              "endLineNumber": 233,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCLIShim.ps1#L26-L54",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCLIShim.ps1",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L26-L54"
+            },
+            "range": {
+              "startLineNumber": 27,
+              "startColumn": 1,
+              "endLineNumber": 55,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCLIShim.ts#L107-L132",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCLIShim.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L107-L132"
+            },
+            "range": {
+              "startLineNumber": 108,
+              "startColumn": 1,
+              "endLineNumber": 133,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCLIShim.ts#L138-L160",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCLIShim.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L138-L160"
+            },
+            "range": {
+              "startLineNumber": 139,
+              "startColumn": 1,
+              "endLineNumber": 161,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCLIShim.ts#L161-L191",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCLIShim.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L161-L191"
+            },
+            "range": {
+              "startLineNumber": 162,
+              "startColumn": 1,
+              "endLineNumber": 192,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCLIShim.ts#L192-L223",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCLIShim.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L192-L223"
+            },
+            "range": {
+              "startLineNumber": 193,
+              "startColumn": 1,
+              "endLineNumber": 224,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCLIShim.ts#L23-L53",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCLIShim.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L23-L53"
+            },
+            "range": {
+              "startLineNumber": 24,
+              "startColumn": 1,
+              "endLineNumber": 54,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCLIShim.ts#L55-L191",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCLIShim.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L55-L191"
+            },
+            "range": {
+              "startLineNumber": 56,
+              "startColumn": 1,
+              "endLineNumber": 192,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCLIShim.ts#L66-L80",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCLIShim.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L66-L80"
+            },
+            "range": {
+              "startLineNumber": 67,
+              "startColumn": 1,
+              "endLineNumber": 81,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCLIShim.ts#L81-L106",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCLIShim.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L81-L106"
+            },
+            "range": {
+              "startLineNumber": 82,
+              "startColumn": 1,
+              "endLineNumber": 107,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCloudSessionsProvider.ts#L413-L441",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCloudSessionsProvider.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L413-L441"
+            },
+            "range": {
+              "startLineNumber": 414,
+              "startColumn": 1,
+              "endLineNumber": 442,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCloudSessionsProvider.ts#L442-L452",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCloudSessionsProvider.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L442-L452"
+            },
+            "range": {
+              "startLineNumber": 443,
+              "startColumn": 1,
+              "endLineNumber": 453,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCloudSessionsProvider.ts#L453-L472",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCloudSessionsProvider.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L453-L472"
+            },
+            "range": {
+              "startLineNumber": 454,
+              "startColumn": 1,
+              "endLineNumber": 473,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/test/copilotCLISDKUpgrade.spec.ts#L0-L20",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/test/copilotCLISDKUpgrade.spec.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L0-L20"
+            },
+            "range": {
+              "startLineNumber": 1,
+              "startColumn": 1,
+              "endLineNumber": 21,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/test/copilotCLISDKUpgrade.spec.ts#L118-L161",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/test/copilotCLISDKUpgrade.spec.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L118-L161"
+            },
+            "range": {
+              "startLineNumber": 119,
+              "startColumn": 1,
+              "endLineNumber": 162,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/test/copilotCLISDKUpgrade.spec.ts#L20-L35",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/test/copilotCLISDKUpgrade.spec.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L20-L35"
+            },
+            "range": {
+              "startLineNumber": 21,
+              "startColumn": 1,
+              "endLineNumber": 36,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/test/copilotCLISDKUpgrade.spec.ts#L92-L118",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/test/copilotCLISDKUpgrade.spec.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L92-L118"
+            },
+            "range": {
+              "startLineNumber": 93,
+              "startColumn": 1,
+              "endLineNumber": 119,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/conversation/vscode-node/sidecarContribution.ts#L18-L33",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/conversation/vscode-node/sidecarContribution.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L18-L33"
+            },
+            "range": {
+              "startLineNumber": 19,
+              "startColumn": 1,
+              "endLineNumber": 34,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/getting-started/vscode-node/commands.ts#L9-L28",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/getting-started/vscode-node/commands.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L9-L28"
+            },
+            "range": {
+              "startLineNumber": 10,
+              "startColumn": 1,
+              "endLineNumber": 29,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/inlineChat/vscode-node/inlineChatCommands.ts#L259-L268",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/inlineChat/vscode-node/inlineChatCommands.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L259-L268"
+            },
+            "range": {
+              "startLineNumber": 260,
+              "startColumn": 1,
+              "endLineNumber": 269,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/log/vscode-node/extensionStateCommand.ts#L86-L104",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/log/vscode-node/extensionStateCommand.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L86-L104"
+            },
+            "range": {
+              "startLineNumber": 87,
+              "startColumn": 1,
+              "endLineNumber": 105,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/onboardDebug/node/copilotDebugWorker/index.ts#L0-L22",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/onboardDebug/node/copilotDebugWorker/index.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L0-L22"
+            },
+            "range": {
+              "startLineNumber": 1,
+              "startColumn": 1,
+              "endLineNumber": 23,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/tools/common/agentMemoryService.ts#L107-L156",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/tools/common/agentMemoryService.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L107-L156"
+            },
+            "range": {
+              "startLineNumber": 108,
+              "startColumn": 1,
+              "endLineNumber": 157,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/tools/node/installExtensionTool.tsx#L80-L96",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/tools/node/installExtensionTool.tsx",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L80-L96"
+            },
+            "range": {
+              "startLineNumber": 81,
+              "startColumn": 1,
+              "endLineNumber": 97,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/tools/node/readFileTool.tsx#L267-L279",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/tools/node/readFileTool.tsx",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L267-L279"
+            },
+            "range": {
+              "startLineNumber": 268,
+              "startColumn": 1,
+              "endLineNumber": 280,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/tools/node/readFileTool.tsx#L27-L40",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/tools/node/readFileTool.tsx",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L27-L40"
+            },
+            "range": {
+              "startLineNumber": 28,
+              "startColumn": 1,
+              "endLineNumber": 41,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/tools/node/readFileTool.tsx#L301-L307",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/tools/node/readFileTool.tsx",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L301-L307"
+            },
+            "range": {
+              "startLineNumber": 302,
+              "startColumn": 1,
+              "endLineNumber": 308,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/test/scenarios/test-tools/workspace/chatSetup.ts#L1277-L1296",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/test/scenarios/test-tools/workspace/chatSetup.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L1277-L1296"
+            },
+            "range": {
+              "startLineNumber": 1278,
+              "startColumn": 1,
+              "endLineNumber": 1297,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/test/scenarios/test-tools/workspace/chatSetup.ts#L658-L682",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/test/scenarios/test-tools/workspace/chatSetup.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L658-L682"
+            },
+            "range": {
+              "startLineNumber": 659,
+              "startColumn": 1,
+              "endLineNumber": 683,
+              "endColumn": 1
+            }
+          }
+        ],
+        "toolCallId": "call-e5cca32e-43c2-4b35-8a5a-bedd82912416-1",
+        "toolId": "copilot_githubRepo"
+      },
+      {
+        "kind": "toolInvocationSerialized",
+        "presentation": "hidden",
+        "invocationMessage": "",
+        "isConfirmed": {
+          "type": 1
+        },
+        "isComplete": true,
+        "source": {
+          "type": "internal",
+          "label": "Built-In"
+        },
+        "toolCallId": "call-7d3d613a-38c7-46e1-b10d-ac11c3e841bb-5",
+        "toolId": "copilot_fetchWebPage"
+      },
+      {
+        "kind": "toolInvocationSerialized",
+        "invocationMessage": {
+          "value": "正在提取 2 资源",
+          "isTrusted": false,
+          "supportThemeIcons": false,
+          "supportHtml": false,
+          "supportAlertSyntax": false
+        },
+        "pastTenseMessage": {
+          "value": "已提取 2 资源",
+          "isTrusted": false,
+          "supportThemeIcons": false,
+          "supportHtml": false,
+          "supportAlertSyntax": false
+        },
+        "isConfirmed": {
+          "type": 1
+        },
+        "isComplete": true,
+        "source": {
+          "type": "internal",
+          "label": "Built-In"
+        },
+        "resultDetails": [
+          {
+            "$mid": 1,
+            "path": "/Davidobot/vscode-copilot-chat-sidecar/sidecar/package.json",
+            "scheme": "https",
+            "authority": "raw.githubusercontent.com"
+          },
+          {
+            "$mid": 1,
+            "path": "/Davidobot/vscode-copilot-chat-sidecar/sidecar/README.md",
+            "scheme": "https",
+            "authority": "raw.githubusercontent.com"
+          }
+        ],
+        "toolCallId": "call-7d3d613a-38c7-46e1-b10d-ac11c3e841bb-5",
+        "toolId": "vscode_fetchWebPage_internal"
+      },
+      {
+        "kind": "toolInvocationSerialized",
+        "invocationMessage": "Searching 'Davidobot/vscode-copilot-chat-sidecar' for 'filename:package.json \"name\" OR \"publisher\" OR \"extensionId\" OR \"GitHub.copilot-chat\"'",
+        "pastTenseMessage": {
+          "value": "Searched Davidobot/vscode-copilot-chat-sidecar for \"filename:package.json \"name\" OR \"publisher\" OR \"extensionId\" OR \"GitHub.copilot-chat\"\", no results",
+          "supportThemeIcons": false,
+          "supportHtml": false,
+          "supportAlertSyntax": false,
+          "uris": {}
+        },
+        "isConfirmed": {
+          "type": 1
+        },
+        "isComplete": true,
+        "source": {
+          "type": "internal",
+          "label": "Built-In"
+        },
+        "resultDetails": [],
+        "toolCallId": "call-7d3d613a-38c7-46e1-b10d-ac11c3e841bb-3",
+        "toolId": "copilot_githubTextSearch"
+      },
+      {
+        "kind": "toolInvocationSerialized",
+        "invocationMessage": "Searching 'Davidobot/vscode-copilot-chat-sidecar' for relevant code snippets",
+        "pastTenseMessage": {
+          "value": "Searched davidobot/vscode-copilot-chat-sidecar for \"package.json extension name publisher id github.copilot-chat\", 64 results",
+          "supportThemeIcons": false,
+          "supportHtml": false,
+          "supportAlertSyntax": false,
+          "uris": {}
+        },
+        "isConfirmed": {
+          "type": 1
+        },
+        "isComplete": true,
+        "source": {
+          "type": "internal",
+          "label": "Built-In"
+        },
+        "resultDetails": [
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/CONTRIBUTING.md#L383-L419",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/CONTRIBUTING.md",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L383-L419"
+            },
+            "range": {
+              "startLineNumber": 384,
+              "startColumn": 1,
+              "endLineNumber": 420,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/docs/monitoring/agent_monitoring_arch.md#L241-L251",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/docs/monitoring/agent_monitoring_arch.md",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L241-L251"
+            },
+            "range": {
+              "startLineNumber": 242,
+              "startColumn": 1,
+              "endLineNumber": 252,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/script/postinstall.ts#L10-L73",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/script/postinstall.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L10-L73"
+            },
+            "range": {
+              "startLineNumber": 11,
+              "startColumn": 1,
+              "endLineNumber": 74,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/copilotcli/common/copilotCLIPrompt.ts#L151-L172",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/copilotcli/common/copilotCLIPrompt.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L151-L172"
+            },
+            "range": {
+              "startLineNumber": 152,
+              "startColumn": 1,
+              "endLineNumber": 173,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/copilotcli/common/copilotCLITools.ts#L1010-L1020",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/copilotcli/common/copilotCLITools.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L1010-L1020"
+            },
+            "range": {
+              "startLineNumber": 1011,
+              "startColumn": 1,
+              "endLineNumber": 1021,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/copilotcli/common/copilotCLITools.ts#L1027-L1033",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/copilotcli/common/copilotCLITools.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L1027-L1033"
+            },
+            "range": {
+              "startLineNumber": 1028,
+              "startColumn": 1,
+              "endLineNumber": 1034,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/copilotcli/common/copilotCLITools.ts#L970-L976",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/copilotcli/common/copilotCLITools.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L970-L976"
+            },
+            "range": {
+              "startLineNumber": 971,
+              "startColumn": 1,
+              "endLineNumber": 977,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/copilotcli/node/cliHelpers.ts#L0-L38",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/copilotcli/node/cliHelpers.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L0-L38"
+            },
+            "range": {
+              "startLineNumber": 1,
+              "startColumn": 1,
+              "endLineNumber": 39,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/copilotcli/node/cliHelpers.ts#L35-L38",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/copilotcli/node/cliHelpers.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L35-L38"
+            },
+            "range": {
+              "startLineNumber": 36,
+              "startColumn": 1,
+              "endLineNumber": 39,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/copilotcli/node/copilotCli.ts#L0-L18",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/copilotcli/node/copilotCli.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L0-L18"
+            },
+            "range": {
+              "startLineNumber": 1,
+              "startColumn": 1,
+              "endLineNumber": 19,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/copilotcli/node/copilotCli.ts#L18-L34",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/copilotcli/node/copilotCli.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L18-L34"
+            },
+            "range": {
+              "startLineNumber": 19,
+              "startColumn": 1,
+              "endLineNumber": 35,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/copilotcli/node/copilotCli.ts#L364-L392",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/copilotcli/node/copilotCli.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L364-L392"
+            },
+            "range": {
+              "startLineNumber": 365,
+              "startColumn": 1,
+              "endLineNumber": 393,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/copilotcli/node/copilotCli.ts#L414-L431",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/copilotcli/node/copilotCli.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L414-L431"
+            },
+            "range": {
+              "startLineNumber": 415,
+              "startColumn": 1,
+              "endLineNumber": 432,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/copilotcli/node/copilotcliSession.ts#L0-L15",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/copilotcli/node/copilotcliSession.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L0-L15"
+            },
+            "range": {
+              "startLineNumber": 1,
+              "startColumn": 1,
+              "endLineNumber": 16,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/copilotcli/node/copilotcliSessionService.ts#L40-L50",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/copilotcli/node/copilotcliSessionService.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L40-L50"
+            },
+            "range": {
+              "startLineNumber": 41,
+              "startColumn": 1,
+              "endLineNumber": 51,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/copilotcli/node/copilotcliSessionService.ts#L50-L105",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/copilotcli/node/copilotcliSessionService.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L50-L105"
+            },
+            "range": {
+              "startLineNumber": 51,
+              "startColumn": 1,
+              "endLineNumber": 106,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/copilotcli/node/copilotCLISkills.ts#L0-L20",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/copilotcli/node/copilotCLISkills.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L0-L20"
+            },
+            "range": {
+              "startLineNumber": 1,
+              "startColumn": 1,
+              "endLineNumber": 21,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/copilotcli/node/copilotCLISkills.ts#L20-L79",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/copilotcli/node/copilotCLISkills.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L20-L79"
+            },
+            "range": {
+              "startLineNumber": 21,
+              "startColumn": 1,
+              "endLineNumber": 80,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/copilotcli/node/mcpHandler.ts#L168-L186",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/copilotcli/node/mcpHandler.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L168-L186"
+            },
+            "range": {
+              "startLineNumber": 169,
+              "startColumn": 1,
+              "endLineNumber": 187,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/copilotcli/vscode-node/tools/index.ts#L20-L30",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/copilotcli/vscode-node/tools/index.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L20-L30"
+            },
+            "range": {
+              "startLineNumber": 21,
+              "startColumn": 1,
+              "endLineNumber": 31,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCLIChatSessionsContribution.ts#L77-L104",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCLIChatSessionsContribution.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L77-L104"
+            },
+            "range": {
+              "startLineNumber": 78,
+              "startColumn": 1,
+              "endLineNumber": 105,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCLICustomizationProvider.ts#L17-L232",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCLICustomizationProvider.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L17-L232"
+            },
+            "range": {
+              "startLineNumber": 18,
+              "startColumn": 1,
+              "endLineNumber": 233,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCLICustomizationProvider.ts#L220-L232",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCLICustomizationProvider.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L220-L232"
+            },
+            "range": {
+              "startLineNumber": 221,
+              "startColumn": 1,
+              "endLineNumber": 233,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCLIPythonEnvironmentApi.ts#L336-L367",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCLIPythonEnvironmentApi.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L336-L367"
+            },
+            "range": {
+              "startLineNumber": 337,
+              "startColumn": 1,
+              "endLineNumber": 368,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCLIPythonEnvironmentApi.ts#L458-L477",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCLIPythonEnvironmentApi.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L458-L477"
+            },
+            "range": {
+              "startLineNumber": 459,
+              "startColumn": 1,
+              "endLineNumber": 478,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCLIPythonEnvironmentApi.ts#L478-L527",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCLIPythonEnvironmentApi.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L478-L527"
+            },
+            "range": {
+              "startLineNumber": 479,
+              "startColumn": 1,
+              "endLineNumber": 528,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCLIPythonEnvironmentApi.ts#L567-L600",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCLIPythonEnvironmentApi.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L567-L600"
+            },
+            "range": {
+              "startLineNumber": 568,
+              "startColumn": 1,
+              "endLineNumber": 601,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCLIPythonEnvironmentApi.ts#L633-L764",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCLIPythonEnvironmentApi.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L633-L764"
+            },
+            "range": {
+              "startLineNumber": 634,
+              "startColumn": 1,
+              "endLineNumber": 765,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCLIPythonEnvironmentApi.ts#L680-L706",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCLIPythonEnvironmentApi.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L680-L706"
+            },
+            "range": {
+              "startLineNumber": 681,
+              "startColumn": 1,
+              "endLineNumber": 707,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCLIPythonEnvironmentApi.ts#L996-L1020",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCLIPythonEnvironmentApi.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L996-L1020"
+            },
+            "range": {
+              "startLineNumber": 997,
+              "startColumn": 1,
+              "endLineNumber": 1021,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCLIShim.ps1#L0-L25",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCLIShim.ps1",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L0-L25"
+            },
+            "range": {
+              "startLineNumber": 1,
+              "startColumn": 1,
+              "endLineNumber": 26,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCLIShim.ps1#L54-L78",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCLIShim.ps1",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L54-L78"
+            },
+            "range": {
+              "startLineNumber": 55,
+              "startColumn": 1,
+              "endLineNumber": 79,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCLIShim.ts#L161-L191",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCLIShim.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L161-L191"
+            },
+            "range": {
+              "startLineNumber": 162,
+              "startColumn": 1,
+              "endLineNumber": 192,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCLIShim.ts#L23-L53",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCLIShim.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L23-L53"
+            },
+            "range": {
+              "startLineNumber": 24,
+              "startColumn": 1,
+              "endLineNumber": 54,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCLIShim.ts#L55-L191",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCLIShim.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L55-L191"
+            },
+            "range": {
+              "startLineNumber": 56,
+              "startColumn": 1,
+              "endLineNumber": 192,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCLIShim.ts#L66-L80",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCLIShim.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L66-L80"
+            },
+            "range": {
+              "startLineNumber": 67,
+              "startColumn": 1,
+              "endLineNumber": 81,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCloudSessionsProvider.ts#L413-L441",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode-node/copilotCloudSessionsProvider.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L413-L441"
+            },
+            "range": {
+              "startLineNumber": 414,
+              "startColumn": 1,
+              "endLineNumber": 442,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode/copilotCodingAgentUtils.ts#L121-L140",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode/copilotCodingAgentUtils.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L121-L140"
+            },
+            "range": {
+              "startLineNumber": 122,
+              "startColumn": 1,
+              "endLineNumber": 141,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode/copilotCodingAgentUtils.ts#L97-L120",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/chatSessions/vscode/copilotCodingAgentUtils.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L97-L120"
+            },
+            "range": {
+              "startLineNumber": 98,
+              "startColumn": 1,
+              "endLineNumber": 121,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/common/constants.ts#L61-L84",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/common/constants.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L61-L84"
+            },
+            "range": {
+              "startLineNumber": 62,
+              "startColumn": 1,
+              "endLineNumber": 85,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/completions-core/vscode-node/extension/src/config.ts#L84-L104",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/completions-core/vscode-node/extension/src/config.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L84-L104"
+            },
+            "range": {
+              "startLineNumber": 85,
+              "startColumn": 1,
+              "endLineNumber": 105,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/completions-core/vscode-node/extension/src/constants.ts#L0-L14",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/completions-core/vscode-node/extension/src/constants.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L0-L14"
+            },
+            "range": {
+              "startLineNumber": 1,
+              "startColumn": 1,
+              "endLineNumber": 15,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/completions-core/vscode-node/lib/src/constants.ts#L0-L5",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/completions-core/vscode-node/lib/src/constants.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L0-L5"
+            },
+            "range": {
+              "startLineNumber": 1,
+              "startColumn": 1,
+              "endLineNumber": 6,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/completions-core/vscode-node/lib/src/experiments/filters.ts#L40-L50",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/completions-core/vscode-node/lib/src/experiments/filters.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L40-L50"
+            },
+            "range": {
+              "startLineNumber": 41,
+              "startColumn": 1,
+              "endLineNumber": 51,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/conversation/node/githubPullRequestProviders.ts#L76-L91",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/conversation/node/githubPullRequestProviders.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L76-L91"
+            },
+            "range": {
+              "startLineNumber": 77,
+              "startColumn": 1,
+              "endLineNumber": 92,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/conversation/vscode-node/chatParticipants.ts#L189-L202",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/conversation/vscode-node/chatParticipants.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L189-L202"
+            },
+            "range": {
+              "startLineNumber": 190,
+              "startColumn": 1,
+              "endLineNumber": 203,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/conversation/vscode-node/newWorkspaceFollowup.ts#L15-L27",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/conversation/vscode-node/newWorkspaceFollowup.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L15-L27"
+            },
+            "range": {
+              "startLineNumber": 16,
+              "startColumn": 1,
+              "endLineNumber": 28,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/conversation/vscode-node/sidecarContribution.ts#L18-L33",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/conversation/vscode-node/sidecarContribution.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L18-L33"
+            },
+            "range": {
+              "startLineNumber": 19,
+              "startColumn": 1,
+              "endLineNumber": 34,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/extension/vscode-node/services.ts#L275-L289",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/extension/vscode-node/services.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L275-L289"
+            },
+            "range": {
+              "startLineNumber": 276,
+              "startColumn": 1,
+              "endLineNumber": 290,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/extension/vscode/extension.ts#L83-L90",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/extension/vscode/extension.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L83-L90"
+            },
+            "range": {
+              "startLineNumber": 84,
+              "startColumn": 1,
+              "endLineNumber": 91,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/intents/node/newIntent.ts#L30-L309",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/intents/node/newIntent.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L30-L309"
+            },
+            "range": {
+              "startLineNumber": 31,
+              "startColumn": 1,
+              "endLineNumber": 310,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/promptFileContext/vscode-node/promptFileContextService.ts#L220-L243",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/promptFileContext/vscode-node/promptFileContextService.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L220-L243"
+            },
+            "range": {
+              "startLineNumber": 221,
+              "startColumn": 1,
+              "endLineNumber": 244,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/prompts/node/agent/familyHPrompts.tsx#L17-L35",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/prompts/node/agent/familyHPrompts.tsx",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L17-L35"
+            },
+            "range": {
+              "startLineNumber": 18,
+              "startColumn": 1,
+              "endLineNumber": 36,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/prompts/node/base/copilotIdentity.tsx#L0-L44",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/prompts/node/base/copilotIdentity.tsx",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L0-L44"
+            },
+            "range": {
+              "startLineNumber": 1,
+              "startColumn": 1,
+              "endLineNumber": 45,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/prompts/node/base/copilotIdentity.tsx#L8-L44",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/prompts/node/base/copilotIdentity.tsx",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L8-L44"
+            },
+            "range": {
+              "startLineNumber": 9,
+              "startColumn": 1,
+              "endLineNumber": 45,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/testing/common/files.ts#L0-L6",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/testing/common/files.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L0-L6"
+            },
+            "range": {
+              "startLineNumber": 1,
+              "startColumn": 1,
+              "endLineNumber": 7,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/tools/common/toolNames.ts#L78-L99",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/tools/common/toolNames.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L78-L99"
+            },
+            "range": {
+              "startLineNumber": 79,
+              "startColumn": 1,
+              "endLineNumber": 100,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/tools/node/test/testToolsService.ts#L17-L268",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/extension/tools/node/test/testToolsService.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L17-L268"
+            },
+            "range": {
+              "startLineNumber": 18,
+              "startColumn": 1,
+              "endLineNumber": 269,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/platform/chat/common/chatAgents.ts#L10-L34",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/platform/chat/common/chatAgents.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L10-L34"
+            },
+            "range": {
+              "startLineNumber": 11,
+              "startColumn": 1,
+              "endLineNumber": 35,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/platform/completions-core/common/openai/copilotAnnotations.ts#L22-L38",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/platform/completions-core/common/openai/copilotAnnotations.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L22-L38"
+            },
+            "range": {
+              "startLineNumber": 23,
+              "startColumn": 1,
+              "endLineNumber": 39,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/platform/configuration/common/configurationService.ts#L325-L356",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/platform/configuration/common/configurationService.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L325-L356"
+            },
+            "range": {
+              "startLineNumber": 326,
+              "startColumn": 1,
+              "endLineNumber": 357,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/platform/extensions/common/packageJson.ts#L0-L33",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/platform/extensions/common/packageJson.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L0-L33"
+            },
+            "range": {
+              "startLineNumber": 1,
+              "startColumn": 1,
+              "endLineNumber": 34,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/platform/otel/common/genAiAttributes.ts#L84-L109",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/platform/otel/common/genAiAttributes.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L84-L109"
+            },
+            "range": {
+              "startLineNumber": 85,
+              "startColumn": 1,
+              "endLineNumber": 110,
+              "endColumn": 1
+            }
+          },
+          {
+            "uri": {
+              "$mid": 1,
+              "external": "https://github.com/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/platform/telemetry/vscode-node/microsoftExperimentationService.ts#L40-L94",
+              "path": "/Davidobot/vscode-copilot-chat-sidecar/tree/sidecar/src/platform/telemetry/vscode-node/microsoftExperimentationService.ts",
+              "scheme": "https",
+              "authority": "github.com",
+              "fragment": "L40-L94"
+            },
+            "range": {
+              "startLineNumber": 41,
+              "startColumn": 1,
+              "endLineNumber": 95,
+              "endColumn": 1
+            }
+          }
+        ],
+        "toolCallId": "call-7d3d613a-38c7-46e1-b10d-ac11c3e841bb-4",
+        "toolId": "copilot_githubRepo"
+      }
+    ],
+    "confirm": [],
+    "other_top": [
+      {
+        "kind": 1,
+        "k": [
+          "inputState",
+          "inputText"
+        ],
+        "has_v": true,
+        "has_i": false
+      },
+      {
+        "kind": 1,
+        "k": [
+          "inputState",
+          "selections"
+        ],
+        "has_v": true,
+        "has_i": false
+      },
+      {
+        "kind": 1,
+        "k": [
+          "inputState",
+          "inputText"
+        ],
+        "has_v": true,
+        "has_i": false
+      },
+      {
+        "kind": 1,
+        "k": [
+          "inputState",
+          "selections"
+        ],
+        "has_v": true,
+        "has_i": false
+      },
+      {
+        "kind": 1,
+        "k": [
+          "inputState",
+          "inputText"
+        ],
+        "has_v": true,
+        "has_i": false
+      },
+      {
+        "kind": 1,
+        "k": [
+          "inputState",
+          "selections"
+        ],
+        "has_v": true,
+        "has_i": false
+      },
+      {
+        "kind": 1,
+        "k": [
+          "inputState",
+          "selections"
+        ],
+        "has_v": true,
+        "has_i": false
+      },
+      {
+        "kind": 1,
+        "k": [
+          "inputState",
+          "inputText"
+        ],
+        "has_v": true,
+        "has_i": false
+      },
+      {
+        "kind": 1,
+        "k": [
+          "inputState",
+          "selections"
+        ],
+        "has_v": true,
+        "has_i": false
+      },
+      {
+        "kind": 1,
+        "k": [
+          "inputState",
+          "inputText"
+        ],
+        "has_v": true,
+        "has_i": false
+      },
+      {
+        "kind": 1,
+        "k": [
+          "inputState",
+          "selections"
+        ],
+        "has_v": true,
+        "has_i": false
+      },
+      {
+        "kind": 1,
+        "k": [
+          "inputState",
+          "inputText"
+        ],
+        "has_v": true,
+        "has_i": false
+      },
+      {
+        "kind": 1,
+        "k": [
+          "inputState",
+          "selections"
+        ],
+        "has_v": true,
+        "has_i": false
+      },
+      {
+        "kind": 1,
+        "k": [
+          "inputState",
+          "inputText"
+        ],
+        "has_v": true,
+        "has_i": false
+      },
+      {
+        "kind": 1,
+        "k": [
+          "inputState",
+          "selections"
+        ],
+        "has_v": true,
+        "has_i": false
+      }
+    ]
+  },
+  "seen_requests": 14,
+  "resp_paths": [
+    "requests/0/response",
+    "requests/1/response",
+    "requests/2/response",
+    "requests/3/response",
+    "requests/4/response",
+    "requests/5/response",
+    "requests/6/response",
+    "requests/7/response",
+    "requests/8/response",
+    "requests/9/response",
+    "requests/10/response",
+    "requests/11/response",
+    "requests/12/response",
+    "requests/13/response"
+  ]
+}

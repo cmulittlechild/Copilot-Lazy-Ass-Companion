@@ -1,0 +1,24 @@
+processChatEntry(t){
+const e=t.k
+;if(Array.isArray(e)&&0!==e.length&&"requests"===e[0])if(3!==e.length||"number"!=typeof e[1]||"elapsedMs"!==e[2]&&"result"!==e[2]&&"isCanceled"!==e[2]){
+if(2===t.kind){
+if(1===e.length){
+const e=t.v
+;if(!Array.isArray(e))return
+;for(const t of e)this.handleUserRequest(t)
+;return
+}
+if(3===e.length&&"number"==typeof e[1]&&"response"===e[2]){
+const r=`requests/${
+e[1]
+}
+/response`,n=t.v
+;if(!Array.isArray(n))return
+;this.applyResponseMutation(r,e[1],n,t.i)
+}
+
+}
+
+}
+else this.scheduleFinalize(e[1])
+}

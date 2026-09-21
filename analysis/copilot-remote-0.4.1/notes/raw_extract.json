@@ -1,0 +1,220 @@
+{
+  "target": "atulhritik.copilot-remote@0.4.1",
+  "artifacts": {
+    "vsix": "/Users/xin/Desktop/sidecar_remote/atulhritik.copilot-remote-0.4.1.vsix",
+    "extension_js_bytes": 326414,
+    "pwa_js_bytes": 315734,
+    "has_source_map": false,
+    "has_cloudflared_binary_in_vsix": false,
+    "public_pem_present": true
+  },
+  "architecture_modules": [
+    "BaseJsonlHook",
+    "LicenseManager",
+    "PushManager",
+    "TunnelManager",
+    "WsServer"
+  ],
+  "protocol_message_types": [
+    "AGENT_CONFIRM",
+    "AGENT_CONFIRM_RESOLVED",
+    "AGENT_LIST",
+    "AGENT_MESSAGE",
+    "AGENT_STREAM_CHUNK",
+    "AGENT_STREAM_END",
+    "AGENT_STREAM_SET",
+    "AGENT_STREAM_START",
+    "COPILOT_DONE",
+    "COPILOT_TYPING",
+    "HISTORY_REPLAY",
+    "PHONE_CONFIRM",
+    "PHONE_CONNECT",
+    "PHONE_MESSAGE",
+    "PHONE_PUSH_SUBSCRIBE"
+  ],
+  "protocol_snippets": [
+    "ete:i.isComplete,input:i.input,result:null}):\"confirm\"===i.type&&(o||this.send({type:\"AGENT_CONFIRM\",title:i.title,message:i.message,buttons:i.buttons}))}this.respBlocks.set(t,e)}renderBlocks(t){const e=[];for(const r of t){const t=r;if(!t|",
+    "NE_CONNECT\":y.setPhoneConnected(!0),y.addLog(\"Phone connected.\"),m.sendToPhone({type:\"AGENT_LIST\",agents:[\"GitHub Copilot\"],active:\"GitHub Copilot\"});break;case\"PHONE_MESSAGE\":{const e=t.text,r=t.mode;m.sendToPhone({type:\"COPILOT_TYPING\"}),",
+    "Timer),this.chunkTimer=null)}sendStreamEnd(t){this.flushPendingChunk();const e={type:\"AGENT_MESSAGE\",text:this.activeStreamAccum,streamId:t,timestamp:Date.now()};this.pushHistory(e),this.broadcast({type:\"AGENT_STREAM_END\",streamId:t,timesta",
+    "endingChunk()))}flushPendingChunk(){if(null===this.pendingChunk)return;const t={type:\"AGENT_STREAM_CHUNK\",text:this.pendingChunk,streamId:this.currentStreamId,timestamp:Date.now()};this.broadcast(t),this.pendingChunk=null,this.currentStream",
+    "treamAccum,streamId:t,timestamp:Date.now()};this.pushHistory(e),this.broadcast({type:\"AGENT_STREAM_END\",streamId:t,timestamp:Date.now()}),0===this.clients.size&&this.activeStreamAccum&&this.push?.notify(\"Copilot finished\",this.activeStreamA",
+    "ssages:this.history}),this.activeStreamId&&this.activeStreamAccum&&this.send(t,{type:\"AGENT_STREAM_SET\",text:this.activeStreamAccum,streamId:this.activeStreamId,timestamp:Date.now()});for(const e of this.offlineQueue)this.send(t,e);this.off",
+    "dStreamStart(t){this.activeStreamId=t,this.activeStreamAccum=\"\",this.broadcast({type:\"AGENT_STREAM_START\",streamId:t,timestamp:Date.now()})}sendStreamSet(t,e){this.activeStreamId=t,this.activeStreamAccum=e,this.broadcast({type:\"AGENT_STREAM",
+    "(()=>{this.finalizeTimers.delete(t),this.closeTextStream(),this.ws.sendToPhone({type:\"COPILOT_DONE\"})},n))}async injectMessage(t,e){this.noteInjectedText(t);try{\"agent\"===e?await u.commands.executeCommand(\"workbench.action.chat.openAgentMod",
+    "sInjectedEcho(r)&&(this.send({type:\"USER_MESSAGE\",text:r}),this.ws.sendToPhone({type:\"COPILOT_TYPING\"}))}applyResponseMutation(t,e,r,n){const i=this.respParts.get(t)??[];if(\"number\"!=typeof n)return this.respParts.set(t,r.slice()),this.emit",
+    "PublicKey:this.push?.vapidPublicKey??null}),this.history.length>0&&this.send(t,{type:\"HISTORY_REPLAY\",messages:this.history}),this.activeStreamId&&this.activeStreamAccum&&this.send(t,{type:\"AGENT_STREAM_SET\",text:this.activeStreamAccum,stre"
+  ],
+  "vscode_commands_used": [
+    "chat.action.acceptToolConfirmation",
+    "chat.action.rejectToolConfirmation",
+    "copilot-remote.activate",
+    "copilot-remote.boundMachine",
+    "copilot-remote.copyUrl",
+    "copilot-remote.dev",
+    "copilot-remote.licenseKey",
+    "copilot-remote.pushSubscriptions",
+    "copilot-remote.qrView",
+    "copilot-remote.qrView.focus",
+    "copilot-remote.restart",
+    "copilot-remote.showQR",
+    "copilot-remote.vapidKeys",
+    "workbench.action.chat.open",
+    "workbench.action.chat.openAgentMode",
+    "workbench.action.chat.openAskMode",
+    "workbench.action.chat.openEditSession"
+  ],
+  "settings_keys": [
+    "copilot-remote.activate",
+    "copilot-remote.boundMachine",
+    "copilot-remote.copyUrl",
+    "copilot-remote.dev",
+    "copilot-remote.licenseKey",
+    "copilot-remote.pushSubscriptions",
+    "copilot-remote.qrView",
+    "copilot-remote.restart",
+    "copilot-remote.showQR",
+    "copilot-remote.vapidKeys"
+  ],
+  "timings_ms": {
+    "session_rescan_ms": 2000,
+    "jsonl_poll_ms": 8,
+    "stream_end_delay_ms": 450,
+    "phone_status_poll_ms": 9000,
+    "tunnel_restart_ms": 3000,
+    "echo_window_ms": 30000
+  },
+  "bundled_dep_signals": [
+    "HttpsProxyAgent",
+    "semver",
+    "uuid",
+    "ws"
+  ],
+  "interesting_methods_sample": [
+    "async activate(){",
+    "async generateAndSendQr(t){",
+    "async handleConfirmation(t){",
+    "async injectMessage(t,e){",
+    "async start(t){",
+    "broadcast(t){",
+    "closeTextStream(){",
+    "emitUrl(t){",
+    "findAndWatchSession(){",
+    "findLatestSessionFile(){",
+    "handleIncoming(t,e){",
+    "handleUpgrade(t,e,r,n){",
+    "handleUserRequest(t){",
+    "isActivated(){",
+    "isInjectedEcho(t){",
+    "killTunnelsForPort(t){",
+    "newestJsonl(t){",
+    "noteInjectedText(t){",
+    "onPhoneMessage(t){",
+    "onPhoneMessage(t=>{switch(t.type){",
+    "onUrl(t){",
+    "processChatEntry(t){",
+    "processNewLines(){",
+    "pushHistory(t){",
+    "restart(t){",
+    "scheduleStreamEnd(t){",
+    "send(t){",
+    "send(t,e){",
+    "send(t,e,r){",
+    "sendFrame(t,e){",
+    "sendStreamChunk(t,e){",
+    "sendStreamEnd(t){",
+    "sendStreamSet(t,e){",
+    "sendStreamStart(t){",
+    "sendToPhone(t){",
+    "setActivated(t){",
+    "setPhoneConnected(t){",
+    "setPushManager(t){",
+    "setTunnelUrl(t){",
+    "shouldHandle(t){",
+    "start(){",
+    "startHeartbeat(){",
+    "startLoop(t){",
+    "startWatching(t){",
+    "stop(){",
+    "stopWatching(){",
+    "url(){"
+  ],
+  "path_discovery_snippets": [
+    "}))}findLatestSessionFile(){const t=this.ctx.storageUri?.fsPath;if(t){const e=[c.join(c.dirname(t),\"chatSessions\"),c.join(t,\"chatSessions\")];for(const t of e){const e=this.newestJsonl(t);if(e)return{file:e,dir:t}}}const e=c.join(process.env.APPDATA??\"\"",
+    "his.newestJsonl(t);if(e)return{file:e,dir:t}}}const e=c.join(process.env.APPDATA??\"\",\"Code\",\"User\",\"workspaceStorage\");if(!a.existsSync(e))return null;let r=null;try{for(const t of a.readdirSync(e)){const n=c.join(e,t,\"chatSessions\"),i=this.newestJsonl(n);",
+    "SAGE\",text:`Watching Copilot session: ${c.basename(e)}`}))}findLatestSessionFile(){const t=this.ctx.storageUri?.fsPath;if(t){const e=[c.join(c.dirname(t),\"chatSessions\"),c.join(t,\"chatSessions\")];for(const t of e){const e=this.newestJsonl(t);if(e)ret",
+    "for(const t of e){const e=this.newestJsonl(t);if(e)return{file:e,dir:t}}}const e=c.join(process.env.APPDATA??\"\",\"Code\",\"User\",\"workspaceStorage\");if(!a.existsSync(e))return null;let r=null;try{for(const t of a.readdirSync(e)){const n=c.join(e,t,\"c",
+    "l}newestJsonl(t){if(!a.existsSync(t))return null;try{const e=a.readdirSync(t).filter(t=>t.endsWith(\".jsonl\")).map(e=>({f:c.join(t,e),mtime:a.statSync(c.join(t,e)).mtimeMs})).sort((t,e)=>e.mtime-t.mtime);return e[0]?.f??null}catch{return null}}pro"
+  ],
+  "license_snippets": [
+    {
+      "pat": "public.pem",
+      "snip": "is.publicKey=this.loadPublicKey()}loadPublicKey(){const t=l.join(this.context.extensionPath,\"dist\",\"public.pem\");if(!h.existsSync(t))throw new Error(\"public.pem not found in extension bundle\");return h.readFileSync(t,\"utf8\")}isActivated(){const t=this.context.globalState.get(f),e=this.context.global"
+    },
+    {
+      "pat": "jsonwebtoken",
+      "snip": "load:i,signature:r.signature}:i}},4040(t,e,r){t.exports={decode:r(7260),verify:r(1691),sign:r(7651),JsonWebTokenError:r(1741),NotBeforeError:r(3726),TokenExpiredError:r(8980)}},1741(t){var e=function(t,e){Error.call(this,t),Error.captureStackTrace&&Error.captureStackTrace(this,this.constructor),this"
+    },
+    {
+      "pat": "machineId",
+      "snip": "roperty(e,\"__esModule\",{value:!0});var o=function(t){return t&&t.__esModule?t:{default:t}}(r(35));e.machineIdSync=function(t){var e=i((0,s.execSync)(u[c]).toString());return t?e:n(e)},e.machineId=function(t){return new o.default(function(e,r){return(0,s.exec)(u[c],{},function(o,s,a){if(o)return r(ne"
+    },
+    {
+      "pat": "boundMachine",
+      "snip": ")),c=s(r(4040)),u=r(9518),l=s(r(6928)),h=s(r(9896)),f=\"copilot-remote.licenseKey\",d=\"copilot-remote.boundMachine\";e.LicenseManager=class{constructor(t){this.context=t,this.publicKey=this.loadPublicKey()}loadPublicKey(){const t=l.join(this.context.extensionPath,\"dist\",\"public.pem\");if(!h.existsSync(t"
+    },
+    {
+      "pat": "licenseKey",
+      "snip": "anager=void 0;const a=s(r(1398)),c=s(r(4040)),u=r(9518),l=s(r(6928)),h=s(r(9896)),f=\"copilot-remote.licenseKey\",d=\"copilot-remote.boundMachine\";e.LicenseManager=class{constructor(t){this.context=t,this.publicKey=this.loadPublicKey()}loadPublicKey(){const t=l.join(this.context.extensionPath,\"dist\",\"p"
+    },
+    {
+      "pat": "RS256",
+      "snip": "==typeof t?r+t:void 0}},7019(t,e,r){const n=r(1977),i=r(4623),o={ec:[\"ES256\",\"ES384\",\"ES512\"],rsa:[\"RS256\",\"PS256\",\"RS384\",\"PS384\",\"RS512\",\"PS512\"],\"rsa-pss\":[\"PS256\",\"PS384\",\"PS512\"]},s={ES256:\"prime256v1\",ES384:\"secp384r1\",ES512:\"secp521r1\"};t.exports=function(t,e){if(!t||!e)return;const r=e.asymm"
+    },
+    {
+      "pat": "verify",
+      "snip": ")},o.prototype.redMul=function(t){return n(this.red,\"redMul works only with red numbers\"),this.red._verify2(this,t),this.red.mul(this,t)},o.prototype.redIMul=function(t){return n(this.red,\"redMul works only with red numbers\"),this.red._verify2(this,t),this.red.imul(this,t)},o.prototype.redSqr=functi"
+    },
+    {
+      "pat": "jwt",
+      "snip": "lid:f,message:'\"issuer\" must be a string'},subject:{isValid:f,message:'\"subject\" must be a string'},jwtid:{isValid:f,message:'\"jwtid\" must be a string'},noTimestamp:{isValid:c,message:'\"noTimestamp\" must be a boolean'},keyid:{isValid:f,message:'\"keyid\" must be a string'},mutatePayload:{isValid:c,mes"
+    }
+  ],
+  "public_pem": "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAyh1B/u40K/DR4sT1P13k\nCGV/OUVCyJNrqQ8w1cOnEtq9qefege6pZn54UPt8cxtXMQTJJEUe61JgiyV4WrJk\np0HQEPdMHNb2ptaErwqllDWTFBEvy3D+DzpOQjsxvSrSE8QqVILq9t+ke3GpYBnx\n5pTFgHsLavFgU0BDSS8cSmJ2NT0iXLvTVlTV4nr6UV9JqLnTqavr48ShaulcLAhN\nU15+8ETX4r9TFPZkhe+7AESdmhV5W/uO7A8jURBoY95TaUi/XjiiNi5M5RMzpJF1\n4SJG1sVOIxgFUboKg42diOSYPpu3j/TQjPZPYAedyycN7FmUruaSHnS6psE+QOrS\n1wIDAQAB\n-----END PUBLIC KEY-----\n",
+  "pwa": {
+    "message_types_seen": [
+      "AGENT_CONFIRM",
+      "AGENT_CONFIRM_RESOLVED",
+      "AGENT_LIST",
+      "AGENT_MESSAGE",
+      "AGENT_STREAM_CHUNK",
+      "AGENT_STREAM_END",
+      "AGENT_STREAM_SET",
+      "AGENT_STREAM_START",
+      "COPILOT_DONE",
+      "COPILOT_TYPING",
+      "HISTORY_REPLAY",
+      "PHONE_CONFIRM",
+      "PHONE_CONNECT",
+      "PHONE_MESSAGE",
+      "PHONE_PUSH_SUBSCRIBE"
+    ],
+    "urls": [
+      "http://www.w3.org/1998/Math/MathML",
+      "http://www.w3.org/1999/xhtml",
+      "http://www.w3.org/1999/xlink",
+      "http://www.w3.org/2000/svg",
+      "http://www.w3.org/XML/1998/namespace",
+      "https://github.com/remarkjs/react-markdown/blob/main/changelog.md",
+      "https://github.com/syntax-tree/hast-util-to-jsx-runtime",
+      "https://reactjs.org/docs/error-decoder.html?invariant=",
+      "https://xxx.trycloudflare.com"
+    ],
+    "signals": [
+      "Notification",
+      "WebSocket",
+      "fcm",
+      "serviceWorker",
+      "vapid"
+    ]
+  }
+}

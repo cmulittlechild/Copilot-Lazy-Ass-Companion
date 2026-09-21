@@ -1,0 +1,9 @@
+OPEN ws://127.0.0.1:3011
+RECV {"type":"SYSTEM_MESSAGE","text":"mock bridge ready"}
+RECV {"type":"AGENT_LIST","agents":["GitHub Copilot"],"active":"GitHub Copilot"}
+RECV {"type":"HISTORY_REPLAY","messages":[]}
+SENT PHONE_MESSAGE hello from fake phone agent
+RECV {"type":"USER_MESSAGE","text":"hello from fake phone"}
+RECV {"type":"COPILOT_TYPING"}
+RECV {"type":"AGENT_STREAM_SET","streamId":"mock#0","text":"mock reply to: hello from fake phone","timestamp":1785851672289}
+RECV {"type":"COPILOT_DONE"}

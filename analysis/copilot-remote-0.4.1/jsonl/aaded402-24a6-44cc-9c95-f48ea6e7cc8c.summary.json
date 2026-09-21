@@ -1,0 +1,1480 @@
+{
+  "file": "/Users/xin/Library/Application Support/Code/User/workspaceStorage/4cfb0b6fc59d641b94989f31b1b09c06/chatSessions/aaded402-24a6-44cc-9c95-f48ea6e7cc8c.jsonl",
+  "size": 500639,
+  "lines": 45,
+  "parse_err": 0,
+  "kind_counter": [
+    [
+      1,
+      31
+    ],
+    [
+      2,
+      13
+    ],
+    [
+      0,
+      1
+    ]
+  ],
+  "k0_counter": [
+    [
+      "requests",
+      39
+    ],
+    [
+      "inputState",
+      4
+    ],
+    [
+      "customTitle",
+      1
+    ]
+  ],
+  "k_path_patterns": [
+    [
+      "requests/#/response",
+      12
+    ],
+    [
+      "requests/#/completionTokens",
+      7
+    ],
+    [
+      "requests/#/promptTokens",
+      7
+    ],
+    [
+      "requests/#/promptTokenDetails",
+      7
+    ],
+    [
+      "inputState/inputText",
+      2
+    ],
+    [
+      "inputState/selections",
+      2
+    ],
+    [
+      "customTitle",
+      1
+    ],
+    [
+      "requests",
+      1
+    ],
+    [
+      "requests/#/result",
+      1
+    ],
+    [
+      "requests/#/responseMarkdownInfo",
+      1
+    ],
+    [
+      "requests/#/followups",
+      1
+    ],
+    [
+      "requests/#/modelState",
+      1
+    ],
+    [
+      "requests/#/elapsedMs",
+      1
+    ]
+  ],
+  "response_part_kinds": [
+    [
+      "thinking",
+      95
+    ],
+    [
+      "toolInvocationSerialized",
+      71
+    ],
+    [
+      "progressTaskSerialized",
+      17
+    ],
+    [
+      "text_value",
+      1
+    ]
+  ],
+  "user_fields": [
+    [
+      "message.text",
+      1
+    ],
+    [
+      "message.parts",
+      1
+    ],
+    [
+      "req.requestId",
+      1
+    ],
+    [
+      "req.timestamp",
+      1
+    ],
+    [
+      "req.agent",
+      1
+    ],
+    [
+      "req.modelId",
+      1
+    ],
+    [
+      "req.responseId",
+      1
+    ],
+    [
+      "req.responseTimestamp",
+      1
+    ],
+    [
+      "req.modelState",
+      1
+    ],
+    [
+      "req.contentReferences",
+      1
+    ],
+    [
+      "req.codeCitations",
+      1
+    ],
+    [
+      "req.timeSpentWaiting",
+      1
+    ],
+    [
+      "req.completionTokens",
+      1
+    ],
+    [
+      "req.promptTokens",
+      1
+    ],
+    [
+      "req.outputBuffer",
+      1
+    ],
+    [
+      "req.promptTokenDetails",
+      1
+    ],
+    [
+      "req.modeInfo",
+      1
+    ],
+    [
+      "req.response",
+      1
+    ],
+    [
+      "req.message",
+      1
+    ],
+    [
+      "req.variableData",
+      1
+    ]
+  ],
+  "event_type_counts": [
+    [
+      "TOOL_CALL",
+      71
+    ],
+    [
+      "FINALIZE",
+      2
+    ],
+    [
+      "USER_MESSAGE",
+      1
+    ],
+    [
+      "STREAM_SET",
+      1
+    ]
+  ],
+  "events_sample": [
+    [
+      "USER_MESSAGE",
+      "https://maas-coding-api.cn-huabei-1.xf-yun.com/v2\nhttps://maas-coding-api.cn-huabei-1.xf-yun.com/anthropic\nhttps://maas-"
+    ],
+    [
+      "TOOL_CALL",
+      "正在运行 ` API\\_KEY='8de8f1ba82c6845c9def1c71f4d32c15:YjhlMzc3OTIzOGIyOGQwNjZmMmMxOD"
+    ],
+    [
+      "TOOL_CALL",
+      "正在运行 ` echo \"PATH=$PATH\"; type curl; type /usr/bin/curl; ls -la /usr/bin/curl /o"
+    ],
+    [
+      "TOOL_CALL",
+      "正在运行 ` API\\_KEY='8de8f1ba82c6845c9def1c71f4d32c15:YjhlMzc3OTIzOGIyOGQwNjZmMmMxOD"
+    ],
+    [
+      "TOOL_CALL",
+      "正在运行 ` echo \"PATH=$PATH\"; type curl; type /usr/bin/curl; ls -la /usr/bin/curl /o"
+    ],
+    [
+      "TOOL_CALL",
+      "正在运行 ` echo \"PATH=$PATH\"; type curl; type /usr/bin/curl; ls -la /usr/bin/curl /o"
+    ],
+    [
+      "TOOL_CALL",
+      "正在运行 ` export PATH=\"/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/b"
+    ],
+    [
+      "TOOL_CALL",
+      "正在运行 ` API\\_KEY='8de8f1ba82c6845c9def1c71f4d32c15:YjhlMzc3OTIzOGIyOGQwNjZmMmMxOD"
+    ],
+    [
+      "TOOL_CALL",
+      "正在运行 ` echo \"PATH=$PATH\"; type curl; type /usr/bin/curl; ls -la /usr/bin/curl /o"
+    ],
+    [
+      "TOOL_CALL",
+      "正在运行 ` echo \"PATH=$PATH\"; type curl; type /usr/bin/curl; ls -la /usr/bin/curl /o"
+    ],
+    [
+      "TOOL_CALL",
+      "正在运行 ` export PATH=\"/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/b"
+    ],
+    [
+      "TOOL_CALL",
+      "正在运行 ` export PATH=\"/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/b"
+    ],
+    [
+      "TOOL_CALL",
+      "正在运行 ` export PATH=\"/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/b"
+    ],
+    [
+      "TOOL_CALL",
+      "正在运行 ` export PATH=\"/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/b"
+    ],
+    [
+      "TOOL_CALL",
+      "正在运行 ` export PATH=\"/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/b"
+    ],
+    [
+      "TOOL_CALL",
+      "正在运行 ` export PATH=\"/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/b"
+    ],
+    [
+      "TOOL_CALL",
+      "正在运行 `tavily_search`"
+    ],
+    [
+      "TOOL_CALL",
+      "正在运行 `tavily_search`"
+    ],
+    [
+      "TOOL_CALL",
+      "正在运行 ` export PATH=\"/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/b"
+    ],
+    [
+      "TOOL_CALL",
+      "正在运行 `tavily_search`"
+    ],
+    [
+      "TOOL_CALL",
+      "正在运行 `tavily_search`"
+    ],
+    [
+      "TOOL_CALL",
+      "正在运行 ` export PATH=\"/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/b"
+    ],
+    [
+      "TOOL_CALL",
+      "正在运行 `tavily_search`"
+    ],
+    [
+      "TOOL_CALL",
+      "正在运行 `tavily_search`"
+    ],
+    [
+      "TOOL_CALL",
+      "正在运行 ` export PATH=\"/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/b"
+    ],
+    [
+      "TOOL_CALL",
+      "正在运行 `tavily_search`"
+    ],
+    [
+      "TOOL_CALL",
+      "正在运行 `tavily_search`"
+    ],
+    [
+      "TOOL_CALL",
+      "正在运行 ` export PATH=\"/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/b"
+    ],
+    [
+      "TOOL_CALL",
+      "正在运行 `tavily_search`"
+    ],
+    [
+      "TOOL_CALL",
+      "正在运行 `tavily_search`"
+    ],
+    [
+      "TOOL_CALL",
+      "Reading [](file:///Users/xin/Library/Application%20Support/Code/User/workspaceSt"
+    ],
+    [
+      "TOOL_CALL",
+      "Reading [](file:///Users/xin/Library/Application%20Support/Code/User/workspaceSt"
+    ],
+    [
+      "TOOL_CALL",
+      "正在运行 ` export PATH=\"/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/b"
+    ],
+    [
+      "TOOL_CALL",
+      "正在运行 ` export PATH=\"/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/b"
+    ],
+    [
+      "TOOL_CALL",
+      "正在运行 `tavily_search`"
+    ],
+    [
+      "TOOL_CALL",
+      "正在运行 `tavily_search`"
+    ],
+    [
+      "TOOL_CALL",
+      "正在运行 ` export PATH=\"/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/b"
+    ],
+    [
+      "TOOL_CALL",
+      "正在运行 `tavily_search`"
+    ],
+    [
+      "TOOL_CALL",
+      "正在运行 `tavily_search`"
+    ],
+    [
+      "TOOL_CALL",
+      "Reading [](file:///Users/xin/Library/Application%20Support/Code/User/workspaceSt"
+    ]
+  ],
+  "samples": {
+    "requests_replace": [
+      {
+        "n": 1,
+        "first_keys": [
+          "requestId",
+          "timestamp",
+          "agent",
+          "modelId",
+          "responseId",
+          "responseTimestamp",
+          "modelState",
+          "contentReferences",
+          "codeCitations",
+          "timeSpentWaiting",
+          "completionTokens",
+          "promptTokens",
+          "outputBuffer",
+          "promptTokenDetails",
+          "modeInfo",
+          "response",
+          "message",
+          "variableData"
+        ]
+      }
+    ],
+    "response_replace": [
+      {
+        "k": [
+          "requests",
+          0,
+          "response"
+        ],
+        "i": null,
+        "v_len": 10,
+        "parts": [
+          {
+            "keys": [
+              "kind",
+              "value",
+              "id",
+              "reasoningDurationMs"
+            ],
+            "kind": "thinking",
+            "value_prefix": "The API key decoded to: `8de8f1ba82c6845c9def1c71f4d32c15:Yj"
+          },
+          {
+            "keys": [
+              "kind",
+              "value",
+              "id",
+              "metadata"
+            ],
+            "kind": "thinking",
+            "value_prefix": ""
+          },
+          {
+            "keys": [
+              "kind",
+              "value",
+              "id",
+              "metadata"
+            ],
+            "kind": "thinking",
+            "value_prefix": ""
+          },
+          {
+            "keys": [
+              "kind",
+              "value",
+              "id",
+              "metadata"
+            ],
+            "kind": "thinking",
+            "value_prefix": ""
+          },
+          {
+            "keys": [
+              "kind",
+              "invocationMessage",
+              "isConfirmed",
+              "isComplete",
+              "source",
+              "toolSpecificData",
+              "toolCallId",
+              "toolId"
+            ],
+            "kind": "toolInvocationSerialized",
+            "value_prefix": null
+          }
+        ]
+      },
+      {
+        "k": [
+          "requests",
+          0,
+          "response"
+        ],
+        "i": null,
+        "v_len": 5,
+        "parts": [
+          {
+            "keys": [
+              "kind",
+              "value",
+              "id",
+              "reasoningDurationMs"
+            ],
+            "kind": "thinking",
+            "value_prefix": "Interesting results. Let me dig deeper:\nI tested the endpoin"
+          },
+          {
+            "keys": [
+              "kind",
+              "value",
+              "id",
+              "metadata"
+            ],
+            "kind": "thinking",
+            "value_prefix": ""
+          },
+          {
+            "keys": [
+              "kind",
+              "value",
+              "id",
+              "metadata"
+            ],
+            "kind": "thinking",
+            "value_prefix": ""
+          },
+          {
+            "keys": [
+              "kind",
+              "value",
+              "id",
+              "metadata"
+            ],
+            "kind": "thinking",
+            "value_prefix": ""
+          },
+          {
+            "keys": [
+              "kind",
+              "invocationMessage",
+              "isConfirmed",
+              "isComplete",
+              "source",
+              "toolSpecificData",
+              "toolCallId",
+              "toolId"
+            ],
+            "kind": "toolInvocationSerialized",
+            "value_prefix": null
+          }
+        ]
+      },
+      {
+        "k": [
+          "requests",
+          0,
+          "response"
+        ],
+        "i": null,
+        "v_len": 7,
+        "parts": [
+          {
+            "keys": [
+              "kind",
+              "value",
+              "id",
+              "reasoningDurationMs"
+            ],
+            "kind": "thinking",
+            "value_prefix": "Interesting findings. The host is reachable. Let me dig deep"
+          },
+          {
+            "keys": [
+              "kind",
+              "value",
+              "id",
+              "metadata"
+            ],
+            "kind": "thinking",
+            "value_prefix": ""
+          },
+          {
+            "keys": [
+              "kind",
+              "value",
+              "id",
+              "metadata"
+            ],
+            "kind": "thinking",
+            "value_prefix": ""
+          },
+          {
+            "keys": [
+              "kind",
+              "value",
+              "id",
+              "metadata"
+            ],
+            "kind": "thinking",
+            "value_prefix": ""
+          },
+          {
+            "keys": [
+              "kind",
+              "invocationMessage",
+              "isConfirmed",
+              "isComplete",
+              "source",
+              "toolSpecificData",
+              "toolCallId",
+              "toolId"
+            ],
+            "kind": "toolInvocationSerialized",
+            "value_prefix": null
+          }
+        ]
+      },
+      {
+        "k": [
+          "requests",
+          0,
+          "response"
+        ],
+        "i": null,
+        "v_len": 4,
+        "parts": [
+          {
+            "keys": [
+              "kind",
+              "value",
+              "id",
+              "reasoningDurationMs"
+            ],
+            "kind": "thinking",
+            "value_prefix": "I have clear results. Let me summarize for the user in Chine"
+          },
+          {
+            "keys": [
+              "kind",
+              "value",
+              "id",
+              "metadata"
+            ],
+            "kind": "thinking",
+            "value_prefix": ""
+          },
+          {
+            "keys": [
+              "kind",
+              "value",
+              "id",
+              "metadata"
+            ],
+            "kind": "thinking",
+            "value_prefix": ""
+          },
+          {
+            "keys": [
+              "value",
+              "supportThemeIcons",
+              "supportHtml",
+              "baseUri"
+            ],
+            "kind": null,
+            "value_prefix": "## 结论：**能连上**，鉴权也通；但当前套餐**不能用** `xopglm52`\n\n### 1. 网络 / 网关\n-"
+          }
+        ]
+      }
+    ],
+    "response_splice": [
+      {
+        "k": [
+          "requests",
+          0,
+          "response"
+        ],
+        "i": 17,
+        "v_len": 6,
+        "parts": [
+          {
+            "keys": [
+              "kind",
+              "invocationMessage",
+              "isConfirmed",
+              "isComplete",
+              "source",
+              "toolSpecificData",
+              "toolCallId",
+              "toolId"
+            ],
+            "kind": "toolInvocationSerialized",
+            "value_prefix": null
+          },
+          {
+            "keys": [
+              "kind",
+              "value",
+              "id",
+              "reasoningDurationMs"
+            ],
+            "kind": "thinking",
+            "value_prefix": "The PATH got corrupted somehow - PATH=/v2/models. That's wei"
+          },
+          {
+            "keys": [
+              "kind",
+              "value",
+              "id",
+              "metadata"
+            ],
+            "kind": "thinking",
+            "value_prefix": ""
+          },
+          {
+            "keys": [
+              "kind",
+              "value",
+              "id",
+              "metadata"
+            ],
+            "kind": "thinking",
+            "value_prefix": ""
+          },
+          {
+            "keys": [
+              "kind",
+              "value",
+              "id",
+              "metadata"
+            ],
+            "kind": "thinking",
+            "value_prefix": ""
+          }
+        ]
+      },
+      {
+        "k": [
+          "requests",
+          0,
+          "response"
+        ],
+        "i": 22,
+        "v_len": 1,
+        "parts": [
+          {
+            "keys": [
+              "kind",
+              "invocationMessage",
+              "isConfirmed",
+              "isComplete",
+              "source",
+              "toolSpecificData",
+              "toolCallId",
+              "toolId"
+            ],
+            "kind": "toolInvocationSerialized",
+            "value_prefix": null
+          }
+        ]
+      },
+      {
+        "k": [
+          "requests",
+          0,
+          "response"
+        ],
+        "i": 27,
+        "v_len": 1,
+        "parts": [
+          {
+            "keys": [
+              "kind",
+              "invocationMessage",
+              "isConfirmed",
+              "isComplete",
+              "source",
+              "toolSpecificData",
+              "toolCallId",
+              "toolId"
+            ],
+            "kind": "toolInvocationSerialized",
+            "value_prefix": null
+          }
+        ]
+      },
+      {
+        "k": [
+          "requests",
+          0,
+          "response"
+        ],
+        "i": 32,
+        "v_len": 4,
+        "parts": [
+          {
+            "keys": [
+              "kind",
+              "invocationMessage",
+              "isConfirmed",
+              "isComplete",
+              "source",
+              "toolSpecificData",
+              "toolCallId",
+              "toolId"
+            ],
+            "kind": "toolInvocationSerialized",
+            "value_prefix": null
+          },
+          {
+            "keys": [
+              "kind",
+              "invocationMessage",
+              "pastTenseMessage",
+              "originMessage",
+              "isConfirmed",
+              "isComplete",
+              "source",
+              "resultDetails",
+              "toolSpecificData",
+              "toolCallId",
+              "toolId"
+            ],
+            "kind": "toolInvocationSerialized",
+            "value_prefix": null
+          },
+          {
+            "keys": [
+              "kind",
+              "invocationMessage",
+              "pastTenseMessage",
+              "originMessage",
+              "isConfirmed",
+              "isComplete",
+              "source",
+              "resultDetails",
+              "toolSpecificData",
+              "toolCallId",
+              "toolId"
+            ],
+            "kind": "toolInvocationSerialized",
+            "value_prefix": null
+          },
+          {
+            "keys": [
+              "kind",
+              "content",
+              "progress"
+            ],
+            "kind": "progressTaskSerialized",
+            "value_prefix": null
+          }
+        ]
+      },
+      {
+        "k": [
+          "requests",
+          0,
+          "response"
+        ],
+        "i": 35,
+        "v_len": 10,
+        "parts": [
+          {
+            "keys": [
+              "kind",
+              "content",
+              "progress"
+            ],
+            "kind": "progressTaskSerialized",
+            "value_prefix": null
+          },
+          {
+            "keys": [
+              "kind",
+              "content",
+              "progress"
+            ],
+            "kind": "progressTaskSerialized",
+            "value_prefix": null
+          },
+          {
+            "keys": [
+              "kind",
+              "content",
+              "progress"
+            ],
+            "kind": "progressTaskSerialized",
+            "value_prefix": null
+          },
+          {
+            "keys": [
+              "kind",
+              "value",
+              "id",
+              "reasoningDurationMs"
+            ],
+            "kind": "thinking",
+            "value_prefix": "Let me read the search results and also try more auth approa"
+          },
+          {
+            "keys": [
+              "kind",
+              "value",
+              "id",
+              "metadata"
+            ],
+            "kind": "thinking",
+            "value_prefix": ""
+          }
+        ]
+      },
+      {
+        "k": [
+          "requests",
+          0,
+          "response"
+        ],
+        "i": 44,
+        "v_len": 7,
+        "parts": [
+          {
+            "keys": [
+              "kind",
+              "invocationMessage",
+              "isConfirmed",
+              "isComplete",
+              "source",
+              "toolSpecificData",
+              "toolCallId",
+              "toolId"
+            ],
+            "kind": "toolInvocationSerialized",
+            "value_prefix": null
+          },
+          {
+            "keys": [
+              "kind",
+              "value",
+              "id",
+              "reasoningDurationMs"
+            ],
+            "kind": "thinking",
+            "value_prefix": "Interesting findings. Let me dig into the official documenta"
+          },
+          {
+            "keys": [
+              "kind",
+              "value",
+              "id",
+              "metadata"
+            ],
+            "kind": "thinking",
+            "value_prefix": ""
+          },
+          {
+            "keys": [
+              "kind",
+              "value",
+              "id",
+              "metadata"
+            ],
+            "kind": "thinking",
+            "value_prefix": ""
+          },
+          {
+            "keys": [
+              "kind",
+              "value",
+              "id",
+              "metadata"
+            ],
+            "kind": "thinking",
+            "value_prefix": ""
+          }
+        ]
+      }
+    ],
+    "finalize": [
+      {
+        "k": [
+          "requests",
+          0,
+          "result"
+        ],
+        "kind": 1,
+        "v_type": "dict",
+        "v": "{'timings': {'firstProgress': 11977, 'totalElapsed': 487044}, 'metadata': {'codeBlocks': [{'code': '8de8f1ba82c6845c9def"
+      },
+      {
+        "k": [
+          "requests",
+          0,
+          "elapsedMs"
+        ],
+        "kind": 1,
+        "v_type": "int",
+        "v": 487122
+      }
+    ],
+    "user": [
+      {
+        "requestId": "request_d7fc064b-c1b9-42fe-b653-08a706fccec9",
+        "keys": [
+          "requestId",
+          "timestamp",
+          "agent",
+          "modelId",
+          "responseId",
+          "responseTimestamp",
+          "modelState",
+          "contentReferences",
+          "codeCitations",
+          "timeSpentWaiting",
+          "completionTokens",
+          "promptTokens",
+          "outputBuffer",
+          "promptTokenDetails",
+          "modeInfo",
+          "response",
+          "message",
+          "variableData"
+        ],
+        "message_keys": [
+          "text",
+          "parts"
+        ],
+        "text": "https://maas-coding-api.cn-huabei-1.xf-yun.com/v2\nhttps://maas-coding-api.cn-huabei-1.xf-yun.com/anthropic\nhttps://maas-coding-api.cn-huabei-1.xf-yun.com/v1/responses\n模型ID用xopglm52\napi-key(base64解一下):"
+      }
+    ],
+    "tool": [
+      {
+        "kind": "toolInvocationSerialized",
+        "invocationMessage": {
+          "value": "正在运行 ` API\\_KEY='8de8f1ba82c6845c9def1c71f4d32c15:YjhlMzc3OTIzOGIyOGQwNjZmMmMxODAz'\n...`",
+          "isTrusted": false,
+          "supportThemeIcons": false,
+          "supportHtml": false,
+          "supportAlertSyntax": false
+        },
+        "isConfirmed": {
+          "type": 1
+        },
+        "isComplete": true,
+        "source": {
+          "type": "internal",
+          "label": "Built-In"
+        },
+        "toolSpecificData": {
+          "kind": "terminal",
+          "terminalToolSessionId": "7d8ceab7-b5e3-48ec-880f-2d82bce361d6",
+          "terminalCommandId": "tool-8bbdeafa-2d59-4bd5-a442-7d87df14a066",
+          "commandLine": {
+            "original": "API_KEY='8de8f1ba82c6845c9def1c71f4d32c15:YjhlMzc3OTIzOGIyOGQwNjZmMmMxODAz'\nBASE='https://maas-coding-api.cn-huabei-1.xf-yun.com'\nMODEL='xopglm52'\n\necho '=== 1) DNS / TLS / base reachability ==='\nfor path in / /v2 /anthropic /v1/responses /v1/models /v2/models; do\n  echo \"--- GET $path ---\"\n  curl -sS -o /tmp/xf_body.txt -w 'http=%{http_code} time=%{time_total}s size=%{size_download}\\n' \\\n    --connect-timeout 10 --max-time 20 \\\n    -H \"Authorization: Bearer $API_KEY\" \\\n    -H \"api-key: $API_KEY\" \\\n    \"$BASE$path\" || echo \"curl_error=$?\"\n  head -c 400 /tmp/xf_body.txt; echo; echo\ndone\n\necho '=== 2) OpenAI-style chat completions candidates ==='\nfor url in \\\n  \"$BASE/v2/chat/completions\" \\\n  \"$BASE/v1/chat/completions\" \\\n  \"$BASE/chat/completions\" \\\n  \"$BASE/v2/v1/chat/completions\"\ndo\n  echo \"--- POST $url ---\"\n  curl -sS -o /tmp/xf_body.txt -w 'http=%{http_code} time=%{time_total}s\\n' \\\n    --connect-timeout 10 --max-time 30 \\\n    -H \"Authorization: Bearer $API_KEY\" \\\n    -H \"Content-Type: application/json\" \\\n    -d \"{\\\"model\\\":\\\"$MODEL\\\",\\\"messages\\\":[{\\\"role\\\":\\\"user\\\",\\\"content\\\":\\\"ping\\\"}],\\\"max_tokens\\\":16,\\\"stream\\\":false}\" \\\n    \"$url\" || echo \"curl_error=$?\"\n  head -c 600 /tmp/xf_body.txt; echo; echo\ndone\n\necho '=== 3) Anthropic-style messages ==='\nfor url in \\\n  \"$BASE/anthropic/v1/messages\" \\\n  \"$BASE/anthropic/messages\" \\\n  \"$BASE/v1/messages\"\ndo\n  echo \"--- POST $url ---\"\n  curl -sS -o /tmp/xf_body.txt -w 'http=%{http_code} time=%{time_total}s\\n' \\\n    --connect-timeout 10 --max-time 30 \\\n    -H \"x-api-key: $API_KEY\" \\\n    -H \"Authorization: Bearer $API_KEY\" \\\n    -H \"anthropic-version: 2023-06-01\" \\\n    -H \"Content-Type: application/json\" \\\n    -d \"{\\\"model\\\":\\\"$MODEL\\\",\\\"max_tokens\\\":16,\\\"messages\\\":[{\\\"role\\\":\\\"user\\\",\\\"content\\\":\\\"ping\\\"}]}\" \\\n    \"$url\" || echo \"curl_error=$?\"\n  head -c 600 /tmp/xf_body.txt; echo; echo\ndone\n\necho '=== 4) Responses API ==='\necho \"--- POST $BASE/v1/responses ---\"\ncurl -sS -o /tmp/xf_body.txt -w 'http=%{http_code} time=%{time_total}s\\n' \\\n  --connect-timeout 10 --max-time 30 \\\n  -H \"Authorization: Bearer $API_KEY\" \\\n  -H \"Content-Type: application/json\" \\\n  -d \"{\\\"model\\\":\\\"$MODEL\\\",\\\"input\\\":\\\"ping\\\",\\\"max_output_tokens\\\":16}\" \\\n  \"$BASE/v1/responses\" || echo \"curl_error=$?\"\nhead -c 800 /tmp/xf_body.txt; echo\n",
+            "toolEdited": " API_KEY='8de8f1ba82c6845c9def1c71f4d32c15:YjhlMzc3OTIzOGIyOGQwNjZmMmMxODAz'\nBASE='https://maas-coding-api.cn-huabei-1.xf-yun.com'\nMODEL='xopglm52'\n\necho '=== 1) DNS / TLS / base reachability ==='\nfor path in / /v2 /anthropic /v1/responses /v1/models /v2/models; do\n  echo \"--- GET $path ---\"\n  curl -sS -o /tmp/xf_body.txt -w 'http=%{http_code} time=%{time_total}s size=%{size_download}\\n' \\\n    --connect-timeout 10 --max-time 20 \\\n    -H \"Authorization: Bearer $API_KEY\" \\\n    -H \"api-key: $API_KEY\" \\\n    \"$BASE$path\" || echo \"curl_error=$?\"\n  head -c 400 /tmp/xf_body.txt; echo; echo\ndone\n\necho '=== 2) OpenAI-style chat completions candidates ==='\nfor url in \\\n  \"$BASE/v2/chat/completions\" \\\n  \"$BASE/v1/chat/completions\" \\\n  \"$BASE/chat/completions\" \\\n  \"$BASE/v2/v1/chat/completions\"\ndo\n  echo \"--- POST $url ---\"\n  curl -sS -o /tmp/xf_body.txt -w 'http=%{http_code} time=%{time_total}s\\n' \\\n    --connect-timeout 10 --max-time 30 \\\n    -H \"Authorization: Bearer $API_KEY\" \\\n    -H \"Content-Type: application/json\" \\\n    -d \"{\\\"model\\\":\\\"$MODEL\\\",\\\"messages\\\":[{\\\"role\\\":\\\"user\\\",\\\"content\\\":\\\"ping\\\"}],\\\"max_tokens\\\":16,\\\"stream\\\":false}\" \\\n    \"$url\" || echo \"curl_error=$?\"\n  head -c 600 /tmp/xf_body.txt; echo; echo\ndone\n\necho '=== 3) Anthropic-style messages ==='\nfor url in \\\n  \"$BASE/anthropic/v1/messages\" \\\n  \"$BASE/anthropic/messages\" \\\n  \"$BASE/v1/messages\"\ndo\n  echo \"--- POST $url ---\"\n  curl -sS -o /tmp/xf_body.txt -w 'http=%{http_code} time=%{time_total}s\\n' \\\n    --connect-timeout 10 --max-time 30 \\\n    -H \"x-api-key: $API_KEY\" \\\n    -H \"Authorization: Bearer $API_KEY\" \\\n    -H \"anthropic-version: 2023-06-01\" \\\n    -H \"Content-Type: application/json\" \\\n    -d \"{\\\"model\\\":\\\"$MODEL\\\",\\\"max_tokens\\\":16,\\\"messages\\\":[{\\\"role\\\":\\\"user\\\",\\\"content\\\":\\\"ping\\\"}]}\" \\\n    \"$url\" || echo \"curl_error=$?\"\n  head -c 600 /tmp/xf_body.txt; echo; echo\ndone\n\necho '=== 4) Responses API ==='\necho \"--- POST $BASE/v1/responses ---\"\ncurl -sS -o /tmp/xf_body.txt -w 'http=%{http_code} time=%{time_total}s\\n' \\\n  --connect-timeout 10 --max-time 30 \\\n  -H \"Authorization: Bearer $API_KEY\" \\\n  -H \"Content-Type: application/json\" \\\n  -d \"{\\\"model\\\":\\\"$MODEL\\\",\\\"input\\\":\\\"ping\\\",\\\"max_output_tokens\\\":16}\" \\\n  \"$BASE/v1/responses\" || echo \"curl_error=$?\"\nhead -c 800 /tmp/xf_body.txt; echo\n",
+            "forDisplay": " API_KEY='8de8f1ba82c6845c9def1c71f4d32c15:YjhlMzc3OTIzOGIyOGQwNjZmMmMxODAz'\nBASE='https://maas-coding-api.cn-huabei-1.xf-yun.com'\nMODEL='xopglm52'\n\necho '=== 1) DNS / TLS / base reachability ==='\nfor path in / /v2 /anthropic /v1/responses /v1/models /v2/models; do\n  echo \"--- GET $path ---\"\n  curl -sS -o /tmp/xf_body.txt -w 'http=%{http_code} time=%{time_total}s size=%{size_download}\\n' \\\n    --connect-timeout 10 --max-time 20 \\\n    -H \"Authorization: Bearer $API_KEY\" \\\n    -H \"api-key: $API_KEY\" \\\n    \"$BASE$path\" || echo \"curl_error=$?\"\n  head -c 400 /tmp/xf_body.txt; echo; echo\ndone\n\necho '=== 2) OpenAI-style chat completions candidates ==='\nfor url in \\\n  \"$BASE/v2/chat/completions\" \\\n  \"$BASE/v1/chat/completions\" \\\n  \"$BASE/chat/completions\" \\\n  \"$BASE/v2/v1/chat/completions\"\ndo\n  echo \"--- POST $url ---\"\n  curl -sS -o /tmp/xf_body.txt -w 'http=%{http_code} time=%{time_total}s\\n' \\\n    --connect-timeout 10 --max-time 30 \\\n    -H \"Authorization: Bearer $API_KEY\" \\\n    -H \"Content-Type: application/json\" \\\n    -d \"{\"model\":\"$MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}],\"max_tokens\":16,\"stream\":false}\" \\\n    \"$url\" || echo \"curl_error=$?\"\n  head -c 600 /tmp/xf_body.txt; echo; echo\ndone\n\necho '=== 3) Anthropic-style messages ==='\nfor url in \\\n  \"$BASE/anthropic/v1/messages\" \\\n  \"$BASE/anthropic/messages\" \\\n  \"$BASE/v1/messages\"\ndo\n  echo \"--- POST $url ---\"\n  curl -sS -o /tmp/xf_body.txt -w 'http=%{http_code} time=%{time_total}s\\n' \\\n    --connect-timeout 10 --max-time 30 \\\n    -H \"x-api-key: $API_KEY\" \\\n    -H \"Authorization: Bearer $API_KEY\" \\\n    -H \"anthropic-version: 2023-06-01\" \\\n    -H \"Content-Type: application/json\" \\\n    -d \"{\"model\":\"$MODEL\",\"max_tokens\":16,\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}\" \\\n    \"$url\" || echo \"curl_error=$?\"\n  head -c 600 /tmp/xf_body.txt; echo; echo\ndone\n\necho '=== 4) Responses API ==='\necho \"--- POST $BASE/v1/responses ---\"\ncurl -sS -o /tmp/xf_body.txt -w 'http=%{http_code} time=%{time_total}s\\n' \\\n  --connect-timeout 10 --max-time 30 \\\n  -H \"Authorization: Bearer $API_KEY\" \\\n  -H \"Content-Type: application/json\" \\\n  -d \"{\"model\":\"$MODEL\",\"input\":\"ping\",\"max_output_tokens\":16}\" \\\n  \"$BASE/v1/responses\" || echo \"curl_error=$?\"\nhead -c 800 /tmp/xf_body.txt; echo\n",
+            "isSandboxWrapped": false
+          },
+          "cwd": {
+            "$mid": 1,
+            "path": "/Users/xin/Desktop/omniprox",
+            "scheme": "file"
+          },
+          "language": "sh",
+          "isBackground": false,
+          "requestUnsandboxedExecution": false,
+          "requestAllowNetwork": false,
+          "confirmation": {
+            "commandLine": "API_KEY='8de8f1ba82c6845c9def1c71f4d32c15:YjhlMzc3OTIzOGIyOGQwNjZmMmMxODAz'\nBASE='https://maas-coding-api.cn-huabei-1.xf-yun.com'\nMODEL='xopglm52'\n\necho '=== 1) DNS / TLS / base reachability ==='\nfor path in / /v2 /anthropic /v1/responses /v1/models /v2/models; do\n  echo \"--- GET $path ---\"\n  curl -sS -o /tmp/xf_body.txt -w 'http=%{http_code} time=%{time_total}s size=%{size_download}\\n' \\\n    --connect-timeout 10 --max-time 20 \\\n    -H \"Authorization: Bearer $API_KEY\" \\\n    -H \"api-key: $API_KEY\" \\\n    \"$BASE$path\" || echo \"curl_error=$?\"\n  head -c 400 /tmp/xf_body.txt; echo; echo\ndone\n\necho '=== 2) OpenAI-style chat completions candidates ==='\nfor url in \\\n  \"$BASE/v2/chat/completions\" \\\n  \"$BASE/v1/chat/completions\" \\\n  \"$BASE/chat/completions\" \\\n  \"$BASE/v2/v1/chat/completions\"\ndo\n  echo \"--- POST $url ---\"\n  curl -sS -o /tmp/xf_body.txt -w 'http=%{http_code} time=%{time_total}s\\n' \\\n    --connect-timeout 10 --max-time 30 \\\n    -H \"Authorization: Bearer $API_KEY\" \\\n    -H \"Content-Type: application/json\" \\\n    -d \"{\"model\":\"$MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}],\"max_tokens\":16,\"stream\":false}\" \\\n    \"$url\" || echo \"curl_error=$?\"\n  head -c 600 /tmp/xf_body.txt; echo; echo\ndone\n\necho '=== 3) Anthropic-style messages ==='\nfor url in \\\n  \"$BASE/anthropic/v1/messages\" \\\n  \"$BASE/anthropic/messages\" \\\n  \"$BASE/v1/messages\"\ndo\n  echo \"--- POST $url ---\"\n  curl -sS -o /tmp/xf_body.txt -w 'http=%{http_code} time=%{time_total}s\\n' \\\n    --connect-timeout 10 --max-time 30 \\\n    -H \"x-api-key: $API_KEY\" \\\n    -H \"Authorization: Bearer $API_KEY\" \\\n    -H \"anthropic-version: 2023-06-01\" \\\n    -H \"Content-Type: application/json\" \\\n    -d \"{\"model\":\"$MODEL\",\"max_tokens\":16,\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}\" \\\n    \"$url\" || echo \"curl_error=$?\"\n  head -c 600 /tmp/xf_body.txt; echo; echo\ndone\n\necho '=== 4) Responses API ==='\necho \"--- POST $BASE/v1/responses ---\"\ncurl -sS -o /tmp/xf_body.txt -w 'http=%{http_code} time=%{time_total}s\\n' \\\n  --connect-timeout 10 --max-time 30 \\\n  -H \"Authorization: Bearer $API_KEY\" \\\n  -H \"Content-Type: application/json\" \\\n  -d \"{\"model\":\"$MODEL\",\"input\":\"ping\",\"max_output_tokens\":16}\" \\\n  \"$BASE/v1/responses\" || echo \"curl_error=$?\"\nhead -c 800 /tmp/xf_body.txt; echo\n"
+          },
+          "terminalCommandUri": {
+            "$mid": 1,
+            "path": "/4cfb0b6fc59d641b94989f31b1b09c06/4",
+            "scheme": "vscode-terminal",
+            "query": "command=tool-8bbdeafa-2d59-4bd5-a442-7d87df14a066"
+          },
+          "terminalCommandState": {
+            "exitCode": 0,
+            "timestamp": 1785848045164,
+            "duration": 75
+          },
+          "terminalCommandOutput": {
+            "text": "=== 1) DNS / TLS / base reachability ===\r\n--- GET / ---\r\nzsh: command not found: curl\r\ncurl_error=127\r\nzsh: command not found: head\r\n\r\n\r\n--- GET /v2 ---\r\nzsh: command not found: curl\r\ncurl_error=127\r\nzsh: command not found: head\r\n\r\n\r\n--- GET /anthropic ---\r\nzsh: command not found: curl\r\ncurl_error=127\r\nzsh: command not found: head\r\n\r\n\r\n--- GET /v1/responses ---\r\nzsh: command not found: curl\r\ncurl_error=127\r\nzsh: command not found: head\r\n\r\n\r\n--- GET /v1/models ---\r\nzsh: command not found: curl\r\ncurl_error=127\r\nzsh: command not found: head\r\n\r\n\r\n--- GET /v2/models ---\r\nzsh: command not found: curl\r\ncurl_error=127\r\nzsh: command not found: head\r\n\r\n\r\n=== 2) OpenAI-style chat completions candidates ===\r\n--- POST https://maas-coding-api.cn-huabei-1.xf-yun.com/v2/chat/completions ---\r\nzsh: command not found: curl\r\ncurl_error=127\r\nzsh: command not found: head\r\n\r\n\r\n--- POST https://maas-coding-api.cn-huabei-1.xf-yun.com/v1/chat/completions ---\r\nzsh: command not found: curl\r\ncurl_error=127\r\nzsh: command not found: head\r\n\r\n\r\n--- POST https://maas-coding-api.cn-huabei-1.xf-yun.com/chat/completions ---\r\nzsh: command not found: curl\r\ncurl_error=127\r\nzsh: command not found: head\r\n\r\n\r\n--- POST https://maas-coding-api.cn-huabei-1.xf-yun.com/v2/v1/chat/completions ---\r\nzsh: command not found: curl\r\ncurl_error=127\r\nzsh: command not found: head\r\n\r\n\r\n=== 3) Anthropic-style messages ===\r\n--- POST https://maas-coding-api.cn-huabei-1.xf-yun.com/anthropic/v1/messages ---\r\nzsh: command not found: curl\r\ncurl_error=127\r\nzsh: command not found: head\r\n\r\n\r\n--- POST https://maas-coding-api.cn-huabei-1.xf-yun.com/anthropic/messages ---\r\nzsh: command not found: curl\r\ncurl_error=127\r\nzsh: command not found: head\r\n\r\n\r\n--- POST https://maas-coding-api.cn-huabei-1.xf-yun.com/v1/messages ---\r\nzsh: command not found: curl\r\ncurl_error=127\r\nzsh: command not found: head\r\n\r\n\r\n=== 4) Responses API ===\r\n--- POST https://maas-coding-api.cn-huabei-1.xf-yun.com/v1/responses ---\r\nzsh: command not found: curl\r\ncurl_error=127\r\nzsh: command not found: head\r\n\u001b[?2004h",
+            "lineCount": 89
+          },
+          "terminalTheme": {
+            "background": "#1e1e1e",
+            "foreground": "#cccccc"
+          }
+        },
+        "toolCallId": "call-867c5ef9-dde8-43a5-8f83-ef9dbd479f13-1",
+        "toolId": "run_in_terminal"
+      },
+      {
+        "kind": "toolInvocationSerialized",
+        "invocationMessage": {
+          "value": "正在运行 ` echo \"PATH=$PATH\"; type curl; type /usr/bin/curl; ls -la /usr/bin/curl /opt/...`",
+          "isTrusted": false,
+          "supportThemeIcons": false,
+          "supportHtml": false,
+          "supportAlertSyntax": false
+        },
+        "isConfirmed": {
+          "type": 1
+        },
+        "isComplete": true,
+        "source": {
+          "type": "internal",
+          "label": "Built-In"
+        },
+        "toolSpecificData": {
+          "kind": "terminal",
+          "terminalToolSessionId": "6aa80472-c65a-45a8-b1dc-a60579f6faa9",
+          "terminalCommandId": "tool-33817b6a-a894-4714-bb70-dd8d4c7b06c4",
+          "commandLine": {
+            "original": "echo \"PATH=$PATH\"; type curl; type /usr/bin/curl; ls -la /usr/bin/curl /opt/homebrew/bin/curl 2>/dev/null; which -a python3 go node 2>/dev/null; /usr/bin/curl --version 2>&1 | head -2",
+            "toolEdited": " echo \"PATH=$PATH\"; type curl; type /usr/bin/curl; ls -la /usr/bin/curl /opt/homebrew/bin/curl 2>/dev/null; which -a python3 go node 2>/dev/null; /usr/bin/curl --version 2>&1 | head -2",
+            "forDisplay": " echo \"PATH=$PATH\"; type curl; type /usr/bin/curl; ls -la /usr/bin/curl /opt/homebrew/bin/curl 2>/dev/null; which -a python3 go node 2>/dev/null; /usr/bin/curl --version 2>&1 | head -2",
+            "isSandboxWrapped": false
+          },
+          "cwd": {
+            "$mid": 1,
+            "external": "file:///Users/xin/Desktop/omniprox",
+            "path": "/Users/xin/Desktop/omniprox",
+            "scheme": "file"
+          },
+          "language": "sh",
+          "isBackground": false,
+          "requestUnsandboxedExecution": false,
+          "requestAllowNetwork": false,
+          "confirmation": {
+            "commandLine": "echo \"PATH=$PATH\"; type curl; type /usr/bin/curl; ls -la /usr/bin/curl /opt/homebrew/bin/curl 2>/dev/null; which -a python3 go node 2>/dev/null; /usr/bin/curl --version 2>&1 | head -2"
+          }
+        },
+        "toolCallId": "call-f8b184c5-c25f-4343-b62e-ea0c112c5666-2",
+        "toolId": "run_in_terminal"
+      },
+      {
+        "kind": "toolInvocationSerialized",
+        "invocationMessage": {
+          "value": "正在运行 ` API\\_KEY='8de8f1ba82c6845c9def1c71f4d32c15:YjhlMzc3OTIzOGIyOGQwNjZmMmMxODAz'\n...`",
+          "isTrusted": false,
+          "supportThemeIcons": false,
+          "supportHtml": false,
+          "supportAlertSyntax": false
+        },
+        "isConfirmed": {
+          "type": 1
+        },
+        "isComplete": true,
+        "source": {
+          "type": "internal",
+          "label": "Built-In"
+        },
+        "toolSpecificData": {
+          "kind": "terminal",
+          "terminalToolSessionId": "7d8ceab7-b5e3-48ec-880f-2d82bce361d6",
+          "terminalCommandId": "tool-8bbdeafa-2d59-4bd5-a442-7d87df14a066",
+          "commandLine": {
+            "original": "API_KEY='8de8f1ba82c6845c9def1c71f4d32c15:YjhlMzc3OTIzOGIyOGQwNjZmMmMxODAz'\nBASE='https://maas-coding-api.cn-huabei-1.xf-yun.com'\nMODEL='xopglm52'\n\necho '=== 1) DNS / TLS / base reachability ==='\nfor path in / /v2 /anthropic /v1/responses /v1/models /v2/models; do\n  echo \"--- GET $path ---\"\n  curl -sS -o /tmp/xf_body.txt -w 'http=%{http_code} time=%{time_total}s size=%{size_download}\\n' \\\n    --connect-timeout 10 --max-time 20 \\\n    -H \"Authorization: Bearer $API_KEY\" \\\n    -H \"api-key: $API_KEY\" \\\n    \"$BASE$path\" || echo \"curl_error=$?\"\n  head -c 400 /tmp/xf_body.txt; echo; echo\ndone\n\necho '=== 2) OpenAI-style chat completions candidates ==='\nfor url in \\\n  \"$BASE/v2/chat/completions\" \\\n  \"$BASE/v1/chat/completions\" \\\n  \"$BASE/chat/completions\" \\\n  \"$BASE/v2/v1/chat/completions\"\ndo\n  echo \"--- POST $url ---\"\n  curl -sS -o /tmp/xf_body.txt -w 'http=%{http_code} time=%{time_total}s\\n' \\\n    --connect-timeout 10 --max-time 30 \\\n    -H \"Authorization: Bearer $API_KEY\" \\\n    -H \"Content-Type: application/json\" \\\n    -d \"{\\\"model\\\":\\\"$MODEL\\\",\\\"messages\\\":[{\\\"role\\\":\\\"user\\\",\\\"content\\\":\\\"ping\\\"}],\\\"max_tokens\\\":16,\\\"stream\\\":false}\" \\\n    \"$url\" || echo \"curl_error=$?\"\n  head -c 600 /tmp/xf_body.txt; echo; echo\ndone\n\necho '=== 3) Anthropic-style messages ==='\nfor url in \\\n  \"$BASE/anthropic/v1/messages\" \\\n  \"$BASE/anthropic/messages\" \\\n  \"$BASE/v1/messages\"\ndo\n  echo \"--- POST $url ---\"\n  curl -sS -o /tmp/xf_body.txt -w 'http=%{http_code} time=%{time_total}s\\n' \\\n    --connect-timeout 10 --max-time 30 \\\n    -H \"x-api-key: $API_KEY\" \\\n    -H \"Authorization: Bearer $API_KEY\" \\\n    -H \"anthropic-version: 2023-06-01\" \\\n    -H \"Content-Type: application/json\" \\\n    -d \"{\\\"model\\\":\\\"$MODEL\\\",\\\"max_tokens\\\":16,\\\"messages\\\":[{\\\"role\\\":\\\"user\\\",\\\"content\\\":\\\"ping\\\"}]}\" \\\n    \"$url\" || echo \"curl_error=$?\"\n  head -c 600 /tmp/xf_body.txt; echo; echo\ndone\n\necho '=== 4) Responses API ==='\necho \"--- POST $BASE/v1/responses ---\"\ncurl -sS -o /tmp/xf_body.txt -w 'http=%{http_code} time=%{time_total}s\\n' \\\n  --connect-timeout 10 --max-time 30 \\\n  -H \"Authorization: Bearer $API_KEY\" \\\n  -H \"Content-Type: application/json\" \\\n  -d \"{\\\"model\\\":\\\"$MODEL\\\",\\\"input\\\":\\\"ping\\\",\\\"max_output_tokens\\\":16}\" \\\n  \"$BASE/v1/responses\" || echo \"curl_error=$?\"\nhead -c 800 /tmp/xf_body.txt; echo\n",
+            "toolEdited": " API_KEY='8de8f1ba82c6845c9def1c71f4d32c15:YjhlMzc3OTIzOGIyOGQwNjZmMmMxODAz'\nBASE='https://maas-coding-api.cn-huabei-1.xf-yun.com'\nMODEL='xopglm52'\n\necho '=== 1) DNS / TLS / base reachability ==='\nfor path in / /v2 /anthropic /v1/responses /v1/models /v2/models; do\n  echo \"--- GET $path ---\"\n  curl -sS -o /tmp/xf_body.txt -w 'http=%{http_code} time=%{time_total}s size=%{size_download}\\n' \\\n    --connect-timeout 10 --max-time 20 \\\n    -H \"Authorization: Bearer $API_KEY\" \\\n    -H \"api-key: $API_KEY\" \\\n    \"$BASE$path\" || echo \"curl_error=$?\"\n  head -c 400 /tmp/xf_body.txt; echo; echo\ndone\n\necho '=== 2) OpenAI-style chat completions candidates ==='\nfor url in \\\n  \"$BASE/v2/chat/completions\" \\\n  \"$BASE/v1/chat/completions\" \\\n  \"$BASE/chat/completions\" \\\n  \"$BASE/v2/v1/chat/completions\"\ndo\n  echo \"--- POST $url ---\"\n  curl -sS -o /tmp/xf_body.txt -w 'http=%{http_code} time=%{time_total}s\\n' \\\n    --connect-timeout 10 --max-time 30 \\\n    -H \"Authorization: Bearer $API_KEY\" \\\n    -H \"Content-Type: application/json\" \\\n    -d \"{\\\"model\\\":\\\"$MODEL\\\",\\\"messages\\\":[{\\\"role\\\":\\\"user\\\",\\\"content\\\":\\\"ping\\\"}],\\\"max_tokens\\\":16,\\\"stream\\\":false}\" \\\n    \"$url\" || echo \"curl_error=$?\"\n  head -c 600 /tmp/xf_body.txt; echo; echo\ndone\n\necho '=== 3) Anthropic-style messages ==='\nfor url in \\\n  \"$BASE/anthropic/v1/messages\" \\\n  \"$BASE/anthropic/messages\" \\\n  \"$BASE/v1/messages\"\ndo\n  echo \"--- POST $url ---\"\n  curl -sS -o /tmp/xf_body.txt -w 'http=%{http_code} time=%{time_total}s\\n' \\\n    --connect-timeout 10 --max-time 30 \\\n    -H \"x-api-key: $API_KEY\" \\\n    -H \"Authorization: Bearer $API_KEY\" \\\n    -H \"anthropic-version: 2023-06-01\" \\\n    -H \"Content-Type: application/json\" \\\n    -d \"{\\\"model\\\":\\\"$MODEL\\\",\\\"max_tokens\\\":16,\\\"messages\\\":[{\\\"role\\\":\\\"user\\\",\\\"content\\\":\\\"ping\\\"}]}\" \\\n    \"$url\" || echo \"curl_error=$?\"\n  head -c 600 /tmp/xf_body.txt; echo; echo\ndone\n\necho '=== 4) Responses API ==='\necho \"--- POST $BASE/v1/responses ---\"\ncurl -sS -o /tmp/xf_body.txt -w 'http=%{http_code} time=%{time_total}s\\n' \\\n  --connect-timeout 10 --max-time 30 \\\n  -H \"Authorization: Bearer $API_KEY\" \\\n  -H \"Content-Type: application/json\" \\\n  -d \"{\\\"model\\\":\\\"$MODEL\\\",\\\"input\\\":\\\"ping\\\",\\\"max_output_tokens\\\":16}\" \\\n  \"$BASE/v1/responses\" || echo \"curl_error=$?\"\nhead -c 800 /tmp/xf_body.txt; echo\n",
+            "forDisplay": " API_KEY='8de8f1ba82c6845c9def1c71f4d32c15:YjhlMzc3OTIzOGIyOGQwNjZmMmMxODAz'\nBASE='https://maas-coding-api.cn-huabei-1.xf-yun.com'\nMODEL='xopglm52'\n\necho '=== 1) DNS / TLS / base reachability ==='\nfor path in / /v2 /anthropic /v1/responses /v1/models /v2/models; do\n  echo \"--- GET $path ---\"\n  curl -sS -o /tmp/xf_body.txt -w 'http=%{http_code} time=%{time_total}s size=%{size_download}\\n' \\\n    --connect-timeout 10 --max-time 20 \\\n    -H \"Authorization: Bearer $API_KEY\" \\\n    -H \"api-key: $API_KEY\" \\\n    \"$BASE$path\" || echo \"curl_error=$?\"\n  head -c 400 /tmp/xf_body.txt; echo; echo\ndone\n\necho '=== 2) OpenAI-style chat completions candidates ==='\nfor url in \\\n  \"$BASE/v2/chat/completions\" \\\n  \"$BASE/v1/chat/completions\" \\\n  \"$BASE/chat/completions\" \\\n  \"$BASE/v2/v1/chat/completions\"\ndo\n  echo \"--- POST $url ---\"\n  curl -sS -o /tmp/xf_body.txt -w 'http=%{http_code} time=%{time_total}s\\n' \\\n    --connect-timeout 10 --max-time 30 \\\n    -H \"Authorization: Bearer $API_KEY\" \\\n    -H \"Content-Type: application/json\" \\\n    -d \"{\"model\":\"$MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}],\"max_tokens\":16,\"stream\":false}\" \\\n    \"$url\" || echo \"curl_error=$?\"\n  head -c 600 /tmp/xf_body.txt; echo; echo\ndone\n\necho '=== 3) Anthropic-style messages ==='\nfor url in \\\n  \"$BASE/anthropic/v1/messages\" \\\n  \"$BASE/anthropic/messages\" \\\n  \"$BASE/v1/messages\"\ndo\n  echo \"--- POST $url ---\"\n  curl -sS -o /tmp/xf_body.txt -w 'http=%{http_code} time=%{time_total}s\\n' \\\n    --connect-timeout 10 --max-time 30 \\\n    -H \"x-api-key: $API_KEY\" \\\n    -H \"Authorization: Bearer $API_KEY\" \\\n    -H \"anthropic-version: 2023-06-01\" \\\n    -H \"Content-Type: application/json\" \\\n    -d \"{\"model\":\"$MODEL\",\"max_tokens\":16,\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}\" \\\n    \"$url\" || echo \"curl_error=$?\"\n  head -c 600 /tmp/xf_body.txt; echo; echo\ndone\n\necho '=== 4) Responses API ==='\necho \"--- POST $BASE/v1/responses ---\"\ncurl -sS -o /tmp/xf_body.txt -w 'http=%{http_code} time=%{time_total}s\\n' \\\n  --connect-timeout 10 --max-time 30 \\\n  -H \"Authorization: Bearer $API_KEY\" \\\n  -H \"Content-Type: application/json\" \\\n  -d \"{\"model\":\"$MODEL\",\"input\":\"ping\",\"max_output_tokens\":16}\" \\\n  \"$BASE/v1/responses\" || echo \"curl_error=$?\"\nhead -c 800 /tmp/xf_body.txt; echo\n",
+            "isSandboxWrapped": false
+          },
+          "cwd": {
+            "$mid": 1,
+            "path": "/Users/xin/Desktop/omniprox",
+            "scheme": "file"
+          },
+          "language": "sh",
+          "isBackground": false,
+          "requestUnsandboxedExecution": false,
+          "requestAllowNetwork": false,
+          "confirmation": {
+            "commandLine": "API_KEY='8de8f1ba82c6845c9def1c71f4d32c15:YjhlMzc3OTIzOGIyOGQwNjZmMmMxODAz'\nBASE='https://maas-coding-api.cn-huabei-1.xf-yun.com'\nMODEL='xopglm52'\n\necho '=== 1) DNS / TLS / base reachability ==='\nfor path in / /v2 /anthropic /v1/responses /v1/models /v2/models; do\n  echo \"--- GET $path ---\"\n  curl -sS -o /tmp/xf_body.txt -w 'http=%{http_code} time=%{time_total}s size=%{size_download}\\n' \\\n    --connect-timeout 10 --max-time 20 \\\n    -H \"Authorization: Bearer $API_KEY\" \\\n    -H \"api-key: $API_KEY\" \\\n    \"$BASE$path\" || echo \"curl_error=$?\"\n  head -c 400 /tmp/xf_body.txt; echo; echo\ndone\n\necho '=== 2) OpenAI-style chat completions candidates ==='\nfor url in \\\n  \"$BASE/v2/chat/completions\" \\\n  \"$BASE/v1/chat/completions\" \\\n  \"$BASE/chat/completions\" \\\n  \"$BASE/v2/v1/chat/completions\"\ndo\n  echo \"--- POST $url ---\"\n  curl -sS -o /tmp/xf_body.txt -w 'http=%{http_code} time=%{time_total}s\\n' \\\n    --connect-timeout 10 --max-time 30 \\\n    -H \"Authorization: Bearer $API_KEY\" \\\n    -H \"Content-Type: application/json\" \\\n    -d \"{\"model\":\"$MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}],\"max_tokens\":16,\"stream\":false}\" \\\n    \"$url\" || echo \"curl_error=$?\"\n  head -c 600 /tmp/xf_body.txt; echo; echo\ndone\n\necho '=== 3) Anthropic-style messages ==='\nfor url in \\\n  \"$BASE/anthropic/v1/messages\" \\\n  \"$BASE/anthropic/messages\" \\\n  \"$BASE/v1/messages\"\ndo\n  echo \"--- POST $url ---\"\n  curl -sS -o /tmp/xf_body.txt -w 'http=%{http_code} time=%{time_total}s\\n' \\\n    --connect-timeout 10 --max-time 30 \\\n    -H \"x-api-key: $API_KEY\" \\\n    -H \"Authorization: Bearer $API_KEY\" \\\n    -H \"anthropic-version: 2023-06-01\" \\\n    -H \"Content-Type: application/json\" \\\n    -d \"{\"model\":\"$MODEL\",\"max_tokens\":16,\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}\" \\\n    \"$url\" || echo \"curl_error=$?\"\n  head -c 600 /tmp/xf_body.txt; echo; echo\ndone\n\necho '=== 4) Responses API ==='\necho \"--- POST $BASE/v1/responses ---\"\ncurl -sS -o /tmp/xf_body.txt -w 'http=%{http_code} time=%{time_total}s\\n' \\\n  --connect-timeout 10 --max-time 30 \\\n  -H \"Authorization: Bearer $API_KEY\" \\\n  -H \"Content-Type: application/json\" \\\n  -d \"{\"model\":\"$MODEL\",\"input\":\"ping\",\"max_output_tokens\":16}\" \\\n  \"$BASE/v1/responses\" || echo \"curl_error=$?\"\nhead -c 800 /tmp/xf_body.txt; echo\n"
+          },
+          "terminalCommandUri": {
+            "$mid": 1,
+            "path": "/4cfb0b6fc59d641b94989f31b1b09c06/4",
+            "scheme": "vscode-terminal",
+            "query": "command=tool-8bbdeafa-2d59-4bd5-a442-7d87df14a066"
+          },
+          "terminalCommandState": {
+            "exitCode": 0,
+            "timestamp": 1785848045164,
+            "duration": 75
+          },
+          "terminalCommandOutput": {
+            "text": "=== 1) DNS / TLS / base reachability ===\r\n--- GET / ---\r\nzsh: command not found: curl\r\ncurl_error=127\r\nzsh: command not found: head\r\n\r\n\r\n--- GET /v2 ---\r\nzsh: command not found: curl\r\ncurl_error=127\r\nzsh: command not found: head\r\n\r\n\r\n--- GET /anthropic ---\r\nzsh: command not found: curl\r\ncurl_error=127\r\nzsh: command not found: head\r\n\r\n\r\n--- GET /v1/responses ---\r\nzsh: command not found: curl\r\ncurl_error=127\r\nzsh: command not found: head\r\n\r\n\r\n--- GET /v1/models ---\r\nzsh: command not found: curl\r\ncurl_error=127\r\nzsh: command not found: head\r\n\r\n\r\n--- GET /v2/models ---\r\nzsh: command not found: curl\r\ncurl_error=127\r\nzsh: command not found: head\r\n\r\n\r\n=== 2) OpenAI-style chat completions candidates ===\r\n--- POST https://maas-coding-api.cn-huabei-1.xf-yun.com/v2/chat/completions ---\r\nzsh: command not found: curl\r\ncurl_error=127\r\nzsh: command not found: head\r\n\r\n\r\n--- POST https://maas-coding-api.cn-huabei-1.xf-yun.com/v1/chat/completions ---\r\nzsh: command not found: curl\r\ncurl_error=127\r\nzsh: command not found: head\r\n\r\n\r\n--- POST https://maas-coding-api.cn-huabei-1.xf-yun.com/chat/completions ---\r\nzsh: command not found: curl\r\ncurl_error=127\r\nzsh: command not found: head\r\n\r\n\r\n--- POST https://maas-coding-api.cn-huabei-1.xf-yun.com/v2/v1/chat/completions ---\r\nzsh: command not found: curl\r\ncurl_error=127\r\nzsh: command not found: head\r\n\r\n\r\n=== 3) Anthropic-style messages ===\r\n--- POST https://maas-coding-api.cn-huabei-1.xf-yun.com/anthropic/v1/messages ---\r\nzsh: command not found: curl\r\ncurl_error=127\r\nzsh: command not found: head\r\n\r\n\r\n--- POST https://maas-coding-api.cn-huabei-1.xf-yun.com/anthropic/messages ---\r\nzsh: command not found: curl\r\ncurl_error=127\r\nzsh: command not found: head\r\n\r\n\r\n--- POST https://maas-coding-api.cn-huabei-1.xf-yun.com/v1/messages ---\r\nzsh: command not found: curl\r\ncurl_error=127\r\nzsh: command not found: head\r\n\r\n\r\n=== 4) Responses API ===\r\n--- POST https://maas-coding-api.cn-huabei-1.xf-yun.com/v1/responses ---\r\nzsh: command not found: curl\r\ncurl_error=127\r\nzsh: command not found: head\r\n\u001b[?2004h",
+            "lineCount": 89
+          },
+          "terminalTheme": {
+            "background": "#1e1e1e",
+            "foreground": "#cccccc"
+          }
+        },
+        "toolCallId": "call-867c5ef9-dde8-43a5-8f83-ef9dbd479f13-1",
+        "toolId": "run_in_terminal"
+      },
+      {
+        "kind": "toolInvocationSerialized",
+        "invocationMessage": {
+          "value": "正在运行 ` echo \"PATH=$PATH\"; type curl; type /usr/bin/curl; ls -la /usr/bin/curl /opt/...`",
+          "isTrusted": false,
+          "supportThemeIcons": false,
+          "supportHtml": false,
+          "supportAlertSyntax": false
+        },
+        "isConfirmed": {
+          "type": 1
+        },
+        "isComplete": true,
+        "source": {
+          "type": "internal",
+          "label": "Built-In"
+        },
+        "toolSpecificData": {
+          "kind": "terminal",
+          "terminalToolSessionId": "6aa80472-c65a-45a8-b1dc-a60579f6faa9",
+          "terminalCommandId": "tool-33817b6a-a894-4714-bb70-dd8d4c7b06c4",
+          "commandLine": {
+            "original": "echo \"PATH=$PATH\"; type curl; type /usr/bin/curl; ls -la /usr/bin/curl /opt/homebrew/bin/curl 2>/dev/null; which -a python3 go node 2>/dev/null; /usr/bin/curl --version 2>&1 | head -2",
+            "toolEdited": " echo \"PATH=$PATH\"; type curl; type /usr/bin/curl; ls -la /usr/bin/curl /opt/homebrew/bin/curl 2>/dev/null; which -a python3 go node 2>/dev/null; /usr/bin/curl --version 2>&1 | head -2",
+            "forDisplay": " echo \"PATH=$PATH\"; type curl; type /usr/bin/curl; ls -la /usr/bin/curl /opt/homebrew/bin/curl 2>/dev/null; which -a python3 go node 2>/dev/null; /usr/bin/curl --version 2>&1 | head -2",
+            "isSandboxWrapped": false
+          },
+          "cwd": {
+            "$mid": 1,
+            "external": "file:///Users/xin/Desktop/omniprox",
+            "path": "/Users/xin/Desktop/omniprox",
+            "scheme": "file"
+          },
+          "language": "sh",
+          "isBackground": false,
+          "requestUnsandboxedExecution": false,
+          "requestAllowNetwork": false,
+          "confirmation": {
+            "commandLine": "echo \"PATH=$PATH\"; type curl; type /usr/bin/curl; ls -la /usr/bin/curl /opt/homebrew/bin/curl 2>/dev/null; which -a python3 go node 2>/dev/null; /usr/bin/curl --version 2>&1 | head -2"
+          }
+        },
+        "toolCallId": "call-f8b184c5-c25f-4343-b62e-ea0c112c5666-2",
+        "toolId": "run_in_terminal"
+      },
+      {
+        "kind": "toolInvocationSerialized",
+        "invocationMessage": {
+          "value": "正在运行 ` echo \"PATH=$PATH\"; type curl; type /usr/bin/curl; ls -la /usr/bin/curl /opt/...`",
+          "isTrusted": false,
+          "supportThemeIcons": false,
+          "supportHtml": false,
+          "supportAlertSyntax": false
+        },
+        "isConfirmed": {
+          "type": 1
+        },
+        "isComplete": true,
+        "source": {
+          "type": "internal",
+          "label": "Built-In"
+        },
+        "toolSpecificData": {
+          "kind": "terminal",
+          "terminalToolSessionId": "6aa80472-c65a-45a8-b1dc-a60579f6faa9",
+          "terminalCommandId": "tool-33817b6a-a894-4714-bb70-dd8d4c7b06c4",
+          "commandLine": {
+            "original": "echo \"PATH=$PATH\"; type curl; type /usr/bin/curl; ls -la /usr/bin/curl /opt/homebrew/bin/curl 2>/dev/null; which -a python3 go node 2>/dev/null; /usr/bin/curl --version 2>&1 | head -2",
+            "toolEdited": " echo \"PATH=$PATH\"; type curl; type /usr/bin/curl; ls -la /usr/bin/curl /opt/homebrew/bin/curl 2>/dev/null; which -a python3 go node 2>/dev/null; /usr/bin/curl --version 2>&1 | head -2",
+            "forDisplay": " echo \"PATH=$PATH\"; type curl; type /usr/bin/curl; ls -la /usr/bin/curl /opt/homebrew/bin/curl 2>/dev/null; which -a python3 go node 2>/dev/null; /usr/bin/curl --version 2>&1 | head -2",
+            "isSandboxWrapped": false
+          },
+          "cwd": {
+            "$mid": 1,
+            "external": "file:///Users/xin/Desktop/omniprox",
+            "path": "/Users/xin/Desktop/omniprox",
+            "scheme": "file"
+          },
+          "language": "sh",
+          "isBackground": false,
+          "requestUnsandboxedExecution": false,
+          "requestAllowNetwork": false,
+          "confirmation": {
+            "commandLine": "echo \"PATH=$PATH\"; type curl; type /usr/bin/curl; ls -la /usr/bin/curl /opt/homebrew/bin/curl 2>/dev/null; which -a python3 go node 2>/dev/null; /usr/bin/curl --version 2>&1 | head -2"
+          },
+          "terminalCommandUri": {
+            "$mid": 1,
+            "path": "/4cfb0b6fc59d641b94989f31b1b09c06/4",
+            "scheme": "vscode-terminal",
+            "query": "command=tool-33817b6a-a894-4714-bb70-dd8d4c7b06c4"
+          },
+          "terminalCommandState": {
+            "exitCode": 127,
+            "timestamp": 1785848053328,
+            "duration": 38
+          },
+          "terminalCommandOutput": {
+            "text": "PATH=/v2/models\r\ncurl not found\r\n/usr/bin/curl is /usr/bin/curl\r\npython3 not found\r\ngo not found\r\nnode not found\r\nzsh: command not found: head\u001b[?2004h",
+            "lineCount": 7
+          },
+          "terminalTheme": {
+            "background": "#1e1e1e",
+            "foreground": "#cccccc"
+          }
+        },
+        "toolCallId": "call-f8b184c5-c25f-4343-b62e-ea0c112c5666-2",
+        "toolId": "run_in_terminal"
+      },
+      {
+        "kind": "toolInvocationSerialized",
+        "invocationMessage": {
+          "value": "正在运行 ` export PATH=\"/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin:...`",
+          "isTrusted": false,
+          "supportThemeIcons": false,
+          "supportHtml": false,
+          "supportAlertSyntax": false
+        },
+        "isConfirmed": {
+          "type": 1
+        },
+        "isComplete": true,
+        "source": {
+          "type": "internal",
+          "label": "Built-In"
+        },
+        "toolSpecificData": {
+          "kind": "terminal",
+          "terminalToolSessionId": "1937f9b5-8cfe-4437-ba23-7d62f3730892",
+          "terminalCommandId": "tool-fe2f7218-3c7c-4061-9fe5-e3879ffede5e",
+          "commandLine": {
+            "original": "export PATH=\"/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin:$HOME/go/bin\"\nAPI_KEY='8de8f1ba82c6845c9def1c71f4d32c15:YjhlMzc3OTIzOGIyOGQwNjZmMmMxODAz'\nBASE='https://maas-coding-api.cn-huabei-1.xf-yun.com'\nMODEL='xopglm52'\nCURL=/usr/bin/curl\n\necho \"=== DNS ===\"\n/usr/bin/nslookup maas-coding-api.cn-huabei-1.xf-yun.com 2>&1 | /usr/bin/tail -20\n\necho\necho \"=== 1) GET reachability ===\"\nfor path in / /v2 /anthropic /v1/responses /v1/models /v2/models; do\n  echo \"--- GET $path ---\"\n  $CURL -sS -D /tmp/xf_hdr.txt -o /tmp/xf_body.txt -w 'http=%{http_code} time=%{time_total}s\\n' \\\n    --connect-timeout 10 --max-time 20 \\\n    -H \"Authorization: Bearer ${API_KEY}\" \\\n    \"${BASE}${path}\" || echo \"curl_error=$?\"\n  /usr/bin/sed -n '1,12p' /tmp/xf_hdr.txt\n  /usr/bin/wc -c /tmp/xf_body.txt\n  /usr/bin/cut -c1-500 /tmp/xf_body.txt\n  echo\n  echo\ndone\n\necho \"=== 2) OpenAI chat completions ===\"\nfor url in \\\n  \"${BASE}/v2/chat/completions\" \\\n  \"${BASE}/v1/chat/completions\" \\\n  \"${BASE}/chat/completions\" \\\n  \"${BASE}/v2/v1/chat/completions\"\ndo\n  echo \"--- POST $url ---\"\n  $CURL -sS -o /tmp/xf_body.txt -w 'http=%{http_code} time=%{time_total}s\\n' \\\n    --connect-timeout 10 --max-time 45 \\\n    -H \"Authorization: Bearer ${API_KEY}\" \\\n    -H \"Content-Type: application/json\" \\\n    -d \"{\\\"model\\\":\\\"${MODEL}\\\",\\\"messages\\\":[{\\\"role\\\":\\\"user\\\",\\\"content\\\":\\\"ping\\\"}],\\\"max_tokens\\\":16,\\\"stream\\\":false}\" \\\n    \"$url\" || echo \"curl_error=$?\"\n  /usr/bin/cut -c1-700 /tmp/xf_body.txt\n  echo\n  echo\ndone\n\necho \"=== 3) Anthropic messages ===\"\nfor url in \\\n  \"${BASE}/anthropic/v1/messages\" \\\n  \"${BASE}/anthropic/messages\" \\\n  \"${BASE}/v1/messages\"\ndo\n  echo \"--- POST $url ---\"\n  $CURL -sS -o /tmp/xf_body.txt -w 'http=%{http_code} time=%{time_total}s\\n' \\\n    --connect-timeout 10 --max-time 45 \\\n    -H \"x-api-key: ${API_KEY}\" \\\n    -H \"Authorization: Bearer ${API_KEY}\" \\\n    -H \"anthropic-version: 2023-06-01\" \\\n    -H \"Content-Type: application/json\" \\\n    -d \"{\\\"model\\\":\\\"${MODEL}\\\",\\\"max_tokens\\\":16,\\\"messages\\\":[{\\\"role\\\":\\\"user\\\",\\\"content\\\":\\\"ping\\\"}]}\" \\\n    \"$url\" || echo \"curl_error=$?\"\n  /usr/bin/cut -c1-700 /tmp/xf_body.txt\n  echo\n  echo\ndone\n\necho \"=== 4) Responses API ===\"\necho \"--- POST ${BASE}/v1/responses ---\"\n$CURL -sS -o /tmp/xf_body.txt -w 'http=%{http_code} time=%{time_total}s\\n' \\\n  --connect-timeout 10 --max-time 45 \\\n  -H \"Authorization: Bearer ${API_KEY}\" \\\n  -H \"Content-Type: application/json\" \\\n  -d \"{\\\"model\\\":\\\"${MODEL}\\\",\\\"input\\\":\\\"ping\\\",\\\"max_output_tokens\\\":16}\" \\\n  \"${BASE}/v1/responses\" || echo \"curl_error=$?\"\n/usr/bin/cut -c1-900 /tmp/xf_body.txt\necho\n",
+            "toolEdited": " export PATH=\"/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin:$HOME/go/bin\"\nAPI_KEY='8de8f1ba82c6845c9def1c71f4d32c15:YjhlMzc3OTIzOGIyOGQwNjZmMmMxODAz'\nBASE='https://maas-coding-api.cn-huabei-1.xf-yun.com'\nMODEL='xopglm52'\nCURL=/usr/bin/curl\n\necho \"=== DNS ===\"\n/usr/bin/nslookup maas-coding-api.cn-huabei-1.xf-yun.com 2>&1 | /usr/bin/tail -20\n\necho\necho \"=== 1) GET reachability ===\"\nfor path in / /v2 /anthropic /v1/responses /v1/models /v2/models; do\n  echo \"--- GET $path ---\"\n  $CURL -sS -D /tmp/xf_hdr.txt -o /tmp/xf_body.txt -w 'http=%{http_code} time=%{time_total}s\\n' \\\n    --connect-timeout 10 --max-time 20 \\\n    -H \"Authorization: Bearer ${API_KEY}\" \\\n    \"${BASE}${path}\" || echo \"curl_error=$?\"\n  /usr/bin/sed -n '1,12p' /tmp/xf_hdr.txt\n  /usr/bin/wc -c /tmp/xf_body.txt\n  /usr/bin/cut -c1-500 /tmp/xf_body.txt\n  echo\n  echo\ndone\n\necho \"=== 2) OpenAI chat completions ===\"\nfor url in \\\n  \"${BASE}/v2/chat/completions\" \\\n  \"${BASE}/v1/chat/completions\" \\\n  \"${BASE}/chat/completions\" \\\n  \"${BASE}/v2/v1/chat/completions\"\ndo\n  echo \"--- POST $url ---\"\n  $CURL -sS -o /tmp/xf_body.txt -w 'http=%{http_code} time=%{time_total}s\\n' \\\n    --connect-timeout 10 --max-time 45 \\\n    -H \"Authorization: Bearer ${API_KEY}\" \\\n    -H \"Content-Type: application/json\" \\\n    -d \"{\\\"model\\\":\\\"${MODEL}\\\",\\\"messages\\\":[{\\\"role\\\":\\\"user\\\",\\\"content\\\":\\\"ping\\\"}],\\\"max_tokens\\\":16,\\\"stream\\\":false}\" \\\n    \"$url\" || echo \"curl_error=$?\"\n  /usr/bin/cut -c1-700 /tmp/xf_body.txt\n  echo\n  echo\ndone\n\necho \"=== 3) Anthropic messages ===\"\nfor url in \\\n  \"${BASE}/anthropic/v1/messages\" \\\n  \"${BASE}/anthropic/messages\" \\\n  \"${BASE}/v1/messages\"\ndo\n  echo \"--- POST $url ---\"\n  $CURL -sS -o /tmp/xf_body.txt -w 'http=%{http_code} time=%{time_total}s\\n' \\\n    --connect-timeout 10 --max-time 45 \\\n    -H \"x-api-key: ${API_KEY}\" \\\n    -H \"Authorization: Bearer ${API_KEY}\" \\\n    -H \"anthropic-version: 2023-06-01\" \\\n    -H \"Content-Type: application/json\" \\\n    -d \"{\\\"model\\\":\\\"${MODEL}\\\",\\\"max_tokens\\\":16,\\\"messages\\\":[{\\\"role\\\":\\\"user\\\",\\\"content\\\":\\\"ping\\\"}]}\" \\\n    \"$url\" || echo \"curl_error=$?\"\n  /usr/bin/cut -c1-700 /tmp/xf_body.txt\n  echo\n  echo\ndone\n\necho \"=== 4) Responses API ===\"\necho \"--- POST ${BASE}/v1/responses ---\"\n$CURL -sS -o /tmp/xf_body.txt -w 'http=%{http_code} time=%{time_total}s\\n' \\\n  --connect-timeout 10 --max-time 45 \\\n  -H \"Authorization: Bearer ${API_KEY}\" \\\n  -H \"Content-Type: application/json\" \\\n  -d \"{\\\"model\\\":\\\"${MODEL}\\\",\\\"input\\\":\\\"ping\\\",\\\"max_output_tokens\\\":16}\" \\\n  \"${BASE}/v1/responses\" || echo \"curl_error=$?\"\n/usr/bin/cut -c1-900 /tmp/xf_body.txt\necho\n",
+            "forDisplay": " export PATH=\"/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin:$HOME/go/bin\"\nAPI_KEY='8de8f1ba82c6845c9def1c71f4d32c15:YjhlMzc3OTIzOGIyOGQwNjZmMmMxODAz'\nBASE='https://maas-coding-api.cn-huabei-1.xf-yun.com'\nMODEL='xopglm52'\nCURL=/usr/bin/curl\n\necho \"=== DNS ===\"\n/usr/bin/nslookup maas-coding-api.cn-huabei-1.xf-yun.com 2>&1 | /usr/bin/tail -20\n\necho\necho \"=== 1) GET reachability ===\"\nfor path in / /v2 /anthropic /v1/responses /v1/models /v2/models; do\n  echo \"--- GET $path ---\"\n  $CURL -sS -D /tmp/xf_hdr.txt -o /tmp/xf_body.txt -w 'http=%{http_code} time=%{time_total}s\\n' \\\n    --connect-timeout 10 --max-time 20 \\\n    -H \"Authorization: Bearer ${API_KEY}\" \\\n    \"${BASE}${path}\" || echo \"curl_error=$?\"\n  /usr/bin/sed -n '1,12p' /tmp/xf_hdr.txt\n  /usr/bin/wc -c /tmp/xf_body.txt\n  /usr/bin/cut -c1-500 /tmp/xf_body.txt\n  echo\n  echo\ndone\n\necho \"=== 2) OpenAI chat completions ===\"\nfor url in \\\n  \"${BASE}/v2/chat/completions\" \\\n  \"${BASE}/v1/chat/completions\" \\\n  \"${BASE}/chat/completions\" \\\n  \"${BASE}/v2/v1/chat/completions\"\ndo\n  echo \"--- POST $url ---\"\n  $CURL -sS -o /tmp/xf_body.txt -w 'http=%{http_code} time=%{time_total}s\\n' \\\n    --connect-timeout 10 --max-time 45 \\\n    -H \"Authorization: Bearer ${API_KEY}\" \\\n    -H \"Content-Type: application/json\" \\\n    -d \"{\"model\":\"${MODEL}\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}],\"max_tokens\":16,\"stream\":false}\" \\\n    \"$url\" || echo \"curl_error=$?\"\n  /usr/bin/cut -c1-700 /tmp/xf_body.txt\n  echo\n  echo\ndone\n\necho \"=== 3) Anthropic messages ===\"\nfor url in \\\n  \"${BASE}/anthropic/v1/messages\" \\\n  \"${BASE}/anthropic/messages\" \\\n  \"${BASE}/v1/messages\"\ndo\n  echo \"--- POST $url ---\"\n  $CURL -sS -o /tmp/xf_body.txt -w 'http=%{http_code} time=%{time_total}s\\n' \\\n    --connect-timeout 10 --max-time 45 \\\n    -H \"x-api-key: ${API_KEY}\" \\\n    -H \"Authorization: Bearer ${API_KEY}\" \\\n    -H \"anthropic-version: 2023-06-01\" \\\n    -H \"Content-Type: application/json\" \\\n    -d \"{\"model\":\"${MODEL}\",\"max_tokens\":16,\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}\" \\\n    \"$url\" || echo \"curl_error=$?\"\n  /usr/bin/cut -c1-700 /tmp/xf_body.txt\n  echo\n  echo\ndone\n\necho \"=== 4) Responses API ===\"\necho \"--- POST ${BASE}/v1/responses ---\"\n$CURL -sS -o /tmp/xf_body.txt -w 'http=%{http_code} time=%{time_total}s\\n' \\\n  --connect-timeout 10 --max-time 45 \\\n  -H \"Authorization: Bearer ${API_KEY}\" \\\n  -H \"Content-Type: application/json\" \\\n  -d \"{\"model\":\"${MODEL}\",\"input\":\"ping\",\"max_output_tokens\":16}\" \\\n  \"${BASE}/v1/responses\" || echo \"curl_error=$?\"\n/usr/bin/cut -c1-900 /tmp/xf_body.txt\necho\n",
+            "isSandboxWrapped": false
+          },
+          "cwd": {
+            "$mid": 1,
+            "path": "/Users/xin/Desktop/omniprox",
+            "scheme": "file"
+          },
+          "language": "sh",
+          "isBackground": false,
+          "requestUnsandboxedExecution": false,
+          "requestAllowNetwork": false,
+          "confirmation": {
+            "commandLine": "export PATH=\"/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin:$HOME/go/bin\"\nAPI_KEY='8de8f1ba82c6845c9def1c71f4d32c15:YjhlMzc3OTIzOGIyOGQwNjZmMmMxODAz'\nBASE='https://maas-coding-api.cn-huabei-1.xf-yun.com'\nMODEL='xopglm52'\nCURL=/usr/bin/curl\n\necho \"=== DNS ===\"\n/usr/bin/nslookup maas-coding-api.cn-huabei-1.xf-yun.com 2>&1 | /usr/bin/tail -20\n\necho\necho \"=== 1) GET reachability ===\"\nfor path in / /v2 /anthropic /v1/responses /v1/models /v2/models; do\n  echo \"--- GET $path ---\"\n  $CURL -sS -D /tmp/xf_hdr.txt -o /tmp/xf_body.txt -w 'http=%{http_code} time=%{time_total}s\\n' \\\n    --connect-timeout 10 --max-time 20 \\\n    -H \"Authorization: Bearer ${API_KEY}\" \\\n    \"${BASE}${path}\" || echo \"curl_error=$?\"\n  /usr/bin/sed -n '1,12p' /tmp/xf_hdr.txt\n  /usr/bin/wc -c /tmp/xf_body.txt\n  /usr/bin/cut -c1-500 /tmp/xf_body.txt\n  echo\n  echo\ndone\n\necho \"=== 2) OpenAI chat completions ===\"\nfor url in \\\n  \"${BASE}/v2/chat/completions\" \\\n  \"${BASE}/v1/chat/completions\" \\\n  \"${BASE}/chat/completions\" \\\n  \"${BASE}/v2/v1/chat/completions\"\ndo\n  echo \"--- POST $url ---\"\n  $CURL -sS -o /tmp/xf_body.txt -w 'http=%{http_code} time=%{time_total}s\\n' \\\n    --connect-timeout 10 --max-time 45 \\\n    -H \"Authorization: Bearer ${API_KEY}\" \\\n    -H \"Content-Type: application/json\" \\\n    -d \"{\"model\":\"${MODEL}\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}],\"max_tokens\":16,\"stream\":false}\" \\\n    \"$url\" || echo \"curl_error=$?\"\n  /usr/bin/cut -c1-700 /tmp/xf_body.txt\n  echo\n  echo\ndone\n\necho \"=== 3) Anthropic messages ===\"\nfor url in \\\n  \"${BASE}/anthropic/v1/messages\" \\\n  \"${BASE}/anthropic/messages\" \\\n  \"${BASE}/v1/messages\"\ndo\n  echo \"--- POST $url ---\"\n  $CURL -sS -o /tmp/xf_body.txt -w 'http=%{http_code} time=%{time_total}s\\n' \\\n    --connect-timeout 10 --max-time 45 \\\n    -H \"x-api-key: ${API_KEY}\" \\\n    -H \"Authorization: Bearer ${API_KEY}\" \\\n    -H \"anthropic-version: 2023-06-01\" \\\n    -H \"Content-Type: application/json\" \\\n    -d \"{\"model\":\"${MODEL}\",\"max_tokens\":16,\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}\" \\\n    \"$url\" || echo \"curl_error=$?\"\n  /usr/bin/cut -c1-700 /tmp/xf_body.txt\n  echo\n  echo\ndone\n\necho \"=== 4) Responses API ===\"\necho \"--- POST ${BASE}/v1/responses ---\"\n$CURL -sS -o /tmp/xf_body.txt -w 'http=%{http_code} time=%{time_total}s\\n' \\\n  --connect-timeout 10 --max-time 45 \\\n  -H \"Authorization: Bearer ${API_KEY}\" \\\n  -H \"Content-Type: application/json\" \\\n  -d \"{\"model\":\"${MODEL}\",\"input\":\"ping\",\"max_output_tokens\":16}\" \\\n  \"${BASE}/v1/responses\" || echo \"curl_error=$?\"\n/usr/bin/cut -c1-900 /tmp/xf_body.txt\necho\n"
+          }
+        },
+        "toolCallId": "call-94b376f0-4817-483f-98e7-9a155b7152f4-3",
+        "toolId": "run_in_terminal"
+      },
+      {
+        "kind": "toolInvocationSerialized",
+        "invocationMessage": {
+          "value": "正在运行 ` API\\_KEY='8de8f1ba82c6845c9def1c71f4d32c15:YjhlMzc3OTIzOGIyOGQwNjZmMmMxODAz'\n...`",
+          "isTrusted": false,
+          "supportThemeIcons": false,
+          "supportHtml": false,
+          "supportAlertSyntax": false
+        },
+        "isConfirmed": {
+          "type": 1
+        },
+        "isComplete": true,
+        "source": {
+          "type": "internal",
+          "label": "Built-In"
+        },
+        "toolSpecificData": {
+          "kind": "terminal",
+          "terminalToolSessionId": "7d8ceab7-b5e3-48ec-880f-2d82bce361d6",
+          "terminalCommandId": "tool-8bbdeafa-2d59-4bd5-a442-7d87df14a066",
+          "commandLine": {
+            "original": "API_KEY='8de8f1ba82c6845c9def1c71f4d32c15:YjhlMzc3OTIzOGIyOGQwNjZmMmMxODAz'\nBASE='https://maas-coding-api.cn-huabei-1.xf-yun.com'\nMODEL='xopglm52'\n\necho '=== 1) DNS / TLS / base reachability ==='\nfor path in / /v2 /anthropic /v1/responses /v1/models /v2/models; do\n  echo \"--- GET $path ---\"\n  curl -sS -o /tmp/xf_body.txt -w 'http=%{http_code} time=%{time_total}s size=%{size_download}\\n' \\\n    --connect-timeout 10 --max-time 20 \\\n    -H \"Authorization: Bearer $API_KEY\" \\\n    -H \"api-key: $API_KEY\" \\\n    \"$BASE$path\" || echo \"curl_error=$?\"\n  head -c 400 /tmp/xf_body.txt; echo; echo\ndone\n\necho '=== 2) OpenAI-style chat completions candidates ==='\nfor url in \\\n  \"$BASE/v2/chat/completions\" \\\n  \"$BASE/v1/chat/completions\" \\\n  \"$BASE/chat/completions\" \\\n  \"$BASE/v2/v1/chat/completions\"\ndo\n  echo \"--- POST $url ---\"\n  curl -sS -o /tmp/xf_body.txt -w 'http=%{http_code} time=%{time_total}s\\n' \\\n    --connect-timeout 10 --max-time 30 \\\n    -H \"Authorization: Bearer $API_KEY\" \\\n    -H \"Content-Type: application/json\" \\\n    -d \"{\\\"model\\\":\\\"$MODEL\\\",\\\"messages\\\":[{\\\"role\\\":\\\"user\\\",\\\"content\\\":\\\"ping\\\"}],\\\"max_tokens\\\":16,\\\"stream\\\":false}\" \\\n    \"$url\" || echo \"curl_error=$?\"\n  head -c 600 /tmp/xf_body.txt; echo; echo\ndone\n\necho '=== 3) Anthropic-style messages ==='\nfor url in \\\n  \"$BASE/anthropic/v1/messages\" \\\n  \"$BASE/anthropic/messages\" \\\n  \"$BASE/v1/messages\"\ndo\n  echo \"--- POST $url ---\"\n  curl -sS -o /tmp/xf_body.txt -w 'http=%{http_code} time=%{time_total}s\\n' \\\n    --connect-timeout 10 --max-time 30 \\\n    -H \"x-api-key: $API_KEY\" \\\n    -H \"Authorization: Bearer $API_KEY\" \\\n    -H \"anthropic-version: 2023-06-01\" \\\n    -H \"Content-Type: application/json\" \\\n    -d \"{\\\"model\\\":\\\"$MODEL\\\",\\\"max_tokens\\\":16,\\\"messages\\\":[{\\\"role\\\":\\\"user\\\",\\\"content\\\":\\\"ping\\\"}]}\" \\\n    \"$url\" || echo \"curl_error=$?\"\n  head -c 600 /tmp/xf_body.txt; echo; echo\ndone\n\necho '=== 4) Responses API ==='\necho \"--- POST $BASE/v1/responses ---\"\ncurl -sS -o /tmp/xf_body.txt -w 'http=%{http_code} time=%{time_total}s\\n' \\\n  --connect-timeout 10 --max-time 30 \\\n  -H \"Authorization: Bearer $API_KEY\" \\\n  -H \"Content-Type: application/json\" \\\n  -d \"{\\\"model\\\":\\\"$MODEL\\\",\\\"input\\\":\\\"ping\\\",\\\"max_output_tokens\\\":16}\" \\\n  \"$BASE/v1/responses\" || echo \"curl_error=$?\"\nhead -c 800 /tmp/xf_body.txt; echo\n",
+            "toolEdited": " API_KEY='8de8f1ba82c6845c9def1c71f4d32c15:YjhlMzc3OTIzOGIyOGQwNjZmMmMxODAz'\nBASE='https://maas-coding-api.cn-huabei-1.xf-yun.com'\nMODEL='xopglm52'\n\necho '=== 1) DNS / TLS / base reachability ==='\nfor path in / /v2 /anthropic /v1/responses /v1/models /v2/models; do\n  echo \"--- GET $path ---\"\n  curl -sS -o /tmp/xf_body.txt -w 'http=%{http_code} time=%{time_total}s size=%{size_download}\\n' \\\n    --connect-timeout 10 --max-time 20 \\\n    -H \"Authorization: Bearer $API_KEY\" \\\n    -H \"api-key: $API_KEY\" \\\n    \"$BASE$path\" || echo \"curl_error=$?\"\n  head -c 400 /tmp/xf_body.txt; echo; echo\ndone\n\necho '=== 2) OpenAI-style chat completions candidates ==='\nfor url in \\\n  \"$BASE/v2/chat/completions\" \\\n  \"$BASE/v1/chat/completions\" \\\n  \"$BASE/chat/completions\" \\\n  \"$BASE/v2/v1/chat/completions\"\ndo\n  echo \"--- POST $url ---\"\n  curl -sS -o /tmp/xf_body.txt -w 'http=%{http_code} time=%{time_total}s\\n' \\\n    --connect-timeout 10 --max-time 30 \\\n    -H \"Authorization: Bearer $API_KEY\" \\\n    -H \"Content-Type: application/json\" \\\n    -d \"{\\\"model\\\":\\\"$MODEL\\\",\\\"messages\\\":[{\\\"role\\\":\\\"user\\\",\\\"content\\\":\\\"ping\\\"}],\\\"max_tokens\\\":16,\\\"stream\\\":false}\" \\\n    \"$url\" || echo \"curl_error=$?\"\n  head -c 600 /tmp/xf_body.txt; echo; echo\ndone\n\necho '=== 3) Anthropic-style messages ==='\nfor url in \\\n  \"$BASE/anthropic/v1/messages\" \\\n  \"$BASE/anthropic/messages\" \\\n  \"$BASE/v1/messages\"\ndo\n  echo \"--- POST $url ---\"\n  curl -sS -o /tmp/xf_body.txt -w 'http=%{http_code} time=%{time_total}s\\n' \\\n    --connect-timeout 10 --max-time 30 \\\n    -H \"x-api-key: $API_KEY\" \\\n    -H \"Authorization: Bearer $API_KEY\" \\\n    -H \"anthropic-version: 2023-06-01\" \\\n    -H \"Content-Type: application/json\" \\\n    -d \"{\\\"model\\\":\\\"$MODEL\\\",\\\"max_tokens\\\":16,\\\"messages\\\":[{\\\"role\\\":\\\"user\\\",\\\"content\\\":\\\"ping\\\"}]}\" \\\n    \"$url\" || echo \"curl_error=$?\"\n  head -c 600 /tmp/xf_body.txt; echo; echo\ndone\n\necho '=== 4) Responses API ==='\necho \"--- POST $BASE/v1/responses ---\"\ncurl -sS -o /tmp/xf_body.txt -w 'http=%{http_code} time=%{time_total}s\\n' \\\n  --connect-timeout 10 --max-time 30 \\\n  -H \"Authorization: Bearer $API_KEY\" \\\n  -H \"Content-Type: application/json\" \\\n  -d \"{\\\"model\\\":\\\"$MODEL\\\",\\\"input\\\":\\\"ping\\\",\\\"max_output_tokens\\\":16}\" \\\n  \"$BASE/v1/responses\" || echo \"curl_error=$?\"\nhead -c 800 /tmp/xf_body.txt; echo\n",
+            "forDisplay": " API_KEY='8de8f1ba82c6845c9def1c71f4d32c15:YjhlMzc3OTIzOGIyOGQwNjZmMmMxODAz'\nBASE='https://maas-coding-api.cn-huabei-1.xf-yun.com'\nMODEL='xopglm52'\n\necho '=== 1) DNS / TLS / base reachability ==='\nfor path in / /v2 /anthropic /v1/responses /v1/models /v2/models; do\n  echo \"--- GET $path ---\"\n  curl -sS -o /tmp/xf_body.txt -w 'http=%{http_code} time=%{time_total}s size=%{size_download}\\n' \\\n    --connect-timeout 10 --max-time 20 \\\n    -H \"Authorization: Bearer $API_KEY\" \\\n    -H \"api-key: $API_KEY\" \\\n    \"$BASE$path\" || echo \"curl_error=$?\"\n  head -c 400 /tmp/xf_body.txt; echo; echo\ndone\n\necho '=== 2) OpenAI-style chat completions candidates ==='\nfor url in \\\n  \"$BASE/v2/chat/completions\" \\\n  \"$BASE/v1/chat/completions\" \\\n  \"$BASE/chat/completions\" \\\n  \"$BASE/v2/v1/chat/completions\"\ndo\n  echo \"--- POST $url ---\"\n  curl -sS -o /tmp/xf_body.txt -w 'http=%{http_code} time=%{time_total}s\\n' \\\n    --connect-timeout 10 --max-time 30 \\\n    -H \"Authorization: Bearer $API_KEY\" \\\n    -H \"Content-Type: application/json\" \\\n    -d \"{\"model\":\"$MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}],\"max_tokens\":16,\"stream\":false}\" \\\n    \"$url\" || echo \"curl_error=$?\"\n  head -c 600 /tmp/xf_body.txt; echo; echo\ndone\n\necho '=== 3) Anthropic-style messages ==='\nfor url in \\\n  \"$BASE/anthropic/v1/messages\" \\\n  \"$BASE/anthropic/messages\" \\\n  \"$BASE/v1/messages\"\ndo\n  echo \"--- POST $url ---\"\n  curl -sS -o /tmp/xf_body.txt -w 'http=%{http_code} time=%{time_total}s\\n' \\\n    --connect-timeout 10 --max-time 30 \\\n    -H \"x-api-key: $API_KEY\" \\\n    -H \"Authorization: Bearer $API_KEY\" \\\n    -H \"anthropic-version: 2023-06-01\" \\\n    -H \"Content-Type: application/json\" \\\n    -d \"{\"model\":\"$MODEL\",\"max_tokens\":16,\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}\" \\\n    \"$url\" || echo \"curl_error=$?\"\n  head -c 600 /tmp/xf_body.txt; echo; echo\ndone\n\necho '=== 4) Responses API ==='\necho \"--- POST $BASE/v1/responses ---\"\ncurl -sS -o /tmp/xf_body.txt -w 'http=%{http_code} time=%{time_total}s\\n' \\\n  --connect-timeout 10 --max-time 30 \\\n  -H \"Authorization: Bearer $API_KEY\" \\\n  -H \"Content-Type: application/json\" \\\n  -d \"{\"model\":\"$MODEL\",\"input\":\"ping\",\"max_output_tokens\":16}\" \\\n  \"$BASE/v1/responses\" || echo \"curl_error=$?\"\nhead -c 800 /tmp/xf_body.txt; echo\n",
+            "isSandboxWrapped": false
+          },
+          "cwd": {
+            "$mid": 1,
+            "path": "/Users/xin/Desktop/omniprox",
+            "scheme": "file"
+          },
+          "language": "sh",
+          "isBackground": false,
+          "requestUnsandboxedExecution": false,
+          "requestAllowNetwork": false,
+          "confirmation": {
+            "commandLine": "API_KEY='8de8f1ba82c6845c9def1c71f4d32c15:YjhlMzc3OTIzOGIyOGQwNjZmMmMxODAz'\nBASE='https://maas-coding-api.cn-huabei-1.xf-yun.com'\nMODEL='xopglm52'\n\necho '=== 1) DNS / TLS / base reachability ==='\nfor path in / /v2 /anthropic /v1/responses /v1/models /v2/models; do\n  echo \"--- GET $path ---\"\n  curl -sS -o /tmp/xf_body.txt -w 'http=%{http_code} time=%{time_total}s size=%{size_download}\\n' \\\n    --connect-timeout 10 --max-time 20 \\\n    -H \"Authorization: Bearer $API_KEY\" \\\n    -H \"api-key: $API_KEY\" \\\n    \"$BASE$path\" || echo \"curl_error=$?\"\n  head -c 400 /tmp/xf_body.txt; echo; echo\ndone\n\necho '=== 2) OpenAI-style chat completions candidates ==='\nfor url in \\\n  \"$BASE/v2/chat/completions\" \\\n  \"$BASE/v1/chat/completions\" \\\n  \"$BASE/chat/completions\" \\\n  \"$BASE/v2/v1/chat/completions\"\ndo\n  echo \"--- POST $url ---\"\n  curl -sS -o /tmp/xf_body.txt -w 'http=%{http_code} time=%{time_total}s\\n' \\\n    --connect-timeout 10 --max-time 30 \\\n    -H \"Authorization: Bearer $API_KEY\" \\\n    -H \"Content-Type: application/json\" \\\n    -d \"{\"model\":\"$MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}],\"max_tokens\":16,\"stream\":false}\" \\\n    \"$url\" || echo \"curl_error=$?\"\n  head -c 600 /tmp/xf_body.txt; echo; echo\ndone\n\necho '=== 3) Anthropic-style messages ==='\nfor url in \\\n  \"$BASE/anthropic/v1/messages\" \\\n  \"$BASE/anthropic/messages\" \\\n  \"$BASE/v1/messages\"\ndo\n  echo \"--- POST $url ---\"\n  curl -sS -o /tmp/xf_body.txt -w 'http=%{http_code} time=%{time_total}s\\n' \\\n    --connect-timeout 10 --max-time 30 \\\n    -H \"x-api-key: $API_KEY\" \\\n    -H \"Authorization: Bearer $API_KEY\" \\\n    -H \"anthropic-version: 2023-06-01\" \\\n    -H \"Content-Type: application/json\" \\\n    -d \"{\"model\":\"$MODEL\",\"max_tokens\":16,\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}\" \\\n    \"$url\" || echo \"curl_error=$?\"\n  head -c 600 /tmp/xf_body.txt; echo; echo\ndone\n\necho '=== 4) Responses API ==='\necho \"--- POST $BASE/v1/responses ---\"\ncurl -sS -o /tmp/xf_body.txt -w 'http=%{http_code} time=%{time_total}s\\n' \\\n  --connect-timeout 10 --max-time 30 \\\n  -H \"Authorization: Bearer $API_KEY\" \\\n  -H \"Content-Type: application/json\" \\\n  -d \"{\"model\":\"$MODEL\",\"input\":\"ping\",\"max_output_tokens\":16}\" \\\n  \"$BASE/v1/responses\" || echo \"curl_error=$?\"\nhead -c 800 /tmp/xf_body.txt; echo\n"
+          },
+          "terminalCommandUri": {
+            "$mid": 1,
+            "path": "/4cfb0b6fc59d641b94989f31b1b09c06/4",
+            "scheme": "vscode-terminal",
+            "query": "command=tool-8bbdeafa-2d59-4bd5-a442-7d87df14a066"
+          },
+          "terminalCommandState": {
+            "exitCode": 0,
+            "timestamp": 1785848045164,
+            "duration": 75
+          },
+          "terminalCommandOutput": {
+            "text": "=== 1) DNS / TLS / base reachability ===\r\n--- GET / ---\r\nzsh: command not found: curl\r\ncurl_error=127\r\nzsh: command not found: head\r\n\r\n\r\n--- GET /v2 ---\r\nzsh: command not found: curl\r\ncurl_error=127\r\nzsh: command not found: head\r\n\r\n\r\n--- GET /anthropic ---\r\nzsh: command not found: curl\r\ncurl_error=127\r\nzsh: command not found: head\r\n\r\n\r\n--- GET /v1/responses ---\r\nzsh: command not found: curl\r\ncurl_error=127\r\nzsh: command not found: head\r\n\r\n\r\n--- GET /v1/models ---\r\nzsh: command not found: curl\r\ncurl_error=127\r\nzsh: command not found: head\r\n\r\n\r\n--- GET /v2/models ---\r\nzsh: command not found: curl\r\ncurl_error=127\r\nzsh: command not found: head\r\n\r\n\r\n=== 2) OpenAI-style chat completions candidates ===\r\n--- POST https://maas-coding-api.cn-huabei-1.xf-yun.com/v2/chat/completions ---\r\nzsh: command not found: curl\r\ncurl_error=127\r\nzsh: command not found: head\r\n\r\n\r\n--- POST https://maas-coding-api.cn-huabei-1.xf-yun.com/v1/chat/completions ---\r\nzsh: command not found: curl\r\ncurl_error=127\r\nzsh: command not found: head\r\n\r\n\r\n--- POST https://maas-coding-api.cn-huabei-1.xf-yun.com/chat/completions ---\r\nzsh: command not found: curl\r\ncurl_error=127\r\nzsh: command not found: head\r\n\r\n\r\n--- POST https://maas-coding-api.cn-huabei-1.xf-yun.com/v2/v1/chat/completions ---\r\nzsh: command not found: curl\r\ncurl_error=127\r\nzsh: command not found: head\r\n\r\n\r\n=== 3) Anthropic-style messages ===\r\n--- POST https://maas-coding-api.cn-huabei-1.xf-yun.com/anthropic/v1/messages ---\r\nzsh: command not found: curl\r\ncurl_error=127\r\nzsh: command not found: head\r\n\r\n\r\n--- POST https://maas-coding-api.cn-huabei-1.xf-yun.com/anthropic/messages ---\r\nzsh: command not found: curl\r\ncurl_error=127\r\nzsh: command not found: head\r\n\r\n\r\n--- POST https://maas-coding-api.cn-huabei-1.xf-yun.com/v1/messages ---\r\nzsh: command not found: curl\r\ncurl_error=127\r\nzsh: command not found: head\r\n\r\n\r\n=== 4) Responses API ===\r\n--- POST https://maas-coding-api.cn-huabei-1.xf-yun.com/v1/responses ---\r\nzsh: command not found: curl\r\ncurl_error=127\r\nzsh: command not found: head\r\n\u001b[?2004h",
+            "lineCount": 89
+          },
+          "terminalTheme": {
+            "background": "#1e1e1e",
+            "foreground": "#cccccc"
+          }
+        },
+        "toolCallId": "call-867c5ef9-dde8-43a5-8f83-ef9dbd479f13-1",
+        "toolId": "run_in_terminal"
+      },
+      {
+        "kind": "toolInvocationSerialized",
+        "invocationMessage": {
+          "value": "正在运行 ` echo \"PATH=$PATH\"; type curl; type /usr/bin/curl; ls -la /usr/bin/curl /opt/...`",
+          "isTrusted": false,
+          "supportThemeIcons": false,
+          "supportHtml": false,
+          "supportAlertSyntax": false
+        },
+        "isConfirmed": {
+          "type": 1
+        },
+        "isComplete": true,
+        "source": {
+          "type": "internal",
+          "label": "Built-In"
+        },
+        "toolSpecificData": {
+          "kind": "terminal",
+          "terminalToolSessionId": "6aa80472-c65a-45a8-b1dc-a60579f6faa9",
+          "terminalCommandId": "tool-33817b6a-a894-4714-bb70-dd8d4c7b06c4",
+          "commandLine": {
+            "original": "echo \"PATH=$PATH\"; type curl; type /usr/bin/curl; ls -la /usr/bin/curl /opt/homebrew/bin/curl 2>/dev/null; which -a python3 go node 2>/dev/null; /usr/bin/curl --version 2>&1 | head -2",
+            "toolEdited": " echo \"PATH=$PATH\"; type curl; type /usr/bin/curl; ls -la /usr/bin/curl /opt/homebrew/bin/curl 2>/dev/null; which -a python3 go node 2>/dev/null; /usr/bin/curl --version 2>&1 | head -2",
+            "forDisplay": " echo \"PATH=$PATH\"; type curl; type /usr/bin/curl; ls -la /usr/bin/curl /opt/homebrew/bin/curl 2>/dev/null; which -a python3 go node 2>/dev/null; /usr/bin/curl --version 2>&1 | head -2",
+            "isSandboxWrapped": false
+          },
+          "cwd": {
+            "$mid": 1,
+            "external": "file:///Users/xin/Desktop/omniprox",
+            "path": "/Users/xin/Desktop/omniprox",
+            "scheme": "file"
+          },
+          "language": "sh",
+          "isBackground": false,
+          "requestUnsandboxedExecution": false,
+          "requestAllowNetwork": false,
+          "confirmation": {
+            "commandLine": "echo \"PATH=$PATH\"; type curl; type /usr/bin/curl; ls -la /usr/bin/curl /opt/homebrew/bin/curl 2>/dev/null; which -a python3 go node 2>/dev/null; /usr/bin/curl --version 2>&1 | head -2"
+          }
+        },
+        "toolCallId": "call-f8b184c5-c25f-4343-b62e-ea0c112c5666-2",
+        "toolId": "run_in_terminal"
+      }
+    ],
+    "confirm": [],
+    "other_top": [
+      {
+        "kind": 1,
+        "k": [
+          "inputState",
+          "inputText"
+        ],
+        "has_v": true,
+        "has_i": false
+      },
+      {
+        "kind": 1,
+        "k": [
+          "inputState",
+          "selections"
+        ],
+        "has_v": true,
+        "has_i": false
+      },
+      {
+        "kind": 1,
+        "k": [
+          "customTitle"
+        ],
+        "has_v": true,
+        "has_i": false
+      },
+      {
+        "kind": 1,
+        "k": [
+          "inputState",
+          "inputText"
+        ],
+        "has_v": true,
+        "has_i": false
+      },
+      {
+        "kind": 1,
+        "k": [
+          "inputState",
+          "selections"
+        ],
+        "has_v": true,
+        "has_i": false
+      }
+    ]
+  },
+  "seen_requests": 1,
+  "resp_paths": [
+    "requests/0/response"
+  ]
+}

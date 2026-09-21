@@ -1,0 +1,61 @@
+{
+  "files": [
+    "/Users/xin/Library/Application Support/Code/User/workspaceStorage/4cfb0b6fc59d641b94989f31b1b09c06/chatSessions/aaded402-24a6-44cc-9c95-f48ea6e7cc8c.jsonl",
+    "/Users/xin/Library/Application Support/Code/User/workspaceStorage/4cfb0b6fc59d641b94989f31b1b09c06/chatSessions/eab05fee-0bc4-450d-a5da-4ec5a62783dd.jsonl",
+    "/Users/xin/Library/Application Support/Code/User/workspaceStorage/31c13c0c390f5d1377fc9ce9b9c55cbd/chatSessions/9c9a327a-4c08-4379-aabf-e790942a895f.jsonl"
+  ],
+  "common_k0": [
+    [
+      "requests",
+      388
+    ],
+    [
+      "inputState",
+      52
+    ],
+    [
+      "customTitle",
+      1
+    ]
+  ],
+  "notes": [],
+  "response_part_kinds": [
+    [
+      "thinking",
+      288
+    ],
+    [
+      "toolInvocationSerialized",
+      201
+    ],
+    [
+      "text_value",
+      72
+    ],
+    [
+      "inlineReference",
+      32
+    ],
+    [
+      "progressTaskSerialized",
+      17
+    ]
+  ],
+  "kinds": [
+    [
+      1,
+      343
+    ],
+    [
+      2,
+      98
+    ],
+    [
+      0,
+      3
+    ]
+  ],
+  "extension_ignore_set_raw": [
+    "\"thinking\",\"progressTaskSerialized\",\"progressMessage\",\"mcpServersStarting\",\"undoStop\",\"prepareToolInvocation\""
+  ]
+}

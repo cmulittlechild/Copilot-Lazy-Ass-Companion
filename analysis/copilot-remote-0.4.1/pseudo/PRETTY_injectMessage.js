@@ -1,0 +1,22 @@
+async injectMessage(t,e){
+this.noteInjectedText(t)
+;try{
+"agent"===e?await u.commands.executeCommand("workbench.action.chat.openAgentMode"):"edit"===e?await u.commands.executeCommand("workbench.action.chat.openEditSession"):"ask"===e&&await u.commands.executeCommand("workbench.action.chat.openAskMode")
+}
+catch{
+
+}
+try{
+return void await u.commands.executeCommand("workbench.action.chat.open",{
+query:t
+}
+)
+}
+catch{
+
+}
+await u.env.clipboard.writeText(t),await u.commands.executeCommand("workbench.action.chat.open"),u.window.showInformationMessage("[Copilot Remote] Message copied — press Ctrl+V then Enter in the chat box.",{
+modal:!1
+}
+)
+}

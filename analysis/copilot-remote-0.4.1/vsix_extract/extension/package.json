@@ -1,0 +1,123 @@
+{
+  "name": "copilot-remote",
+  "displayName": "Copilot Remote Control",
+  "description": "Monitor and control your GitHub Copilot agent from your phone in real time. Get push notifications, reply — all without touching your PC.",
+  "version": "0.4.1",
+  "publisher": "atulhritik",
+  "icon": "icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://agent-handle.vercel.app"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "AI",
+    "Other"
+  ],
+  "keywords": [
+    "copilot",
+    "remote",
+    "phone",
+    "agent",
+    "mobile",
+    "PWA",
+    "tunnel",
+    "monitor",
+    "notification",
+    "AI"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "copilot-remote.activate",
+        "title": "Copilot Remote: Activate License"
+      },
+      {
+        "command": "copilot-remote.showQR",
+        "title": "Copilot Remote: Show QR Code"
+      },
+      {
+        "command": "copilot-remote.restart",
+        "title": "Copilot Remote: Restart Tunnel"
+      },
+      {
+        "command": "copilot-remote.copyUrl",
+        "title": "Copilot Remote: Copy Tunnel URL"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "copilot-remote",
+          "title": "Copilot Remote",
+          "icon": "icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "copilot-remote": [
+        {
+          "type": "webview",
+          "id": "copilot-remote.qrView",
+          "name": "Phone Connection",
+          "icon": "icon.svg"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Copilot Remote",
+      "properties": {
+        "copilot-remote.port": {
+          "type": "number",
+          "default": 3000,
+          "description": "Local WebSocket server port (3000–3020 auto-scanned)."
+        },
+        "copilot-remote.licenseKey": {
+          "type": "string",
+          "default": "",
+          "description": "License key (JWT) for Copilot Remote Control."
+        },
+        "copilot-remote.pwaUrl": {
+          "type": "string",
+          "default": "https://copilot-remote-pwa.vercel.app",
+          "description": "Base URL of the deployed Copilot Remote PWA."
+        }
+      }
+    }
+  },
+  "dependencies": {
+    "jsonwebtoken": "^9.0.2",
+    "node-machine-id": "^1.1.12",
+    "qrcode": "^1.5.3",
+    "uuid": "^9.0.1",
+    "web-push": "^3.6.7",
+    "ws": "^8.16.0"
+  },
+  "devDependencies": {
+    "@types/jsonwebtoken": "^9.0.5",
+    "@types/node": "^20.11.0",
+    "@types/qrcode": "^1.5.5",
+    "@types/vscode": "^1.85.0",
+    "@types/web-push": "^3.6.4",
+    "@types/ws": "^8.5.10",
+    "@vscode/vsce": "^3.7.1",
+    "copy-webpack-plugin": "^14.0.0",
+    "ts-loader": "^9.5.1",
+    "typescript": "^5.3.3",
+    "webpack": "^5.90.0",
+    "webpack-cli": "^5.1.4"
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run package",
+    "compile": "webpack",
+    "watch": "webpack --watch",
+    "package": "webpack --mode production --devtool hidden-source-map",
+    "lint": "eslint src --ext ts"
+  }
+}

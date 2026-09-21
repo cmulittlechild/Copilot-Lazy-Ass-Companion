@@ -1,0 +1,1 @@
+startWatching(t){const e=r(9896);try{this.fsWatcher=e.watch(t,{persistent:!1},()=>this.processNewLines())}catch{}this.pollTimer=setInterval(()=>this.processNewLines(),8)}

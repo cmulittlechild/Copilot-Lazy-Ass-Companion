@@ -1,0 +1,1 @@
+t([]),[])}}function Li(e,t){for(let n=e.length-1;n>=0;n--)if(t(e[n]))return n;return-1}function Sd(e){return"USER_MESSAGE"===e?"user":"AGENT_MESSAGE"===e?"agent":"TOOL_CALL"===e?"tool":"AGENT_CONFIRM"===e?"confirm":"system"}function my(e){return{id:yt(),role:Sd(e.type),text:e.text??e.message??"",timestamp:e.t

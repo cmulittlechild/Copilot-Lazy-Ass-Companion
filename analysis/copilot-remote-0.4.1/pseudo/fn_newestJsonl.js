@@ -1,0 +1,1 @@
+newestJsonl(t){if(!a.existsSync(t))return null;try{const e=a.readdirSync(t).filter(t=>t.endsWith(".jsonl")).map(e=>({f:c.join(t,e),mtime:a.statSync(c.join(t,e)).mtimeMs})).sort((t,e)=>e.mtime-t.mtime);return e[0]?.f??null}catch{return null}}

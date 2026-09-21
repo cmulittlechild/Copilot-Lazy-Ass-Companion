@@ -1,0 +1,208 @@
+{
+  "name": "copilot-sidecar-companion",
+  "displayName": "Copilot Lazy Ass Companion",
+  "description": "Non-replacing remote companion (Copilot Lazy Ass) for GitHub Copilot Chat: mirror chatSessions over WebSocket/PWA and inject prompts via workbench chat commands.",
+  "version": "0.5.39",
+  "publisher": "local-dev",
+  "license": "MIT",
+  "icon": "icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/local-dev/copilot-sidecar-companion"
+  },
+  "engines": {
+    "vscode": "^1.93.0"
+  },
+  "categories": [
+    "AI",
+    "Chat",
+    "Other"
+  ],
+  "keywords": [
+    "copilot",
+    "github copilot",
+    "chat",
+    "remote",
+    "mobile",
+    "phone",
+    "pwa",
+    "websocket",
+    "companion",
+    "sidecar"
+  ],
+  "galleryBanner": {
+    "color": "#1e1e1e",
+    "theme": "dark"
+  },
+  "extensionKind": [
+    "ui"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "copilotSidecar",
+          "title": "Copilot Lazy Ass",
+          "icon": "media/pwa/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "copilotSidecar": [
+        {
+          "type": "webview",
+          "id": "copilotSidecar.qrPanel",
+          "name": "QR / 连接"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "copilotSidecar.start",
+        "title": "Copilot Lazy Ass: Start Bridge"
+      },
+      {
+        "command": "copilotSidecar.stop",
+        "title": "Copilot Lazy Ass: Stop Bridge"
+      },
+      {
+        "command": "copilotSidecar.showStatus",
+        "title": "Copilot Lazy Ass: Show Status"
+      },
+      {
+        "command": "copilotSidecar.copyWsUrl",
+        "title": "Copilot Lazy Ass: Copy PWA URL"
+      },
+      {
+        "command": "copilotSidecar.showQr",
+        "title": "Copilot Lazy Ass: Show QR Panel"
+      },
+      {
+        "command": "copilotSidecar.startTunnel",
+        "title": "Copilot Lazy Ass: Start Tunnel"
+      },
+      {
+        "command": "copilotSidecar.stopTunnel",
+        "title": "Copilot Lazy Ass: Stop Tunnel"
+      },
+      {
+        "command": "copilotSidecar.restartTunnel",
+        "title": "Copilot Lazy Ass: Restart Tunnel"
+      },
+      {
+        "command": "copilotSidecar.copyToken",
+        "title": "Copilot Lazy Ass: Copy Auth Token"
+      }
+    ],
+    "configuration": {
+      "title": "Copilot Lazy Ass Companion",
+      "properties": {
+        "copilotSidecar.port": {
+          "type": "number",
+          "default": 3010,
+          "description": "Local WebSocket/HTTP bridge port."
+        },
+        "copilotSidecar.host": {
+          "type": "string",
+          "default": "127.0.0.1",
+          "description": "Bind host. Use 127.0.0.1 for local-only; 0.0.0.0 for LAN."
+        },
+        "copilotSidecar.autoStart": {
+          "type": "boolean",
+          "default": true,
+          "description": "Start bridge when VS Code finishes startup."
+        },
+        "copilotSidecar.authToken": {
+          "type": "string",
+          "default": "",
+          "description": "Optional shared token. If set, clients must send PHONE_CONNECT.token (or ?token= on PWA URL)."
+        },
+        "copilotSidecar.defaultMode": {
+          "type": "string",
+          "enum": [
+            "agent",
+            "ask",
+            "edit"
+          ],
+          "default": "agent",
+          "description": "Default chat mode for injected phone messages."
+        },
+        "copilotSidecar.injectSessionOpen": {
+          "type": "string",
+          "enum": [
+            "editor",
+            "sidebar",
+            "focused-only"
+          ],
+          "default": "editor",
+          "description": "Inject targeting. 'editor' (default, commercial): open target chat session as ChatEditor then submit; require disk verify or clipboard. 'sidebar': also Move Chat into Side Bar (may refocus wrong widget on 1.131). 'focused-only': paid-Remote parity, may hit wrong session."
+        },
+        "copilotSidecar.pollMs": {
+          "type": "number",
+          "default": 50,
+          "minimum": 8,
+          "description": "JSONL tail poll interval in ms (Remote uses 8; 50 is gentler)."
+        },
+        "copilotSidecar.sessionRescanMs": {
+          "type": "number",
+          "default": 2000,
+          "description": "How often to rescan for newest chatSessions jsonl."
+        },
+        "copilotSidecar.liveOnly": {
+          "type": "boolean",
+          "default": true,
+          "description": "If true, start tailing at EOF (only new chat activity). If false, replay whole session on switch."
+        },
+        "copilotSidecar.preferTranscript": {
+          "type": "boolean",
+          "default": true,
+          "description": "Use GitHub.copilot-chat/transcripts realtime event stream as primary content source (millisecond latency, avoids chatSessions ~60s state flush lag). Falls back to chatSessions when transcripts dir missing."
+        },
+        "copilotSidecar.enableTunnel": {
+          "type": "boolean",
+          "default": false,
+          "description": "Auto-start Cloudflare quick tunnel when bridge starts. If false (default), open sidebar and click「开启隧道」or run command Start Tunnel. Public URL and session token only appear after tunnel starts."
+        },
+        "copilotSidecar.downloadCloudflared": {
+          "type": "boolean",
+          "default": true,
+          "description": "If cloudflared is missing, download once into ~/.copilot-sidecar-companion/."
+        },
+        "copilotSidecar.tunnelTimeoutMs": {
+          "type": "number",
+          "default": 35000,
+          "minimum": 5000,
+          "description": "Milliseconds to wait for cloudflared trycloudflare public URL before failing Start Tunnel."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p .",
+    "watch": "tsc -w -p .",
+    "test:e2e": "npm run compile && node scripts/e2e_local.mjs",
+    "test:e2e:fast": "npm run compile && SKIP_TUNNEL_SMOKE=1 node scripts/e2e_local.mjs",
+    "test:tunnel": "npm run compile && node scripts/e2e_tunnel_smoke.mjs",
+    "test:unit": "npm run compile && node scripts/test_chatcontrol.mjs && node scripts/test_workspaceindex.mjs && node scripts/test_portscan.mjs && node scripts/test_sessionperf.mjs && node scripts/test_dispatch_isolated.mjs && node scripts/test_pin.mjs && node scripts/test_sessionselect.mjs && node scripts/test_bighistory.mjs && node scripts/test_gapfill_pending.mjs && node scripts/test_transcript_order.mjs",
+    "test": "npm run test:unit && SKIP_TUNNEL_SMOKE=1 node scripts/e2e_local.mjs",
+    "probe": "node scripts/probe_live.mjs",
+    "package": "npm run compile && npx --yes @vscode/vsce package"
+  },
+  "dependencies": {
+    "qrcode": "^1.5.4",
+    "web-push": "^3.6.7",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/qrcode": "^1.5.5",
+    "@types/vscode": "^1.93.0",
+    "@types/web-push": "^3.6.4",
+    "@types/ws": "^8.5.10",
+    "typescript": "^5.3.3"
+  }
+}

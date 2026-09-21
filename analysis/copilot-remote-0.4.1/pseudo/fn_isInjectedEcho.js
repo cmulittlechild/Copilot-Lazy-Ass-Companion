@@ -1,0 +1,1 @@
+isInjectedEcho(t){const e=Date.now(),r=t.trim(),n=this.recentPhoneInjects.findIndex(t=>t.text===r&&e-t.at<3e4);return n>=0&&(this.recentPhoneInjects.splice(n,1),this.lastActivity=Date.now(),!0)}

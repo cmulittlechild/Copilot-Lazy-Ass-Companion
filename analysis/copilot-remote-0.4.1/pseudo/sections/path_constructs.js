@@ -1,0 +1,3 @@
+c.basename(e)}`}))}findLatestSessionFile(){const t=this.ctx.storageUri?.fsPath;if(t){const e=[c.join(c.dirname(t),"chatSessions"),c.join(t,"chatSessions")];for(const t of e){const e=this.new
+nl(t);if(e)return{file:e,dir:t}}}const e=c.join(process.env.APPDATA??"","Code","User","workspaceStorage");if(!a.existsSync(e))return null;let r=null;try{for(const t of a.readdirSync(e)){c
+onst n=c.join(e,t,"chatSessions"),i=this.newestJsonl(n);if(i){const t=a.statSync(i).mtimeMs;(!r||t>r.mtime)&&(r={file:i,dir:n,mtime:t})}}}catch{}return

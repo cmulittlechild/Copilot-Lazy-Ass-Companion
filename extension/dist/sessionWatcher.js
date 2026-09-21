@@ -1,0 +1,1284 @@
+"use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.SessionWatcher = void 0;
+exports.defaultSessionRoots = defaultSessionRoots;
+exports.sessionDiscoveryFromExtension = sessionDiscoveryFromExtension;
+const fs = __importStar(require("fs"));
+const os = __importStar(require("os"));
+const path = __importStar(require("path"));
+const jsonl_1 = require("./jsonl");
+/**
+ * 超过此大小的会话文件不整读（只读尾部）。
+ * 本机实测最大会话文件 325MB，整读耗时 4900ms 且堆增长 767MB，
+ * 足以冻结扩展宿主甚至 OOM。
+ */
+const HISTORY_BIG_FILE_BYTES = 8 * 1024 * 1024;
+/**
+ * 大文件从尾部读取时的自适应窗口档位（字节）。
+ *
+ * 单个 kind=2 增量行可达 0.9MB，固定 4MB 窗口可能整个落在一行中间 ——
+ * 丢弃被截断的首行后几乎不剩内容（实测 177MB/128MB 文件只剩 6~7 行，
+ * 手机端切过去看到空白）。因此逐档扩大直到拿到足够行数。
+ * 实测耗时：4MB ~14ms，16MB ~50ms，48MB ~215ms（仍远低于整读的 4900ms）。
+ */
+const HISTORY_TAIL_WINDOWS = [4 * 1024 * 1024, 16 * 1024 * 1024, 48 * 1024 * 1024];
+/** 尾部窗口内至少需要的可解析行数，不足则升到下一档窗口。 */
+const HISTORY_TAIL_MIN_LINES = 24;
+/**
+ * 参与历史回放的 kind≠0 增量行上限。
+ * 实测有会话能投出 1446 个事件，而 bridge 侧最终只保留 HISTORY_MAX 条，
+ * 全量投影纯属浪费。
+ */
+const HISTORY_MAX_MUTATIONS = 400;
+/** 桌面消息兜底扫描周期（ms）：轮询新增 USER_MESSAGE 增量。
+ *  0.5.8 实测 1200ms 会让桌面发消息延迟 >1s 才上手机，压到 500ms；
+ *  配合 mtime 快速跳过，全量 stat 400 文件 ~2ms，开销可忽略。 */
+const USER_MSG_SCAN_MS = 500;
+class SessionWatcher {
+    opts;
+    timer;
+    pollTimer;
+    current;
+    offset = 0;
+    projector = new jsonl_1.JsonlProjector();
+    disposed = false;
+    pending = '';
+    liveOnly;
+    fileWatcher;
+    dirWatcher;
+    watchDebounce;
+    watchDebounceMs;
+    lastSize = 0;
+    lastMtimeMs = 0;
+    /** fingerprint of last complete line to detect same-offset rewrites */
+    lastLineFp = '';
+    bootstrapDoneFor;
+    /** 桌面消息兜底扫描器 timer */
+    userMsgTimer;
+    /** 桌面消息兜底：上次检查过的 (文件, 字节偏移, mtime, 已看到的最新请求数) */
+    userMsgCursors = new Map();
+    /** 已见桌面（非手机）用户消息 requestId，防重发 */
+    seenForeignReqIds = new Set();
+    /** enrichSessions 结果缓存：key=(file|size|mtime)，避免列表刷新重复读 jsonl */
+    enrichCache = new Map();
+    /**
+     * 手机端显式选定的会话（pin）。
+     *
+     * 不设这个标记时，scan() 每 2 秒会把 `current` 强制回绑到全局 mtime 最新的
+     * 会话文件 —— 用户在手机上选了旧会话，两秒后就被抢回去，表现为「选不回来」。
+     */
+    pinnedFile;
+    constructor(opts) {
+        this.opts = opts;
+        this.liveOnly = opts.liveOnly !== false;
+        this.watchDebounceMs = Math.max(8, opts.watchDebounceMs ?? 40);
+    }
+    get currentFile() {
+        return this.current;
+    }
+    get readOffset() {
+        return this.offset;
+    }
+    /**
+     * 扫描一个 chatSessions 目录，把其中的 `*.jsonl` 汇总成 SessionSummary。
+     *
+     * @param dir  目标目录（不存在/不可读时静默跳过）
+     * @param out  结果收集数组
+     * @param rec  已知的工作区记录；传入时跳过路径反查（省一次上溯查找）。
+     *             未传入且配了 workspaceIndex 时，用 resolveBySessionFile 反查。
+     */
+    collectSessionsFromDir(dir, out, rec) {
+        if (!fs.existsSync(dir))
+            return;
+        let files = [];
+        try {
+            files = fs.readdirSync(dir).filter((f) => f.endsWith('.jsonl'));
+        }
+        catch {
+            return;
+        }
+        const currentHash = this.opts.currentWorkspaceHash;
+        for (const f of files) {
+            const full = path.join(dir, f);
+            try {
+                const st = fs.statSync(full);
+                if (!st.isFile())
+                    continue;
+                const sessionId = f.replace(/\.jsonl$/, '');
+                // 标题优先级：state.vscdb 官方索引 > jsonl customTitle/首条消息截断
+                const indexTitle = this.opts.sessionIndex?.getTitle(sessionId);
+                // 工作区归属：优先用调用方给的记录，否则按文件路径反查；拿不到就留 undefined（不造假）
+                let ws = rec;
+                if (!ws) {
+                    try {
+                        ws = this.opts.workspaceIndex?.resolveBySessionFile(full);
+                    }
+                    catch {
+                        ws = undefined;
+                    }
+                }
+                out.push({
+                    file: full,
+                    name: sessionId,
+                    // 只取便宜来源（state.vscdb 内存索引）；缺失时留空，
+                    // 由 enrichSessions 在排序截断后从 jsonl 补全
+                    title: indexTitle,
+                    mtime: st.mtimeMs,
+                    size: st.size,
+                    // requestCount 同样延迟到 enrichSessions（避开全量读文件）
+                    workspaceId: ws?.workspaceId,
+                    qualifiedName: ws?.qualifiedName,
+                    machineName: ws ? ws.machineName : undefined,
+                    isRemote: ws?.isRemote,
+                    displayName: ws?.displayName,
+                    isCurrent: ws && currentHash ? ws.storageHash === currentHash : undefined,
+                });
+            }
+            catch {
+                // ignore unreadable
+            }
+        }
+    }
+    /**
+     * 补全昂贵字段（标题兜底 + 请求数）。
+     *
+     * 这两项都需要读 jsonl 内容。本机实测有 432 个会话文件、共 3GB，
+     * 若在扇出阶段逐个读取会同步阻塞事件循环约 1.4 秒，导致扩展宓主卡死、
+     * 手机端所有请求超时。因此只对排序截断后真正要返回的少量条目执行。
+     */
+    enrichSessions(list) {
+        for (const s of list) {
+            try {
+                const key = `${s.file}|${s.size}|${Math.round(s.mtime)}`;
+                const cached = this.enrichCache.get(key);
+                if (cached) {
+                    s.title = cached.title;
+                    s.requestCount = cached.requestCount;
+                    continue;
+                }
+                let title = s.title;
+                let count = s.requestCount;
+                if (!title)
+                    title = resolveSessionTitle(s.file);
+                if (count === undefined)
+                    count = countRequestsQuick(s.file);
+                this.enrichCache.set(key, { title, requestCount: count });
+                if (this.enrichCache.size > 400) {
+                    // 防止长时间运行无限增长
+                    const first = this.enrichCache.keys().next().value;
+                    this.enrichCache.delete(first);
+                }
+                s.title = title;
+                s.requestCount = count;
+            }
+            catch {
+                // 单条补全失败不影响整体
+            }
+        }
+        return list;
+    }
+    /**
+     * 列出可发现的历史会话（当前工作区优先，其次 mtime 倒序）。
+     * 手机端通过 PHONE_SESSION_LIST 获取后可在多个会话间切换。
+     *
+     * 扫描顺序（靠 seenDirs 去重，先到先得）：
+     * 1. workspaceIndex.all() 里每条记录的 chatSessionsDir —— 已过滤不存在的目录，
+     *    且能直接带上工作区元数据，省掉路径反查；
+     * 2. preferChatSessionDirs（扩展宿主给的当前工作区目录）；
+     * 3. 遍历 roots 下的 `<hash>/chatSessions` —— 兜底，保证跨工作区全局可见。
+     */
+    listSessions(limit = 40) {
+        const dirs = this.opts.preferChatSessionDirs ?? [];
+        const roots = this.opts.roots ?? defaultSessionRoots();
+        const all = [];
+        const seenDirs = new Set();
+        // 1) 工作区索引优先：目录已验证存在，元数据现成
+        const records = this.opts.workspaceIndex?.all() ?? [];
+        for (const rec of records) {
+            if (!rec.chatSessionsDir)
+                continue;
+            const n = path.normalize(rec.chatSessionsDir);
+            if (seenDirs.has(n))
+                continue;
+            seenDirs.add(n);
+            this.collectSessionsFromDir(n, all, rec);
+        }
+        // 2) 扩展宿主提供的偏好目录
+        for (const d of dirs) {
+            const n = path.normalize(d);
+            if (seenDirs.has(n))
+                continue;
+            seenDirs.add(n);
+            this.collectSessionsFromDir(n, all);
+        }
+        // 3) 兜底：全局遍历 workspaceStorage
+        for (const root of roots) {
+            if (!fs.existsSync(root))
+                continue;
+            let entries = [];
+            try {
+                entries = fs.readdirSync(root);
+            }
+            catch {
+                continue;
+            }
+            for (const id of entries) {
+                const dir = path.join(root, id, 'chatSessions');
+                const n = path.normalize(dir);
+                if (seenDirs.has(n))
+                    continue;
+                seenDirs.add(n);
+                this.collectSessionsFromDir(n, all);
+            }
+        }
+        // 当前工作区的会话排最前，其余按 mtime 倒序
+        all.sort((a, b) => {
+            const ca = a.isCurrent === true ? 1 : 0;
+            const cb = b.isCurrent === true ? 1 : 0;
+            if (ca !== cb)
+                return cb - ca;
+            return b.mtime - a.mtime;
+        });
+        // 只对最终返回的少量条目做昂贵补全（读文件头）
+        return this.enrichSessions(all.slice(0, limit));
+    }
+    /**
+     * 列出指定工作区的会话（按 mtime 倒序）。
+     * 需要构造时传入 workspaceIndex；工作区不存在或没有 chatSessions 目录时返回空数组。
+     */
+    listSessionsByWorkspace(workspaceId, limit = 40) {
+        const rec = this.opts.workspaceIndex?.byId(workspaceId);
+        if (!rec?.chatSessionsDir)
+            return [];
+        const out = [];
+        this.collectSessionsFromDir(path.normalize(rec.chatSessionsDir), out, rec);
+        out.sort((a, b) => b.mtime - a.mtime);
+        return this.enrichSessions(out.slice(0, limit));
+    }
+    /**
+     * 切换到指定会话文件：重新绑定 watcher、live-only 下从 EOF 继续、
+     * 并 bootstrap 最近请求让手机端能立即看到内容。
+     */
+    selectSession(file, opts) {
+        if (!file)
+            return false;
+        try {
+            const st = fs.statSync(file);
+            if (!st.isFile())
+                return false;
+        }
+        catch {
+            return false;
+        }
+        // 钉住选中会话，防止周期 scan() 把它抢回最新会话
+        this.pinnedFile = file;
+        // 即使已经绑定同一文件也要重新 bind：
+        // 手机端切走再切回时 feed 已被清空，必须重新投影才能恢复内容。
+        this.bindFile(file, { skipBootstrap: opts?.bootstrap !== true });
+        // 默认不 bootstrap：手机切会话走 projectHistory → HISTORY_REPLAY 单通道。
+        // bootstrap 会把最近 N 轮再经 onEvent 灌进 live，与 REPLAY 叠加造成：
+        // 重复气泡、错序、Copilot 一直「正在输入」（COPILOT_TYPING 无配对 DONE）。
+        if (opts?.bootstrap === true) {
+            this.bootstrapLastRequests(file);
+        }
+        return true;
+    }
+    /**
+     * 投影指定会话的最近 N 轮历史，**返回**事件数组而不走 onEvent。
+     *
+     * 工业级时序保证（0.5.9 根因修复）：
+     * - 旧实现：先投影全部 USER/TOOL，再 finalize 全部 AGENT → 手机端看到
+     *   「用户消息挤在中间、助手消息堆在末尾」的错乱时间线，再被 HISTORY_MAX
+     *   截断后只剩 0.5.4 验证表等旧助手碎片。
+     * - 新实现：按 request 轮次投影（每轮：USER → 该轮 response mutations →
+     *   该轮收尾），保证 USER/AGENT 交错顺序与 VS Code 一致。
+     */
+    projectHistory(file, maxRequests = 20) {
+        const out = [];
+        let raw = '';
+        try {
+            const st = fs.statSync(file);
+            if (st.size > HISTORY_BIG_FILE_BYTES) {
+                raw = readTailLines(file, st.size);
+            }
+            else {
+                raw = fs.readFileSync(file, 'utf8');
+            }
+        }
+        catch {
+            return out;
+        }
+        const lines = raw.split('\n').filter((l) => l.trim());
+        if (!lines.length)
+            return out;
+        const muts = [];
+        let kind0 = null;
+        for (const line of lines) {
+            try {
+                const obj = JSON.parse(line);
+                if (obj?.kind === 0) {
+                    kind0 = obj;
+                    continue;
+                }
+                const k = obj?.k;
+                let reqIndex = null;
+                let isAppend = false;
+                let isResponse = false;
+                let isFinalize = false;
+                if (Array.isArray(k) && k[0] === 'requests') {
+                    if (k.length === 1) {
+                        isAppend = true;
+                        // splice index if present
+                        if (typeof obj.i === 'number')
+                            reqIndex = obj.i;
+                    }
+                    else if (typeof k[1] === 'number') {
+                        reqIndex = k[1];
+                        if (k[2] === 'response')
+                            isResponse = true;
+                        if (k[2] === 'elapsedMs' || k[2] === 'result' || k[2] === 'isCanceled')
+                            isFinalize = true;
+                    }
+                }
+                muts.push({ obj, reqIndex, isAppend, isResponse, isFinalize });
+            }
+            catch {
+                /* 单行损坏忽略 */
+            }
+        }
+        // 从 kind0 + append 推导请求列表（权威顺序）
+        const requests = [];
+        if (kind0?.v && Array.isArray(kind0.v.requests)) {
+            for (const r of kind0.v.requests)
+                requests.push(r);
+        }
+        for (const m of muts) {
+            if (!m.isAppend)
+                continue;
+            const v = m.obj?.v;
+            if (!Array.isArray(v))
+                continue;
+            const base = typeof m.obj.i === 'number' && m.obj.i >= 0 ? m.obj.i : requests.length;
+            for (let n = 0; n < v.length; n++) {
+                const gi = base + n;
+                while (requests.length <= gi)
+                    requests.push(null);
+                requests[gi] = v[n];
+            }
+        }
+        // 只保留最近 maxRequests 轮
+        const total = requests.length;
+        const startIdx = Math.max(0, total - Math.max(1, maxRequests));
+        const proj = new jsonl_1.JsonlProjector();
+        // done 事件并入 out，但按轮次 flush
+        const pendingDone = [];
+        proj.setDoneSink((ev) => pendingDone.push(ev));
+        try {
+            for (let ri = startIdx; ri < total; ri++) {
+                const req = requests[ri];
+                if (!req)
+                    continue;
+                // 1) USER_MESSAGE for this request
+                for (const ev of proj.projectLine({
+                    kind: 2,
+                    k: ['requests'],
+                    i: ri,
+                    v: [req],
+                })) {
+                    out.push(ev);
+                }
+                // 2) response mutations belonging to this request (in file order)
+                for (const m of muts) {
+                    if (m.reqIndex !== ri)
+                        continue;
+                    if (!m.isResponse && !m.isFinalize)
+                        continue;
+                    for (const ev of proj.projectLine(m.obj))
+                        out.push(ev);
+                }
+                // 3) also project any response already embedded on the request object
+                if (Array.isArray(req.response) && req.response.length) {
+                    for (const ev of proj.projectLine({
+                        kind: 2,
+                        k: ['requests', ri, 'response'],
+                        v: req.response,
+                    })) {
+                        out.push(ev);
+                    }
+                }
+                // 4) force finalize this request's streams so AGENT_MESSAGE lands next to its USER
+                for (const ev of proj.finalizeAllStreams())
+                    out.push(ev);
+                // 5) flush any debounced COPILOT_DONE immediately for ordering
+                if (pendingDone.length) {
+                    out.push(...pendingDone.splice(0));
+                }
+            }
+            // leftover
+            for (const ev of proj.finalizeAllStreams())
+                out.push(ev);
+            if (pendingDone.length)
+                out.push(...pendingDone.splice(0));
+        }
+        catch {
+            /* 投影失败返回已收集部分 */
+        }
+        finally {
+            try {
+                proj.dispose();
+            }
+            catch {
+                /* ignore */
+            }
+        }
+        return out;
+    }
+    start() {
+        this.projector.setDoneSink((ev) => {
+            if (!this.disposed)
+                this.opts.onEvent(ev);
+        });
+        this.scan();
+        this.timer = setInterval(() => this.scan(), this.opts.rescanMs);
+        // poll remains as backup even when fs.watch is active
+        this.pollTimer = setInterval(() => this.tail(), this.opts.pollMs);
+        // 兜底用户消息扫描：桌面在「非选中」会话直接发消息时，当前 watcher 只 tail
+        // 被 pin 的选中文件，其它会话的新 USER_MESSAGE 会丢失。轻量扫描器定期检查
+        // 所有 chatSessions 文件尾部，只投 USER_MESSAGE（不投 assistant 侧，避免与
+        // transcript/兜底双渲染），保证手机端任何会话都看不到丢消息。
+        this.userMsgTimer = setInterval(() => this.scanForeignUserMessages(), USER_MSG_SCAN_MS);
+    }
+    dispose() {
+        this.disposed = true;
+        if (this.timer)
+            clearInterval(this.timer);
+        if (this.pollTimer)
+            clearInterval(this.pollTimer);
+        if (this.userMsgTimer)
+            clearInterval(this.userMsgTimer);
+        if (this.watchDebounce)
+            clearTimeout(this.watchDebounce);
+        this.closeWatchers();
+        this.projector.dispose();
+    }
+    /**
+     * 桌面→手机 USER_MESSAGE 兜底扫描（根因修复，issue2）：
+     *
+     * 背景：主 watcher 只 tail「选中/pin」的一个会话文件；TranscriptWatcher 同样
+     * 单文件。用户直接在桌面 Copilot 插件的「其它」会话发消息时，该文件的增量
+     * 永远不会被读到 → 手机看不到。
+     *
+     * 方案：周期扫描所有 chatSessions 目录里每个文件的新增字节（增量读），
+     * 只挑出 `kind=0/kind=2` 中「新出现且属于桌面发出」的 USER_MESSAGE 并 onEvent。
+     * - 不投 assistant 流（避免双渲染 / 性能开销）
+     * - 用 requestId 记忆去重（JsonlProjector 的 seenRequestIds 只认单个文件投影
+     *   顺序，这里用独立全局 seen 保证跨扫描、跨文件不重复投）
+     * - 增量 offset 记录避免整文件反复解析
+     */
+    scanForeignUserMessages() {
+        if (this.disposed)
+            return;
+        const dirs = this.opts.preferChatSessionDirs ?? [];
+        const roots = this.opts.roots ?? defaultSessionRoots();
+        const seenDirs = new Set();
+        const queue = [];
+        for (const d of dirs) {
+            const n = path.normalize(d);
+            if (seenDirs.has(n))
+                continue;
+            seenDirs.add(n);
+            queue.push(n);
+        }
+        for (const root of roots) {
+            let entries = [];
+            try {
+                entries = fs.readdirSync(root);
+            }
+            catch {
+                continue;
+            }
+            for (const e of entries) {
+                const d = path.join(root, e, 'chatSessions');
+                const n = path.normalize(d);
+                if (seenDirs.has(n))
+                    continue;
+                seenDirs.add(n);
+                queue.push(n);
+            }
+        }
+        for (const dir of queue) {
+            let files = [];
+            try {
+                files = fs.readdirSync(dir).filter((f) => f.endsWith('.jsonl'));
+            }
+            catch {
+                continue;
+            }
+            for (const f of files) {
+                const full = path.join(dir, f);
+                // 已选中的会话由主 watcher 负责，这里跳过，避免重复
+                if (this.current === full)
+                    continue;
+                try {
+                    const st = fs.statSync(full);
+                    if (!st.isFile())
+                        continue;
+                    const cursor = this.userMsgCursors.get(full) ?? { offset: 0, mtimeMs: 0, lastReqCount: 0 };
+                    if (st.mtimeMs === cursor.mtimeMs && st.size === cursor.offset) {
+                        // 文件未变化，快速跳过（避免每 500ms 对全部 jsonl open/read）
+                        continue;
+                    }
+                    if (st.size < cursor.offset) {
+                        // 文件被重写/截断：重置增量
+                        cursor.offset = 0;
+                        cursor.lastReqCount = 0;
+                    }
+                    if (cursor.offset === 0 && !this.userMsgCursors.has(full)) {
+                        // 首次看到此文件：从尾部开始，只投「之后新增」的桌面消息。
+                        // 否则会把整个文件的历史请求当新消息重放（PWA 端 seenKeys 虽去重，
+                        // 但 bridge 的 echo 窗口与带宽会被污染）。
+                        cursor.offset = st.size;
+                        cursor.mtimeMs = st.mtimeMs;
+                        this.userMsgCursors.set(full, cursor);
+                        continue;
+                    }
+                    if (st.size <= cursor.offset) {
+                        cursor.mtimeMs = st.mtimeMs;
+                        this.userMsgCursors.set(full, cursor);
+                        continue;
+                    }
+                    const len = st.size - cursor.offset;
+                    // 限制单次读取，防止超大文件卡死（一次最多 4MB）
+                    if (len > 4 * 1024 * 1024) {
+                        cursor.offset = st.size - 4 * 1024 * 1024;
+                        continue;
+                    }
+                    const fd = fs.openSync(full, 'r');
+                    const buf = Buffer.alloc(len);
+                    fs.readSync(fd, buf, 0, len, cursor.offset);
+                    fs.closeSync(fd);
+                    cursor.offset = st.size;
+                    const lines = buf.toString('utf8').split('\n');
+                    for (const line of lines) {
+                        const s = line.trim();
+                        if (!s)
+                            continue;
+                        try {
+                            const obj = JSON.parse(s);
+                            const reqs = this.extractRequestsFromObj(obj);
+                            if (!reqs || !reqs.length)
+                                continue;
+                            for (const r of reqs) {
+                                const rid = r?.requestId ?? '';
+                                if (!rid || this.seenForeignReqIds.has(rid))
+                                    continue;
+                                const text = (0, jsonl_1.textOfUserReq)(r);
+                                if (!text)
+                                    continue;
+                                this.seenForeignReqIds.add(rid);
+                                // 手机端已 pin 某会话时，禁止把「其他会话」的桌面消息灌进当前 feed
+                                // （否则切换到 A 后仍看到 B 的「你好」——会话内容错乱根因之一）。
+                                // 未 pin（跟随最新）时才广播，便于桌面任意会话的实时同步。
+                                if (this.pinnedFile)
+                                    continue;
+                                this.opts.onEvent({ type: 'USER_MESSAGE', text, requestId: rid, foreign: true });
+                            }
+                        }
+                        catch {
+                            /* 单行损坏忽略 */
+                        }
+                    }
+                    // 记录最新 mtime + offset：下次 mtime/size 相同则快速跳过
+                    cursor.mtimeMs = st.mtimeMs;
+                    this.userMsgCursors.set(full, cursor);
+                }
+                catch {
+                    /* stat/read 失败忽略 */
+                }
+            }
+        }
+        // 防止 seen 无限增长
+        if (this.seenForeignReqIds.size > 20000) {
+            this.seenForeignReqIds.clear();
+        }
+    }
+    /** 从任意 jsonl 行（kind=0 快照或 kind=2 增量）中提取 request 数组 */
+    extractRequestsFromObj(obj) {
+        if (!obj || typeof obj !== 'object')
+            return undefined;
+        if (obj.kind === 0 && Array.isArray(obj?.v?.requests)) {
+            return obj.v.requests;
+        }
+        if (obj.kind === 2 &&
+            Array.isArray(obj.k) &&
+            obj.k.length >= 1 &&
+            obj.k[0] === 'requests' &&
+            Array.isArray(obj.v)) {
+            // k 可能为 ['requests']（整组追加）或 ['requests', idx, 'request']
+            // （单项变异）。两者 v 里都可能是单个 request 或数组。
+            const v = obj.v;
+            if (Array.isArray(v)) {
+                // 若 v 也是数组且内含 request 对象 → 整组/多项
+                return v;
+            }
+            if (v && typeof v === 'object') {
+                return [v];
+            }
+        }
+        return undefined;
+    }
+    closeWatchers() {
+        try {
+            this.fileWatcher?.close();
+        }
+        catch {
+            /* ignore */
+        }
+        try {
+            this.dirWatcher?.close();
+        }
+        catch {
+            /* ignore */
+        }
+        this.fileWatcher = undefined;
+        this.dirWatcher = undefined;
+    }
+    scheduleTailFromWatch() {
+        if (this.disposed)
+            return;
+        if (this.watchDebounce)
+            clearTimeout(this.watchDebounce);
+        this.watchDebounce = setTimeout(() => {
+            this.watchDebounce = undefined;
+            this.tail();
+        }, this.watchDebounceMs);
+    }
+    bindWatchers(file) {
+        this.closeWatchers();
+        const onChange = () => this.scheduleTailFromWatch();
+        try {
+            this.fileWatcher = fs.watch(file, { persistent: false }, onChange);
+            this.fileWatcher.on('error', () => {
+                try {
+                    this.fileWatcher?.close();
+                }
+                catch {
+                    /* ignore */
+                }
+                this.fileWatcher = undefined;
+            });
+        }
+        catch {
+            this.fileWatcher = undefined;
+        }
+        const parent = path.dirname(file);
+        try {
+            this.dirWatcher = fs.watch(parent, { persistent: false }, (eventType, filename) => {
+                if (filename && this.current && path.basename(this.current) === String(filename)) {
+                    this.scheduleTailFromWatch();
+                }
+                else if (eventType === 'rename' || eventType === 'change') {
+                    this.scan();
+                    this.scheduleTailFromWatch();
+                }
+            });
+            this.dirWatcher.on('error', () => {
+                try {
+                    this.dirWatcher?.close();
+                }
+                catch {
+                    /* ignore */
+                }
+                this.dirWatcher = undefined;
+            });
+        }
+        catch {
+            this.dirWatcher = undefined;
+        }
+    }
+    scan() {
+        if (this.disposed)
+            return;
+        // 手机端显式选定了会话 → 不再自动跟随最新文件（否则会把选中的会话抢走）
+        if (this.pinnedFile) {
+            if (this.current !== this.pinnedFile)
+                this.bindFile(this.pinnedFile);
+            return;
+        }
+        const newest = this.opts.forceFile ||
+            findNewestSessionFile({
+                preferDirs: this.opts.preferChatSessionDirs,
+                roots: this.opts.roots ?? defaultSessionRoots(),
+            });
+        if (!newest)
+            return;
+        if (newest !== this.current) {
+            this.bindFile(newest);
+        }
+    }
+    bindFile(file, opts) {
+        this.current = file;
+        this.pending = '';
+        this.projector.reset();
+        this.lastLineFp = '';
+        this.bootstrapDoneFor = undefined;
+        let startOffset = 0;
+        let st;
+        try {
+            st = fs.statSync(file);
+            this.lastSize = st.size;
+            this.lastMtimeMs = st.mtimeMs;
+        }
+        catch {
+            this.lastSize = 0;
+            this.lastMtimeMs = 0;
+        }
+        if (this.liveOnly) {
+            startOffset = st?.size ?? 0;
+        }
+        this.offset = startOffset;
+        const mode = this.liveOnly ? 'live-only@EOF' : 'catch-up@0';
+        // Tag internal so bridge/PWA can drop chrome noise from the phone feed.
+        this.opts.onEvent({
+            type: 'SYSTEM_MESSAGE',
+            text: `Watching session: ${path.basename(file)} (${mode})`,
+            visibility: 'internal',
+            internal: true,
+        });
+        this.bindWatchers(file);
+        if (!this.liveOnly) {
+            this.tail(true);
+        }
+        else if (opts?.skipBootstrap) {
+            // 手机 PHONE_SESSION_SELECT：历史只走 HISTORY_REPLAY，live 从 EOF 收增量
+            this.bootstrapDoneFor = file;
+        }
+        else {
+            // Catch mid-turn: project last request(s) once without full history flood.
+            this.bootstrapLastRequests(file);
+        }
+    }
+    /**
+     * Read the full file once and project only the last N requests via a fresh
+     * temporary projector path — actually reuses main projector after reset so
+     * subsequent live diffs continue correctly.
+     */
+    bootstrapLastRequests(file) {
+        if (this.bootstrapDoneFor === file)
+            return;
+        const n = Math.max(0, this.opts.bootstrapLastRequests ?? 1);
+        if (n === 0) {
+            this.bootstrapDoneFor = file;
+            return;
+        }
+        let raw = '';
+        try {
+            raw = fs.readFileSync(file, 'utf8');
+        }
+        catch {
+            return;
+        }
+        const lines = raw.split('\n').filter((l) => l.trim());
+        if (!lines.length) {
+            this.bootstrapDoneFor = file;
+            return;
+        }
+        // Prefer the last kind=0 snapshot if present; else walk all lines.
+        let kind0 = null;
+        const mutations = [];
+        for (const line of lines) {
+            try {
+                const obj = JSON.parse(line);
+                if (obj?.kind === 0)
+                    kind0 = obj;
+                else
+                    mutations.push(obj);
+            }
+            catch {
+                /* ignore */
+            }
+        }
+        // Reset projector and only emit last N requests worth of content.
+        this.projector.reset();
+        if (kind0) {
+            try {
+                // Temporarily project kind0 but filter to last N requests by mutating a shallow copy
+                const v = kind0.v && typeof kind0.v === 'object' ? { ...kind0.v } : kind0.v;
+                if (v && Array.isArray(v.requests) && v.requests.length > n) {
+                    v.requests = v.requests.slice(-n);
+                    // renumber is not needed — projector uses array indices as requestIndex
+                }
+                const evs = this.projector.projectLine({ ...kind0, v });
+                for (const ev of evs)
+                    this.opts.onEvent(ev);
+            }
+            catch {
+                /* ignore */
+            }
+        }
+        // Apply trailing mutations so mid-turn kind2/1 after snapshot still land.
+        // Cap work: only last ~80 mutation lines.
+        const tailMut = mutations.slice(-80);
+        for (const obj of tailMut) {
+            try {
+                const evs = this.projector.projectLine(obj);
+                for (const ev of evs)
+                    this.opts.onEvent(ev);
+            }
+            catch {
+                /* ignore */
+            }
+        }
+        this.bootstrapDoneFor = file;
+        // Stay at EOF for live tail; pending empty.
+        try {
+            const st = fs.statSync(file);
+            this.offset = st.size;
+            this.lastSize = st.size;
+            this.lastMtimeMs = st.mtimeMs;
+        }
+        catch {
+            /* ignore */
+        }
+        this.pending = '';
+    }
+    tail(fromStart = false) {
+        if (!this.current || this.disposed)
+            return;
+        let st;
+        try {
+            st = fs.statSync(this.current);
+        }
+        catch {
+            return;
+        }
+        // Truncation / full rewrite: size went backwards.
+        if (st.size < this.offset || st.size < this.lastSize) {
+            this.offset = 0;
+            this.pending = '';
+            this.projector.reset();
+            this.lastLineFp = '';
+            // After rewrite, bootstrap again so phone gets current turn.
+            if (this.liveOnly) {
+                this.bootstrapDoneFor = undefined;
+                this.lastSize = st.size;
+                this.lastMtimeMs = st.mtimeMs;
+                this.bootstrapLastRequests(this.current);
+                return;
+            }
+        }
+        if (fromStart)
+            this.offset = 0;
+        // Same size but mtime advanced: possible in-place rewrite of last line(s).
+        // Re-read from a safe earlier point: re-bootstrap for liveOnly, else full re-tail.
+        if (st.size === this.offset &&
+            st.size === this.lastSize &&
+            st.mtimeMs > this.lastMtimeMs + 5 &&
+            this.liveOnly) {
+            this.lastMtimeMs = st.mtimeMs;
+            this.bootstrapDoneFor = undefined;
+            this.projector.reset();
+            this.bootstrapLastRequests(this.current);
+            return;
+        }
+        if (st.size === this.offset) {
+            this.lastSize = st.size;
+            this.lastMtimeMs = st.mtimeMs;
+            return;
+        }
+        const fd = fs.openSync(this.current, 'r');
+        try {
+            const len = st.size - this.offset;
+            const buf = Buffer.alloc(len);
+            fs.readSync(fd, buf, 0, len, this.offset);
+            this.offset = st.size;
+            this.lastSize = st.size;
+            this.lastMtimeMs = st.mtimeMs;
+            const chunk = this.pending + buf.toString('utf8');
+            const parts = chunk.split('\n');
+            this.pending = parts.pop() || '';
+            for (const line of parts) {
+                const s = line.trim();
+                if (!s)
+                    continue;
+                // Detect identical re-append of same line (rare)
+                const fp = s.length + ':' + s.slice(0, 64) + ':' + s.slice(-32);
+                if (fp === this.lastLineFp)
+                    continue;
+                this.lastLineFp = fp;
+                try {
+                    const obj = JSON.parse(s);
+                    // Full kind0 snapshot mid-session: project (projector dedupes requests/text)
+                    const evs = this.projector.projectLine(obj);
+                    for (const ev of evs)
+                        this.opts.onEvent(ev);
+                }
+                catch {
+                    // ignore bad line
+                }
+            }
+        }
+        finally {
+            fs.closeSync(fd);
+        }
+    }
+}
+exports.SessionWatcher = SessionWatcher;
+/**
+ * 从文件尾部读取内容，自适应扩大窗口直到拿到足够多的可解析行。
+ * 返回已丢弃截断首行的文本；失败返回空串。
+ */
+function readTailLines(file, size) {
+    let fd;
+    try {
+        fd = fs.openSync(file, 'r');
+        let best = '';
+        for (const win of HISTORY_TAIL_WINDOWS) {
+            const len = Math.min(win, size);
+            const buf = Buffer.allocUnsafe(len);
+            const n = fs.readSync(fd, buf, 0, len, size - len);
+            let text = buf.subarray(0, n).toString('utf8');
+            // 只有真的截断了才需要丢首行（整文件读到时首行是完整的）
+            if (len < size) {
+                const nl = text.indexOf('\n');
+                text = nl >= 0 ? text.slice(nl + 1) : '';
+            }
+            best = text;
+            let lines = 0;
+            for (const l of text.split('\n')) {
+                if (l.trim())
+                    lines++;
+            }
+            // 行数够了，或已经读到整个文件，就不必再扩
+            if (lines >= HISTORY_TAIL_MIN_LINES || len >= size)
+                break;
+        }
+        return best;
+    }
+    catch {
+        return '';
+    }
+    finally {
+        if (fd !== undefined) {
+            try {
+                fs.closeSync(fd);
+            }
+            catch {
+                /* ignore */
+            }
+        }
+    }
+}
+function newestInChatSessionsDir(dir) {
+    if (!fs.existsSync(dir))
+        return undefined;
+    let files = [];
+    try {
+        files = fs.readdirSync(dir).filter((f) => f.endsWith('.jsonl'));
+    }
+    catch {
+        return undefined;
+    }
+    let best;
+    for (const f of files) {
+        const full = path.join(dir, f);
+        try {
+            const mt = fs.statSync(full).mtimeMs;
+            if (!best || mt > best.mtime)
+                best = { file: full, mtime: mt };
+        }
+        catch {
+            // ignore
+        }
+    }
+    return best;
+}
+function findNewestSessionFile(opts) {
+    let best;
+    for (const dir of opts.preferDirs || []) {
+        const hit = newestInChatSessionsDir(dir);
+        if (hit && (!best || hit.mtime > best.mtime))
+            best = hit;
+    }
+    if (best)
+        return best.file;
+    for (const root of opts.roots) {
+        if (!fs.existsSync(root))
+            continue;
+        let entries = [];
+        try {
+            entries = fs.readdirSync(root);
+        }
+        catch {
+            continue;
+        }
+        for (const id of entries) {
+            const dir = path.join(root, id, 'chatSessions');
+            const hit = newestInChatSessionsDir(dir);
+            if (hit && (!best || hit.mtime > best.mtime))
+                best = hit;
+        }
+    }
+    return best?.file;
+}
+function defaultSessionRoots() {
+    const home = os.homedir();
+    const roots = [];
+    roots.push(path.join(home, 'Library', 'Application Support', 'Code', 'User', 'workspaceStorage'));
+    roots.push(path.join(home, 'Library', 'Application Support', 'Code - Insiders', 'User', 'workspaceStorage'));
+    roots.push(path.join(home, '.config', 'Code', 'User', 'workspaceStorage'));
+    roots.push(path.join(home, '.config', 'Code - Insiders', 'User', 'workspaceStorage'));
+    if (process.env.APPDATA) {
+        roots.push(path.join(process.env.APPDATA, 'Code', 'User', 'workspaceStorage'));
+        roots.push(path.join(process.env.APPDATA, 'Code - Insiders', 'User', 'workspaceStorage'));
+    }
+    return roots;
+}
+function sessionDiscoveryFromExtension(storageUri, globalStorageUri) {
+    const preferChatSessionDirs = [];
+    const roots = [];
+    const seen = new Set();
+    const pushRoot = (r) => {
+        const n = path.normalize(r);
+        if (seen.has(n))
+            return;
+        seen.add(n);
+        roots.push(n);
+    };
+    // storageUri is extension workspaceStorage/<wsHash>/local.xxx — parent is wsHash dir
+    if (storageUri?.fsPath) {
+        const wsHashDir = path.dirname(storageUri.fsPath);
+        const wsRoot = path.dirname(wsHashDir);
+        preferChatSessionDirs.push(path.join(wsHashDir, 'chatSessions'));
+        pushRoot(wsRoot);
+    }
+    if (globalStorageUri?.fsPath) {
+        const globalStorageRoot = path.dirname(globalStorageUri.fsPath);
+        const userDir = path.dirname(globalStorageRoot);
+        pushRoot(path.join(userDir, 'workspaceStorage'));
+        const copilotChat = path.join(globalStorageRoot, 'github.copilot-chat');
+        if (fs.existsSync(copilotChat)) {
+            preferChatSessionDirs.push(path.join(copilotChat, 'chatSessions'));
+        }
+    }
+    for (const r of defaultSessionRoots())
+        pushRoot(r);
+    return { preferChatSessionDirs, roots };
+}
+/**
+ * 解析会话标题（与 VS Code 官方侧栏一致）：
+ * 1. chatSessions/<id>.jsonl 中 kind=1 且 k==['customTitle'] 的 v（LLM 生成，权威源）
+ * 2. 缺失时：首个用户 request 的 message 文本第一行截断 200 字符（官方 fallback）
+ * 3. 空会话：'新建聊天'
+ */
+function resolveSessionTitle(file) {
+    let customTitle;
+    let firstPrompt;
+    let hasRequests = false;
+    try {
+        const st = fs.statSync(file);
+        if (st.size < 20)
+            return '新建聊天';
+        const fd = fs.openSync(file, 'r');
+        try {
+            // kind=0 快照常是超大单行（实测 8MB+），1MB 截断会导致 JSON.parse 失败，
+            // customTitle 在行首却拿不到 → 回落「新建聊天」。扩到 12MB 并用正则兜底。
+            const cap = Math.min(st.size, 12 * 1024 * 1024);
+            const buf = Buffer.alloc(cap);
+            const read = fs.readSync(fd, buf, 0, buf.length, 0);
+            const head = buf.subarray(0, read).toString('utf8');
+            // 1) 正则直接抽 customTitle / initialTitle（不依赖换行或完整 JSON）
+            for (const key of ['customTitle', 'initialTitle', 'title']) {
+                const re = new RegExp(`"${key}"\\s*:\\s*"((?:\\\\.|[^"\\\\])*)"`);
+                const m = head.match(re);
+                if (m?.[1]) {
+                    const t = m[1]
+                        .replace(/\\n/g, ' ')
+                        .replace(/\\"/g, '"')
+                        .replace(/\\\\/g, '\\')
+                        .trim();
+                    if (t && t !== 'New Chat' && t !== '新建聊天') {
+                        customTitle = t;
+                        break;
+                    }
+                }
+            }
+            if (customTitle)
+                return customTitle;
+            for (const line of head.split('\n')) {
+                const s = line.trim();
+                if (!s)
+                    continue;
+                try {
+                    const obj = JSON.parse(s);
+                    if (!obj || typeof obj !== 'object')
+                        continue;
+                    if (obj.kind === 1 &&
+                        Array.isArray(obj.k) &&
+                        obj.k.length === 1 &&
+                        obj.k[0] === 'customTitle' &&
+                        typeof obj.v === 'string') {
+                        customTitle = obj.v.trim() || customTitle;
+                    }
+                    else if (obj.kind === 0 && obj.v && typeof obj.v === 'object') {
+                        const v = obj.v;
+                        for (const key of ['customTitle', 'initialTitle', 'title']) {
+                            const val = typeof v[key] === 'string' ? String(v[key]).trim() : '';
+                            if (val && val !== 'New Chat' && val !== '新建聊天') {
+                                customTitle = customTitle || val;
+                                break;
+                            }
+                        }
+                        if (Array.isArray(v.requests) && v.requests.length) {
+                            hasRequests = true;
+                            if (!firstPrompt) {
+                                const first = v.requests[0];
+                                const msg = first?.message;
+                                const text = typeof msg?.text === 'string'
+                                    ? msg.text
+                                    : Array.isArray(msg?.parts)
+                                        ? msg.parts
+                                            .map((p) => typeof p?.text === 'string'
+                                            ? p.text
+                                            : typeof p?.value === 'string'
+                                                ? p.value
+                                                : '')
+                                            .join('')
+                                        : '';
+                                if (String(text).trim()) {
+                                    firstPrompt = String(text).trim().split('\n')[0].slice(0, 200);
+                                }
+                            }
+                        }
+                    }
+                    else if (obj.kind === 2 && Array.isArray(obj.k) && obj.k[0] === 'requests' && Array.isArray(obj.v)) {
+                        if (!hasRequests && obj.v.length)
+                            hasRequests = true;
+                        for (const r of obj.v) {
+                            if (firstPrompt)
+                                break;
+                            const msg = r?.message;
+                            const text = typeof msg?.text === 'string'
+                                ? msg.text
+                                : typeof msg?.value === 'string'
+                                    ? msg.value
+                                    : Array.isArray(msg?.parts)
+                                        ? msg.parts
+                                            .map((p) => typeof p?.text === 'string'
+                                            ? p.text
+                                            : typeof p?.value === 'string'
+                                                ? p.value
+                                                : '')
+                                            .join('')
+                                        : '';
+                            if (text.trim()) {
+                                firstPrompt = text.trim().split('\n')[0].slice(0, 200);
+                            }
+                        }
+                    }
+                }
+                catch {
+                    // ignore bad / truncated line
+                }
+                if (customTitle && firstPrompt)
+                    break;
+            }
+        }
+        finally {
+            fs.closeSync(fd);
+        }
+    }
+    catch {
+        return undefined;
+    }
+    if (customTitle)
+        return customTitle;
+    if (firstPrompt)
+        return firstPrompt;
+    if (hasRequests)
+        return '对话';
+    return '新建聊天';
+}
+/**
+ * 快速统计会话文件中的请求数：只读文件前 ~256KB 找 kind=0 快照的 requests
+ * 长度；找不到快照则数行数作为粗略估计。大文件不整读。
+ */
+function countRequestsQuick(file) {
+    try {
+        const fd = fs.openSync(file, 'r');
+        try {
+            const buf = Buffer.alloc(256 * 1024);
+            const read = fs.readSync(fd, buf, 0, buf.length, 0);
+            const head = buf.subarray(0, read).toString('utf8');
+            let requests;
+            for (const line of head.split('\n')) {
+                const s = line.trim();
+                if (!s)
+                    continue;
+                try {
+                    const obj = JSON.parse(s);
+                    if (obj && obj.kind === 0 && obj.v && Array.isArray(obj.v.requests)) {
+                        requests = obj.v.requests.length;
+                        break;
+                    }
+                }
+                catch {
+                    // ignore bad line
+                }
+            }
+            // kind=0 快照往往是空的（requests: []），真实请求都在后续 kind=2 增量里，
+            // 只看快照会把活跃会话显示成「0 次请求」。因此另做 requestId 去重计数。
+            const ids = new Set();
+            const re = /"requestId"\s*:\s*"([^"]+)"/g;
+            let m;
+            while ((m = re.exec(head)) !== null)
+                ids.add(m[1]);
+            if (requests !== undefined || ids.size > 0) {
+                return Math.max(requests ?? 0, ids.size);
+            }
+            // 粗略估计：按行数 / 2（快照 + 增量各占一部分）
+            const lineCount = head.split('\n').filter((l) => l.trim()).length;
+            return Math.max(0, Math.round(lineCount / 2));
+        }
+        finally {
+            fs.closeSync(fd);
+        }
+    }
+    catch {
+        return undefined;
+    }
+}
+//# sourceMappingURL=sessionWatcher.js.map

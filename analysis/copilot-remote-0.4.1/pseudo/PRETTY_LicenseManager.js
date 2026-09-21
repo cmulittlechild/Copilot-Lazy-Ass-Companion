@@ -1,0 +1,50 @@
+e.LicenseManager=class{
+constructor(t){
+this.context=t,this.publicKey=this.loadPublicKey()
+}
+loadPublicKey(){
+const t=l.join(this.context.extensionPath,"dist","public.pem")
+;if(!h.existsSync(t))throw new Error("public.pem not found in extension bundle")
+;return h.readFileSync(t,"utf8")
+}
+isActivated(){
+const t=this.context.globalState.get(f),e=this.context.globalState.get(d)
+;if(!t||!e)return!1
+;if(e!==(0,u.machineIdSync)())return!1
+;try{
+return this.verifyKey(t),!0
+}
+catch{
+return!1
+}
+
+}
+async activate(){
+const t=await a.window.showInputBox({
+title:"Copilot Remote — License Activation",prompt:"Paste your license key (from the purchase email)",password:!1,ignoreFocusOut:!0,validateInput:t=>t&&0!==t.trim().length?3!==t.trim().split(".").length?"Invalid key format — should be a JWT (three dot-separated parts)":null:"Key cannot be empty"
+}
+)
+;if(!t)return!1
+;try{
+this.verifyKey(t.trim())
+}
+catch(t){
+const e=t instanceof Error?t.message:String(t)
+;return a.window.showErrorMessage(`Invalid license key: ${
+e
+}
+`),!1
+}
+const e=(0,u.machineIdSync)()
+;return await this.context.globalState.update(f,t.trim()),await this.context.globalState.update(d,e),a.window.showInformationMessage("✅ Copilot Remote activated! Scan the QR code in the sidebar to connect your phone."),!0
+}
+verifyKey(t){
+const e=c.verify(t,this.publicKey,{
+algorithms:["RS256"]
+}
+)
+;if("copilot-remote"!==e.product)throw new Error("Key is for a different product")
+;return e
+}
+
+}

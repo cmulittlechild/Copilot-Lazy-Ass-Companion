@@ -1,0 +1,4 @@
+mock bridge on ws://127.0.0.1:3011
+client connected 1
+from phone PHONE_CONNECT {"type":"PHONE_CONNECT","fcmToken":null}
+from phone PHONE_MESSAGE {"type":"PHONE_MESSAGE","text":"hello from fake phone","mode":"agent"}

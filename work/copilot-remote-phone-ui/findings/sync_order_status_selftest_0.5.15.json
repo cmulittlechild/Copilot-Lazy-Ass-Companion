@@ -1,0 +1,422 @@
+{
+  "cases": [
+    {
+      "id": "C1_connect_history",
+      "ok": true,
+      "detail": {
+        "n": 200,
+        "userCount": 7,
+        "agentCount": 8,
+        "toolCount": 184,
+        "typing": 0,
+        "done": 0,
+        "badStack": false,
+        "uaPairs": 3,
+        "compact": "UTTTTTTTTTTTTTTTTTAUTATUTTAATTTTTTTTTTTTTTTTTTTTTTATTTTTTTTTTATTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT",
+        "users": [
+          {
+            "text": "你有写好，各个线上课程的链接，提供的学时吗？并且你要去查看，确实这个课程是存在的",
+            "i": 0
+          },
+          {
+            "text": "1 能做到免费凑满学时 并且拿到证书证明吗\n\n2 培训类的 有线上课程吗",
+            "i": 19
+          },
+          {
+            "text": "联网复核一下，确定都是能在线完成的 并且这些课程是免费的 我要百分百确定性",
+            "i": 23
+          },
+          {
+            "text": "你好",
+            "i": 196
+          },
+          {
+            "text": "今天是周几",
+            "i": 197
+          },
+          {
+            "text": "你好",
+            "i": 198
+          }
+        ]
+      }
+    },
+    {
+      "id": "C2_select_munich",
+      "ok": true,
+      "detail": {
+        "selOk": true,
+        "replayCount": 1,
+        "liveNonReplay": 565,
+        "liveTypes": [
+          "AGENT_STREAM_START",
+          "AGENT_STREAM_SET",
+          "TOOL_CALL",
+          "AGENT_MESSAGE",
+          "AGENT_STREAM_END",
+          "AGENT_STREAM_CHUNK",
+          "COPILOT_DONE"
+        ],
+        "sum": {
+          "n": 53,
+          "userCount": 8,
+          "agentCount": 16,
+          "toolCount": 28,
+          "typing": 0,
+          "done": 0,
+          "badStack": false,
+          "uaPairs": 8,
+          "compact": "UAUAUTAUTTAAUTTAAUTTTTTTTTTTTTTTTTTAAUTATAUTTAATTAAA.",
+          "users": [
+            {
+              "text": "能线上完成的是哪些，哪些必须要线下完成",
+              "i": 0
+            },
+            {
+              "text": "也就是说，学分/课时   还有 logbook 上需要上的课 都可以线上完成吗",
+              "i": 2
+            },
+            {
+              "text": "你有把相关的能线上的课程，写到 readme.md 里吗",
+              "i": 4
+            },
+            {
+              "text": "相关链接有吗 ，你有写明分别这些课程提供多少学分，要完成的哪些，才能满足学分要求",
+              "i": 7
+            },
+            {
+              "text": "1 直接做\n\n2 我和朋友说可以全部线上，朋友说 你得有培训才行，这是什么意思",
+              "i": 12
+            },
+            {
+              "text": "你有写好，各个线上课程的链接，提供的学时吗？并且你要去查看，确实这个课程是存在的",
+              "i": 17
+            }
+          ]
+        },
+        "file": "cbfb5e9c-1ced-4266-9bff-a4fcdc92a61a.jsonl"
+      }
+    },
+    {
+      "id": "C2_select_glm",
+      "ok": true,
+      "detail": {
+        "selOk": true,
+        "replayCount": 1,
+        "liveNonReplay": 44,
+        "liveTypes": [
+          "AGENT_STREAM_START",
+          "AGENT_STREAM_SET",
+          "TOOL_CALL",
+          "AGENT_MESSAGE",
+          "AGENT_STREAM_END",
+          "COPILOT_DONE"
+        ],
+        "sum": {
+          "n": 23,
+          "userCount": 2,
+          "agentCount": 10,
+          "toolCount": 10,
+          "typing": 0,
+          "done": 0,
+          "badStack": false,
+          "uaPairs": 2,
+          "compact": "UTTTTTTAAAATAAUTTTAAAA.",
+          "users": [
+            {
+              "text": "ae0430c726a54727ba6260cdec8101c9.WtX4Y99",
+              "i": 0
+            },
+            {
+              "text": "你再测试一下 现在模型是否有回复",
+              "i": 14
+            }
+          ]
+        },
+        "file": "1678ecf0-2ba1-4140-b4f5-0dcfed3e6a2f.jsonl"
+      }
+    },
+    {
+      "id": "C2_select_mihomo",
+      "ok": true,
+      "detail": {
+        "selOk": true,
+        "replayCount": 1,
+        "liveNonReplay": 75,
+        "liveTypes": [
+          "AGENT_STREAM_START",
+          "AGENT_STREAM_SET",
+          "TOOL_CALL",
+          "AGENT_MESSAGE",
+          "AGENT_STREAM_END",
+          "COPILOT_DONE"
+        ],
+        "sum": {
+          "n": 42,
+          "userCount": 3,
+          "agentCount": 11,
+          "toolCount": 27,
+          "typing": 0,
+          "done": 0,
+          "badStack": false,
+          "uaPairs": 3,
+          "compact": "UTTTTTTTTTTTTAAAUTTTTTTTTTAAATAUTTTTTAAAA.",
+          "users": [
+            {
+              "text": "改一下 colocrossing 上的 mihomo，现在是不是每十分钟刷新一次",
+              "i": 0
+            },
+            {
+              "text": "我是让你直接去修改 docker 容器 mihomo，不是在omniprox 瞎",
+              "i": 16
+            },
+            {
+              "text": "[Terminal 2a159eab-e39f-45da-8e56-01ac48",
+              "i": 31
+            }
+          ]
+        },
+        "file": "47e663d8-6cba-4df2-9ba1-f5dd2458b5cb.jsonl"
+      }
+    },
+    {
+      "id": "C2_select_multi",
+      "ok": true,
+      "detail": {
+        "selOk": true,
+        "replayCount": 1,
+        "liveNonReplay": 53,
+        "liveTypes": [
+          "AGENT_STREAM_START",
+          "AGENT_STREAM_SET",
+          "TOOL_CALL",
+          "AGENT_MESSAGE",
+          "AGENT_STREAM_END",
+          "COPILOT_DONE"
+        ],
+        "sum": {
+          "n": 29,
+          "userCount": 4,
+          "agentCount": 10,
+          "toolCount": 14,
+          "typing": 0,
+          "done": 0,
+          "badStack": false,
+          "uaPairs": 2,
+          "compact": "UUAUTTTTTTTTAAATTTTTTAAAAAAU.",
+          "users": [
+            {
+              "text": "你好",
+              "i": 0
+            },
+            {
+              "text": "nihao ",
+              "i": 1
+            },
+            {
+              "text": "联网搜索一下 是不是有可以测模型上下文的工具 \n你帮我测一下我们现在用的 dee",
+              "i": 3
+            },
+            {
+              "text": "**MARKER 值是多少?**",
+              "i": 27
+            }
+          ]
+        },
+        "file": "40fcafbd-9095-4662-9106-f194f782ecb6.jsonl"
+      }
+    },
+    {
+      "id": "C3_rapid_switch",
+      "ok": true,
+      "detail": {
+        "sels": [
+          {
+            "ok": true,
+            "file": "1678ecf0-2ba1-4140-b4f5-0dcfed3e6a2f.jsonl"
+          },
+          {
+            "ok": true,
+            "file": "cbfb5e9c-1ced-4266-9bff-a4fcdc92a61a.jsonl"
+          },
+          {
+            "ok": true,
+            "file": "1678ecf0-2ba1-4140-b4f5-0dcfed3e6a2f.jsonl"
+          }
+        ],
+        "replayN": 3,
+        "lastSys": [
+          "已切换到会话: 1678ecf0-2ba1-4140-b4f5-0dcfed3e6a2f.jsonl"
+        ],
+        "sum": {
+          "n": 23,
+          "userCount": 2,
+          "agentCount": 10,
+          "toolCount": 10,
+          "typing": 0,
+          "done": 0,
+          "badStack": false,
+          "uaPairs": 2,
+          "compact": "UTTTTTTAAAATAAUTTTAAAA.",
+          "users": [
+            {
+              "text": "ae0430c726a54727ba6260cdec8101c9.WtX4Y99",
+              "i": 0
+            },
+            {
+              "text": "你再测试一下 现在模型是否有回复",
+              "i": 14
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "C4_inject_status",
+      "ok": true,
+      "detail": {
+        "token": "sync-status-1786142955665",
+        "hasUser": true,
+        "an": {
+          "n": 567,
+          "types": [
+            "USER_MESSAGE",
+            "AGENT_STREAM_START",
+            "AGENT_STREAM_SET",
+            "TOOL_CALL",
+            "AGENT_MESSAGE",
+            "AGENT_STREAM_END",
+            "AGENT_STREAM_CHUNK",
+            "COPILOT_TYPING",
+            "COPILOT_DONE"
+          ],
+          "users": [
+            "sync-status-1786142955665"
+          ],
+          "typingCount": 1,
+          "doneCount": 11,
+          "streamStart": 14,
+          "streamEnd": 8,
+          "danglingTyping": false,
+          "lastTyping": 555,
+          "lastDone": 566
+        },
+        "firstTypes": [
+          "USER_MESSAGE",
+          "AGENT_STREAM_START",
+          "AGENT_STREAM_SET",
+          "TOOL_CALL",
+          "TOOL_CALL",
+          "TOOL_CALL",
+          "TOOL_CALL",
+          "TOOL_CALL",
+          "TOOL_CALL",
+          "TOOL_CALL",
+          "TOOL_CALL",
+          "TOOL_CALL",
+          "TOOL_CALL",
+          "TOOL_CALL",
+          "TOOL_CALL"
+        ]
+      }
+    },
+    {
+      "id": "C4b_inject_status_settle",
+      "ok": true,
+      "detail": {
+        "landed": true,
+        "an2": {
+          "n": 567,
+          "types": [
+            "USER_MESSAGE",
+            "AGENT_STREAM_START",
+            "AGENT_STREAM_SET",
+            "TOOL_CALL",
+            "AGENT_MESSAGE",
+            "AGENT_STREAM_END",
+            "AGENT_STREAM_CHUNK",
+            "COPILOT_TYPING",
+            "COPILOT_DONE"
+          ],
+          "users": [
+            "sync-status-1786142955665"
+          ],
+          "typingCount": 1,
+          "doneCount": 11,
+          "streamStart": 14,
+          "streamEnd": 8,
+          "danglingTyping": false,
+          "lastTyping": 555,
+          "lastDone": 566
+        },
+        "danglingTyping": false
+      }
+    },
+    {
+      "id": "C5_no_post_replay_typing_flood",
+      "ok": true,
+      "detail": {
+        "typingAfter": 0,
+        "streamAfter": 0,
+        "afterTypes": [
+          "COPILOT_DONE"
+        ]
+      }
+    },
+    {
+      "id": "C6_reconnect_replay",
+      "ok": true,
+      "detail": {
+        "replayN": 2,
+        "sums": [
+          {
+            "n": 42,
+            "userCount": 3,
+            "agentCount": 11,
+            "toolCount": 27,
+            "typing": 0,
+            "done": 0,
+            "badStack": false,
+            "uaPairs": 3,
+            "compact": "UTTTTTTTTTTTTAAAUTTTTTTTTTAAATAUTTTTTAAAA.",
+            "users": [
+              {
+                "text": "改一下 colocrossing 上的 mihomo，现在是不是每十分钟刷新一次",
+                "i": 0
+              },
+              {
+                "text": "我是让你直接去修改 docker 容器 mihomo，不是在omniprox 瞎",
+                "i": 16
+              },
+              {
+                "text": "[Terminal 2a159eab-e39f-45da-8e56-01ac48",
+                "i": 31
+              }
+            ]
+          },
+          {
+            "n": 23,
+            "userCount": 2,
+            "agentCount": 10,
+            "toolCount": 10,
+            "typing": 0,
+            "done": 0,
+            "badStack": false,
+            "uaPairs": 2,
+            "compact": "UTTTTTTAAAATAAUTTTAAAA.",
+            "users": [
+              {
+                "text": "ae0430c726a54727ba6260cdec8101c9.WtX4Y99",
+                "i": 0
+              },
+              {
+                "text": "你再测试一下 现在模型是否有回复",
+                "i": 14
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

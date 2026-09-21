@@ -1,0 +1,1533 @@
+{
+  "file": "/Users/xin/Library/Application Support/Code/User/workspaceStorage/31c13c0c390f5d1377fc9ce9b9c55cbd/chatSessions/9c9a327a-4c08-4379-aabf-e790942a895f.jsonl",
+  "size": 781447,
+  "lines": 111,
+  "parse_err": 0,
+  "kind_counter": [
+    [
+      1,
+      88
+    ],
+    [
+      2,
+      22
+    ],
+    [
+      0,
+      1
+    ]
+  ],
+  "k0_counter": [
+    [
+      "requests",
+      97
+    ],
+    [
+      "inputState",
+      13
+    ]
+  ],
+  "k_path_patterns": [
+    [
+      "requests/#/response",
+      17
+    ],
+    [
+      "requests/#/completionTokens",
+      14
+    ],
+    [
+      "requests/#/promptTokens",
+      14
+    ],
+    [
+      "requests/#/promptTokenDetails",
+      14
+    ],
+    [
+      "inputState/inputText",
+      6
+    ],
+    [
+      "inputState/selections",
+      6
+    ],
+    [
+      "requests/#/result",
+      5
+    ],
+    [
+      "requests/#/modelState",
+      5
+    ],
+    [
+      "requests/#/contentReferences",
+      5
+    ],
+    [
+      "requests/#/outputBuffer",
+      5
+    ],
+    [
+      "requests/#/elapsedMs",
+      5
+    ],
+    [
+      "requests",
+      4
+    ],
+    [
+      "requests/#/responseMarkdownInfo",
+      4
+    ],
+    [
+      "requests/#/followups",
+      4
+    ],
+    [
+      "requests/#/variableData/variables",
+      1
+    ],
+    [
+      "inputState/permissionLevel",
+      1
+    ]
+  ],
+  "response_part_kinds": [
+    [
+      "thinking",
+      48
+    ],
+    [
+      "toolInvocationSerialized",
+      43
+    ],
+    [
+      "text_value",
+      9
+    ],
+    [
+      "inlineReference",
+      1
+    ]
+  ],
+  "user_fields": [
+    [
+      "message.text",
+      4
+    ],
+    [
+      "message.parts",
+      4
+    ],
+    [
+      "req.requestId",
+      4
+    ],
+    [
+      "req.timestamp",
+      4
+    ],
+    [
+      "req.agent",
+      4
+    ],
+    [
+      "req.modelId",
+      4
+    ],
+    [
+      "req.responseId",
+      4
+    ],
+    [
+      "req.responseTimestamp",
+      4
+    ],
+    [
+      "req.modelState",
+      4
+    ],
+    [
+      "req.contentReferences",
+      4
+    ],
+    [
+      "req.codeCitations",
+      4
+    ],
+    [
+      "req.timeSpentWaiting",
+      4
+    ],
+    [
+      "req.modeInfo",
+      4
+    ],
+    [
+      "req.response",
+      4
+    ],
+    [
+      "req.message",
+      4
+    ],
+    [
+      "req.variableData",
+      4
+    ]
+  ],
+  "event_type_counts": [
+    [
+      "TOOL_CALL",
+      43
+    ],
+    [
+      "FINALIZE",
+      10
+    ],
+    [
+      "STREAM_SET",
+      9
+    ],
+    [
+      "USER_MESSAGE",
+      4
+    ]
+  ],
+  "events_sample": [
+    [
+      "FINALIZE",
+      0,
+      "result"
+    ],
+    [
+      "FINALIZE",
+      0,
+      "elapsedMs"
+    ],
+    [
+      "STREAM_SET",
+      "不是。VS Code 里的 **GitHub Copilot 插件** 不只是“可视化壳”，背后也**不是**简单套一层 Copilot CLI。\n\n## 简短"
+    ],
+    [
+      "USER_MESSAGE",
+      "联网搜索一下，有没有能远程控制 vscode 的 copilot插件的（不是 copilot cli）\n我想躺床上用手机发送指令， 并且我回到电脑面前的时候，会话都是同步的\n\n这个有方法名 联网搜索 github"
+    ],
+    [
+      "STREAM_SET",
+      "我先联网查一下：有没有能远程操控 VS Code 里 Copilot 插件（不是 CLI）的方案，以及会话能否跨手机/电脑同步。 "
+    ],
+    [
+      "TOOL_CALL",
+      "正在 Web 上搜索“remote control VS Code Copilot chat from phone session sync”"
+    ],
+    [
+      "TOOL_CALL",
+      "正在 Web 上搜索“GitHub Copilot Chat remote access mobile phone VS Code”"
+    ],
+    [
+      "TOOL_CALL",
+      "正在 Web 上搜索“vscode copilot agent remote control phone github”"
+    ],
+    [
+      "STREAM_SET",
+      "我先联网查一下：有没有能远程操控 VS Code 里 Copilot 插件（不是 CLI）的方案，以及会话能否跨手机/电脑同步。 "
+    ],
+    [
+      "TOOL_CALL",
+      "正在 Web 上搜索“remote control VS Code Copilot chat from phone session sync”"
+    ],
+    [
+      "TOOL_CALL",
+      "正在 Web 上搜索“GitHub Copilot Chat remote access mobile phone VS Code”"
+    ],
+    [
+      "TOOL_CALL",
+      "正在 Web 上搜索“vscode copilot agent remote control phone github”"
+    ],
+    [
+      "TOOL_CALL",
+      "正在 Web 上搜索“vscode copilot agent remote control phone github”"
+    ],
+    [
+      "TOOL_CALL",
+      "正在 Web 上搜索“\"copilot\" \"vscode\" \"remote\" \"phone\" OR \"mobile\" chat session sync”"
+    ],
+    [
+      "TOOL_CALL",
+      "copilot_fetchWebPage"
+    ],
+    [
+      "TOOL_CALL",
+      "正在提取 3 资源"
+    ],
+    [
+      "TOOL_CALL",
+      "copilot_fetchWebPage"
+    ],
+    [
+      "TOOL_CALL",
+      "正在提取 3 资源"
+    ],
+    [
+      "TOOL_CALL",
+      "正在提取 3 资源"
+    ],
+    [
+      "TOOL_CALL",
+      "正在 Web 上搜索“atulhritik copilot-remote VS Code marketplace”"
+    ],
+    [
+      "TOOL_CALL",
+      "正在 Web 上搜索“chat.sessionSync.enabled VS Code Copilot sessions GitHub Mobile steer"
+    ],
+    [
+      "FINALIZE",
+      1,
+      "result"
+    ],
+    [
+      "FINALIZE",
+      1,
+      "elapsedMs"
+    ],
+    [
+      "TOOL_CALL",
+      "copilot_fetchWebPage"
+    ],
+    [
+      "TOOL_CALL",
+      "正在提取 3 资源"
+    ],
+    [
+      "TOOL_CALL",
+      "正在提取 3 资源"
+    ],
+    [
+      "TOOL_CALL",
+      "正在 Web 上搜索“atulhritik copilot-remote VS Code marketplace”"
+    ],
+    [
+      "TOOL_CALL",
+      "正在 Web 上搜索“chat.sessionSync.enabled VS Code Copilot sessions GitHub Mobile steer"
+    ],
+    [
+      "TOOL_CALL",
+      "正在 Web 上搜索“chat.sessionSync.enabled VS Code Copilot sessions GitHub Mobile steer"
+    ],
+    [
+      "STREAM_SET",
+      "## 结论先说\n\n**官方目前没有**“远程遥控 VS Code 里 Copilot 插件会话（非 CLI）”的完整方案。  \n官方 **Remote Cont"
+    ],
+    [
+      "STREAM_SET",
+      "）。  \n- **官方同类能力还在 feature request 里。**\n\n如果你要，我可以下一步帮你：\n\n1. 对比 `copilot-remote` v"
+    ],
+    [
+      "USER_MESSAGE",
+      "但是我看 还有是可以49卢比购买，你看一下 到底是5美元还是49卢比"
+    ],
+    [
+      "TOOL_CALL",
+      "copilot_fetchWebPage"
+    ],
+    [
+      "TOOL_CALL",
+      "正在提取 3 资源"
+    ],
+    [
+      "TOOL_CALL",
+      "正在 Web 上搜索“atulhritik copilot-remote license price ₹49 $5 agent-handle”"
+    ],
+    [
+      "FINALIZE",
+      2,
+      "result"
+    ],
+    [
+      "FINALIZE",
+      2,
+      "elapsedMs"
+    ],
+    [
+      "TOOL_CALL",
+      "copilot_fetchWebPage"
+    ],
+    [
+      "TOOL_CALL",
+      "正在提取 3 资源"
+    ],
+    [
+      "TOOL_CALL",
+      "正在 Web 上搜索“atulhritik copilot-remote license price ₹49 $5 agent-handle”"
+    ]
+  ],
+  "samples": {
+    "requests_replace": [
+      {
+        "n": 1,
+        "first_keys": [
+          "requestId",
+          "timestamp",
+          "agent",
+          "modelId",
+          "responseId",
+          "responseTimestamp",
+          "modelState",
+          "contentReferences",
+          "codeCitations",
+          "timeSpentWaiting",
+          "modeInfo",
+          "response",
+          "message",
+          "variableData"
+        ]
+      },
+      {
+        "n": 1,
+        "first_keys": [
+          "requestId",
+          "timestamp",
+          "agent",
+          "modelId",
+          "responseId",
+          "responseTimestamp",
+          "modelState",
+          "contentReferences",
+          "codeCitations",
+          "timeSpentWaiting",
+          "modeInfo",
+          "response",
+          "message",
+          "variableData"
+        ]
+      },
+      {
+        "n": 1,
+        "first_keys": [
+          "requestId",
+          "timestamp",
+          "agent",
+          "modelId",
+          "responseId",
+          "responseTimestamp",
+          "modelState",
+          "contentReferences",
+          "codeCitations",
+          "timeSpentWaiting",
+          "modeInfo",
+          "response",
+          "message",
+          "variableData"
+        ]
+      }
+    ],
+    "response_replace": [
+      {
+        "k": [
+          "requests",
+          0,
+          "response"
+        ],
+        "i": null,
+        "v_len": 4,
+        "parts": [
+          {
+            "keys": [
+              "kind",
+              "value",
+              "id",
+              "reasoningDurationMs"
+            ],
+            "kind": "thinking",
+            "value_prefix": "The user is asking about the VS Code Copilot plugin - whethe"
+          },
+          {
+            "keys": [
+              "kind",
+              "value",
+              "id"
+            ],
+            "kind": "thinking",
+            "value_prefix": ""
+          },
+          {
+            "keys": [
+              "kind",
+              "value",
+              "id",
+              "metadata"
+            ],
+            "kind": "thinking",
+            "value_prefix": ""
+          },
+          {
+            "keys": [
+              "value",
+              "supportThemeIcons",
+              "supportHtml",
+              "baseUri"
+            ],
+            "kind": null,
+            "value_prefix": "不是。VS Code 里的 **GitHub Copilot 插件** 不只是“可视化壳”，背后也**不是**简单套一层"
+          }
+        ]
+      },
+      {
+        "k": [
+          "requests",
+          1,
+          "response"
+        ],
+        "i": null,
+        "v_len": 1,
+        "parts": [
+          {
+            "keys": [
+              "kind",
+              "didStartServerIds"
+            ],
+            "kind": "mcpServersStarting",
+            "value_prefix": null
+          }
+        ]
+      },
+      {
+        "k": [
+          "requests",
+          1,
+          "response"
+        ],
+        "i": null,
+        "v_len": 7,
+        "parts": [
+          {
+            "keys": [
+              "kind",
+              "value",
+              "id",
+              "reasoningDurationMs"
+            ],
+            "kind": "thinking",
+            "value_prefix": "The user wants me to search online for ways to remotely cont"
+          },
+          {
+            "keys": [
+              "kind",
+              "value",
+              "id"
+            ],
+            "kind": "thinking",
+            "value_prefix": ""
+          },
+          {
+            "keys": [
+              "kind",
+              "value",
+              "id",
+              "metadata"
+            ],
+            "kind": "thinking",
+            "value_prefix": ""
+          },
+          {
+            "keys": [
+              "value",
+              "supportThemeIcons",
+              "supportHtml",
+              "baseUri"
+            ],
+            "kind": null,
+            "value_prefix": "我先联网查一下：有没有能远程操控 VS Code 里 Copilot 插件（不是 CLI）的方案，以及会话能否跨手机/电"
+          },
+          {
+            "keys": [
+              "kind",
+              "invocationMessage",
+              "isConfirmed",
+              "isComplete",
+              "source",
+              "resultDetails",
+              "toolCallId",
+              "toolId"
+            ],
+            "kind": "toolInvocationSerialized",
+            "value_prefix": null
+          }
+        ]
+      },
+      {
+        "k": [
+          "requests",
+          1,
+          "response"
+        ],
+        "i": null,
+        "v_len": 5,
+        "parts": [
+          {
+            "keys": [
+              "kind",
+              "value",
+              "id",
+              "reasoningDurationMs"
+            ],
+            "kind": "thinking",
+            "value_prefix": "I have good search results. Let me dig deeper into the non-C"
+          },
+          {
+            "keys": [
+              "kind",
+              "value",
+              "id"
+            ],
+            "kind": "thinking",
+            "value_prefix": ""
+          },
+          {
+            "keys": [
+              "kind",
+              "value",
+              "id",
+              "metadata"
+            ],
+            "kind": "thinking",
+            "value_prefix": ""
+          },
+          {
+            "keys": [
+              "kind",
+              "presentation",
+              "invocationMessage",
+              "isConfirmed",
+              "isComplete",
+              "source",
+              "toolCallId",
+              "toolId"
+            ],
+            "kind": "toolInvocationSerialized",
+            "value_prefix": null
+          },
+          {
+            "keys": [
+              "kind",
+              "invocationMessage",
+              "pastTenseMessage",
+              "isConfirmed",
+              "isComplete",
+              "source",
+              "toolCallId",
+              "toolId"
+            ],
+            "kind": "toolInvocationSerialized",
+            "value_prefix": null
+          }
+        ]
+      },
+      {
+        "k": [
+          "requests",
+          2,
+          "response"
+        ],
+        "i": null,
+        "v_len": 6,
+        "parts": [
+          {
+            "keys": [
+              "kind",
+              "value",
+              "id",
+              "reasoningDurationMs"
+            ],
+            "kind": "thinking",
+            "value_prefix": "The user wants me to check whether the Copilot Remote Contro"
+          },
+          {
+            "keys": [
+              "kind",
+              "value",
+              "id"
+            ],
+            "kind": "thinking",
+            "value_prefix": ""
+          },
+          {
+            "keys": [
+              "kind",
+              "value",
+              "id",
+              "metadata"
+            ],
+            "kind": "thinking",
+            "value_prefix": ""
+          },
+          {
+            "keys": [
+              "kind",
+              "presentation",
+              "invocationMessage",
+              "isConfirmed",
+              "isComplete",
+              "source",
+              "toolCallId",
+              "toolId"
+            ],
+            "kind": "toolInvocationSerialized",
+            "value_prefix": null
+          },
+          {
+            "keys": [
+              "kind",
+              "invocationMessage",
+              "pastTenseMessage",
+              "isConfirmed",
+              "isComplete",
+              "source",
+              "toolCallId",
+              "toolId"
+            ],
+            "kind": "toolInvocationSerialized",
+            "value_prefix": null
+          }
+        ]
+      },
+      {
+        "k": [
+          "requests",
+          3,
+          "response"
+        ],
+        "i": null,
+        "v_len": 11,
+        "parts": [
+          {
+            "keys": [
+              "kind",
+              "value",
+              "id",
+              "reasoningDurationMs"
+            ],
+            "kind": "thinking",
+            "value_prefix": "The user is asking about the license for Copilot Remote Cont"
+          },
+          {
+            "keys": [
+              "kind",
+              "value",
+              "id"
+            ],
+            "kind": "thinking",
+            "value_prefix": ""
+          },
+          {
+            "keys": [
+              "kind",
+              "value",
+              "id",
+              "metadata"
+            ],
+            "kind": "thinking",
+            "value_prefix": ""
+          },
+          {
+            "keys": [
+              "value",
+              "supportThemeIcons",
+              "supportHtml",
+              "baseUri"
+            ],
+            "kind": null,
+            "value_prefix": "我再核对一下官方对 license 绑定方式的说明，尤其是“一机一证”和 SSH 远程场景。 "
+          },
+          {
+            "keys": [
+              "kind",
+              "presentation",
+              "invocationMessage",
+              "isConfirmed",
+              "isComplete",
+              "source",
+              "toolCallId",
+              "toolId"
+            ],
+            "kind": "toolInvocationSerialized",
+            "value_prefix": null
+          }
+        ]
+      }
+    ],
+    "response_splice": [
+      {
+        "k": [
+          "requests",
+          1,
+          "response"
+        ],
+        "i": 7,
+        "v_len": 2,
+        "parts": [
+          {
+            "keys": [
+              "kind",
+              "invocationMessage",
+              "isConfirmed",
+              "isComplete",
+              "source",
+              "resultDetails",
+              "toolCallId",
+              "toolId"
+            ],
+            "kind": "toolInvocationSerialized",
+            "value_prefix": null
+          },
+          {
+            "keys": [
+              "kind",
+              "invocationMessage",
+              "isConfirmed",
+              "isComplete",
+              "source",
+              "resultDetails",
+              "toolCallId",
+              "toolId"
+            ],
+            "kind": "toolInvocationSerialized",
+            "value_prefix": null
+          }
+        ]
+      },
+      {
+        "k": [
+          "requests",
+          1,
+          "response"
+        ],
+        "i": 13,
+        "v_len": 3,
+        "parts": [
+          {
+            "keys": [
+              "kind",
+              "invocationMessage",
+              "pastTenseMessage",
+              "isConfirmed",
+              "isComplete",
+              "source",
+              "resultDetails",
+              "toolCallId",
+              "toolId"
+            ],
+            "kind": "toolInvocationSerialized",
+            "value_prefix": null
+          },
+          {
+            "keys": [
+              "kind",
+              "invocationMessage",
+              "isConfirmed",
+              "isComplete",
+              "source",
+              "resultDetails",
+              "toolCallId",
+              "toolId"
+            ],
+            "kind": "toolInvocationSerialized",
+            "value_prefix": null
+          },
+          {
+            "keys": [
+              "kind",
+              "invocationMessage",
+              "isConfirmed",
+              "isComplete",
+              "source",
+              "toolCallId",
+              "toolId"
+            ],
+            "kind": "toolInvocationSerialized",
+            "value_prefix": null
+          }
+        ]
+      },
+      {
+        "k": [
+          "requests",
+          1,
+          "response"
+        ],
+        "i": 15,
+        "v_len": 7,
+        "parts": [
+          {
+            "keys": [
+              "kind",
+              "invocationMessage",
+              "isConfirmed",
+              "isComplete",
+              "source",
+              "resultDetails",
+              "toolCallId",
+              "toolId"
+            ],
+            "kind": "toolInvocationSerialized",
+            "value_prefix": null
+          },
+          {
+            "keys": [
+              "kind",
+              "value",
+              "id",
+              "reasoningDurationMs"
+            ],
+            "kind": "thinking",
+            "value_prefix": "I have enough information to give a clear answer. Let me sum"
+          },
+          {
+            "keys": [
+              "kind",
+              "value",
+              "id"
+            ],
+            "kind": "thinking",
+            "value_prefix": ""
+          },
+          {
+            "keys": [
+              "kind",
+              "value",
+              "id",
+              "metadata"
+            ],
+            "kind": "thinking",
+            "value_prefix": ""
+          },
+          {
+            "keys": [
+              "value",
+              "supportThemeIcons",
+              "supportHtml",
+              "baseUri"
+            ],
+            "kind": null,
+            "value_prefix": "## 结论先说\n\n**官方目前没有**“远程遥控 VS Code 里 Copilot 插件会话（非 CLI）”的完整方案"
+          }
+        ]
+      },
+      {
+        "k": [
+          "requests",
+          2,
+          "response"
+        ],
+        "i": 6,
+        "v_len": 6,
+        "parts": [
+          {
+            "keys": [
+              "kind",
+              "invocationMessage",
+              "pastTenseMessage",
+              "isConfirmed",
+              "isComplete",
+              "source",
+              "resultDetails",
+              "toolCallId",
+              "toolId"
+            ],
+            "kind": "toolInvocationSerialized",
+            "value_prefix": null
+          },
+          {
+            "keys": [
+              "kind",
+              "invocationMessage",
+              "isConfirmed",
+              "isComplete",
+              "source",
+              "resultDetails",
+              "toolCallId",
+              "toolId"
+            ],
+            "kind": "toolInvocationSerialized",
+            "value_prefix": null
+          },
+          {
+            "keys": [
+              "kind",
+              "value",
+              "id",
+              "reasoningDurationMs"
+            ],
+            "kind": "thinking",
+            "value_prefix": "The user wants clarification on the price - is it $5 or ₹49?"
+          },
+          {
+            "keys": [
+              "kind",
+              "value",
+              "id"
+            ],
+            "kind": "thinking",
+            "value_prefix": ""
+          },
+          {
+            "keys": [
+              "kind",
+              "value",
+              "id",
+              "metadata"
+            ],
+            "kind": "thinking",
+            "value_prefix": ""
+          }
+        ]
+      }
+    ],
+    "finalize": [
+      {
+        "k": [
+          "requests",
+          0,
+          "result"
+        ],
+        "kind": 1,
+        "v_type": "dict",
+        "v": "{'timings': {'firstProgress': 24549, 'totalElapsed': 26601}, 'metadata': {'codeBlocks': [{'code': 'VS Code UI\\n  → GitHu"
+      },
+      {
+        "k": [
+          "requests",
+          0,
+          "elapsedMs"
+        ],
+        "kind": 1,
+        "v_type": "int",
+        "v": 27409
+      },
+      {
+        "k": [
+          "requests",
+          1,
+          "result"
+        ],
+        "kind": 1,
+        "v_type": "dict",
+        "v": "{'timings': {'firstProgress': 19089, 'totalElapsed': 185695}, 'metadata': {'codeBlocks': [], 'renderedUserMessage': [{'t"
+      },
+      {
+        "k": [
+          "requests",
+          1,
+          "elapsedMs"
+        ],
+        "kind": 1,
+        "v_type": "int",
+        "v": 188956
+      },
+      {
+        "k": [
+          "requests",
+          2,
+          "result"
+        ],
+        "kind": 1,
+        "v_type": "dict",
+        "v": "{'timings': {'firstProgress': 81046, 'totalElapsed': 82243}, 'metadata': {'codeBlocks': [], 'renderedUserMessage': [{'ty"
+      },
+      {
+        "k": [
+          "requests",
+          2,
+          "elapsedMs"
+        ],
+        "kind": 1,
+        "v_type": "int",
+        "v": 90178
+      },
+      {
+        "k": [
+          "requests",
+          3,
+          "result"
+        ],
+        "kind": 1,
+        "v_type": "dict",
+        "v": "{'timings': {'firstProgress': 16257, 'totalElapsed': 61912}, 'metadata': {'codeBlocks': [], 'renderedUserMessage': [{'ty"
+      },
+      {
+        "k": [
+          "requests",
+          3,
+          "elapsedMs"
+        ],
+        "kind": 1,
+        "v_type": "int",
+        "v": 62508
+      }
+    ],
+    "user": [
+      {
+        "requestId": "request_1aa8d8e8-6023-4883-9659-1c056967d58f",
+        "keys": [
+          "requestId",
+          "timestamp",
+          "agent",
+          "modelId",
+          "responseId",
+          "responseTimestamp",
+          "modelState",
+          "contentReferences",
+          "codeCitations",
+          "timeSpentWaiting",
+          "modeInfo",
+          "response",
+          "message",
+          "variableData"
+        ],
+        "message_keys": [
+          "text",
+          "parts"
+        ],
+        "text": "联网搜索一下，有没有能远程控制 vscode 的 copilot插件的（不是 copilot cli）\n我想躺床上用手机发送指令， 并且我回到电脑面前的时候，会话都是同步的\n\n这个有方法名 联网搜索 github"
+      },
+      {
+        "requestId": "request_2f3c3669-e8e3-4ab1-8812-58baec986e3a",
+        "keys": [
+          "requestId",
+          "timestamp",
+          "agent",
+          "modelId",
+          "responseId",
+          "responseTimestamp",
+          "modelState",
+          "contentReferences",
+          "codeCitations",
+          "timeSpentWaiting",
+          "modeInfo",
+          "response",
+          "message",
+          "variableData"
+        ],
+        "message_keys": [
+          "text",
+          "parts"
+        ],
+        "text": "但是我看 还有是可以49卢比购买，你看一下 到底是5美元还是49卢比"
+      },
+      {
+        "requestId": "request_e4d456c3-24a8-488e-8f9d-9aa3b36460c6",
+        "keys": [
+          "requestId",
+          "timestamp",
+          "agent",
+          "modelId",
+          "responseId",
+          "responseTimestamp",
+          "modelState",
+          "contentReferences",
+          "codeCitations",
+          "timeSpentWaiting",
+          "modeInfo",
+          "response",
+          "message",
+          "variableData"
+        ],
+        "message_keys": [
+          "text",
+          "parts"
+        ],
+        "text": "一个证书是只适用于一个设备吗，如果我ssh到另一个机器是不是就是要再买一个"
+      },
+      {
+        "requestId": "request_eac23f7f-4699-4e13-ab1a-609fee087798",
+        "keys": [
+          "requestId",
+          "timestamp",
+          "agent",
+          "modelId",
+          "responseId",
+          "responseTimestamp",
+          "modelState",
+          "contentReferences",
+          "codeCitations",
+          "timeSpentWaiting",
+          "modeInfo",
+          "response",
+          "message",
+          "variableData"
+        ],
+        "message_keys": [
+          "text",
+          "parts"
+        ],
+        "text": "1 有没有功能相同 但是免费的扩展 \n2 这个插件开源吗？"
+      }
+    ],
+    "tool": [
+      {
+        "kind": "toolInvocationSerialized",
+        "invocationMessage": "正在 Web 上搜索“remote control VS Code Copilot chat from phone session sync”",
+        "isConfirmed": {
+          "type": 1
+        },
+        "isComplete": true,
+        "source": {
+          "type": "extension",
+          "label": "Web Search for Copilot",
+          "extensionId": {
+            "value": "ms-vscode.vscode-websearchforcopilot",
+            "_lower": "ms-vscode.vscode-websearchforcopilot"
+          }
+        },
+        "resultDetails": {
+          "input": "{\n  \"query\": \"remote control VS Code Copilot chat from phone session sync\"\n}",
+          "output": [
+            {
+              "type": "embed",
+              "isText": true,
+              "value": "Here is some relevent context from webpages across the internet:\n[{\"file\":{\"$mid\":1,\"path\":\"/docs/agents/agent-types/copilot-cli\",\"scheme\":\"https\",\"authority\":\"code.visualstudio.com\",\"fragment\":\":~:text=The `\\\"/remote on\\\"` command lets,before remote control is enabled.\"},\"text\":\"TITLE: Copilot CLI sessions in Visual Studio Code\\nSNIPPET:The `\\\"/remote on\\\"` command lets you remote control a Copilot CLI session from github.com or the GitHub Mobile app. With remote control, you can monitor and steer your ongoing Copilot CLI sessions from anywhere, giving you more flexibility to keep work moving without being tied to your machine. You keep the full session context and history in sync across both VS Code and GitHub.\\n\\nTip [...] 1. Start or resume a Copilot CLI session from the Chat view.\\n2. Enter `\\\"/remote on\\\"` in the chat input to enable remote control and create the linked GitHub task page.\\n3. Select Open on GitHub to open the linked task page or scan the QR code to open it on your mobile device.\\n\\nRun `\\\"/remote\\\"` at any time to check the current remote-control status. The `\\\"/remote\\\"` command only shows status and does not enable or disable remote control. [...] To stop mirroring the session to GitHub, enter `\\\"/remote off\\\"` in the chat input.\\n\\nTo disable remote control support for Copilot CLI sessions in VS Code, disable the   github.copilot.chat.cli.remote.enabled   Open in VS Code Open in VS Code Insiders   setting.\\n\\nNote \\n\\nRemote control requires GitHub authentication in VS Code and a workspace that maps to a GitHub repository. If additional GitHub permissions are needed, VS Code prompts you to grant them before remote control is enabled.\"},{\"file\":{\"$mid\":1,\"path\":\"/changelog/2026-05-18-remote-control-for-copilot-cli-sessions-now-generally-available-on-mobile-web-and-vs-code\",\"scheme\":\"https\",\"authority\":\"github.blog\",\"fragment\":\":~:text=When remote control is enabled,Agents tab in the repository.\"},\"text\":\"TITLE: Remote control for Copilot CLI sessions now generally available on mobile, web, and VS Code - GitHub Changelog\\nSNIPPET:When remote control is enabled, Copilot streams your CLI session activity in real time, so you can view and steer your sessions on the go. Simply kick off a Copilot CLI session in the terminal, VS Code, or JetBrains, then monitor or steer it from the GitHub Mobile app or github.com.\\n\\n### Built for staying productive from your phone [...] Download the latest version of VS Code.\\n Enable the `github.copilot.chat.cli.remote.enabled` setting.\\n Start or resume a Copilot CLI session from the Chat view.\\n Enter `/remote on` in the chat input to enable remote control and create the linked GitHub task page.\\n Select Open on GitHub to open the linked task page.\\n\\n> Note: If you’re a Copilot Business or Copilot Enterprise user, an administrator will have to enable remote control and CLI policies before you can use it. [...] Run `/update` to make sure you’re on the latest version of Copilot CLI.\\n Start a remote session with `copilot --remote`, or enable it midsession with `/remote on`.\\n Scan the QR code or open the link in the GitHub Mobile app or on github.com.\\n For longer runs, use `/keep-alive` to help keep your machine awake.\\n View your sessions in the Agents tab in the repository.\"},{\"file\":{\"$mid\":1,\"path\":\"/watch\",\"scheme\":\"https\",\"authority\":\"www.youtube.com\",\"query\":\"v=nwDmyMY_rJc&vl=en\",\"fragment\":\":~:text=GitHub has just released some,remote control? Check out PolyPilot:\"},\"text\":\"TITLE: GitHub Copilot CLI Remote Sessions - Code From Your Couch, The Beach or anywhere!\\nSNIPPET:GitHub has just released some mind-blowing functionality. You can now remote control your GitHub CLI session that is running on your desktop through your phone, through your web, from another device. Let's just go check out what it can do and how to set it up. [music] Now, I'm going to be bold and assume that you already know what Copilot is. Unless you have been sleeping under a rock, um I think it has been very hard to miss. It's in your VS Code, it's in your Visual Studio. Hopefully, you've [...] In this video I show you how it works and what you can do with it.\\n\\nGet started:\\ncopilot --remote\\n\\nOr enable it mid-session:\\n/remote\\n\\nFrom the web or mobile you can:\\n- Send follow-up messages to steer the agent\\n- Review and modify plans before implementation\\n- Switch between plan, interactive, and autopilot mode\\n- Approve or deny permission requests\\n- Respond to questions from Copilot\\n\\nEverything stays in sync. Each session is private and visible only to you. [...] # GitHub Copilot CLI Remote Sessions - Code From Your Couch, The Beach or anywhere!\\n## Gerald Versluis\\n106000 subscribers\\n57 likes\\n\\n### Description\\n2293 views\\nPosted: 14 Apr 2026\\nGitHub Copilot CLI just got remote sessions and it changes how you interact with the agent. Start a task on your machine, then monitor and steer it from your browser or phone while you're away from your desk.\\n\\nMultiple parallel Copilot sessions with remote control? Check out PolyPilot:\"},{\"file\":{\"$mid\":1,\"path\":\"/docs/agents/sessions/session-sync\",\"scheme\":\"https\",\"authority\":\"code.visualstudio.com\",\"fragment\":\":~:text=By default,## Exclude repositories from sync\"},\"text\":\"TITLE: Sync Copilot sessions to GitHub\\nSNIPPET:By default, VS Code syncs your chat sessions to your GitHub account, including all local agent sessions. Synced sessions are private to you and are not visible to anyone else unless you explicitly share them. They appear on GitHub.com in the Agents tab of your repository, enabling session insights to query across all your sessions, including those from Copilot CLI, coding agent, code review, and the GitHub Copilot Desktop app.\\n\\n## Opt out of session sync [...] You can opt out at any time by setting   chat.sessionSync.enabled   Open in VS Code Open in VS Code Insiders  This setting is managed at the organization level. Contact your administrator to change it.ORG to `false`. Existing synced sessions remain on GitHub.com until you delete them. [...] To keep session data local only, set   chat.sessionSync.enabled   Open in VS Code Open in VS Code Insiders  This setting is managed at the organization level. Contact your administrator to change it.ORG to `false`. When you opt out, session data stays on your machine and you can only query it locally.\\n\\n## Exclude repositories from sync\"},{\"file\":{\"$mid\":1,\"path\":\"/copilot/how-tos/copilot-cli/use-copilot-cli/steer-remotely\",\"scheme\":\"https\",\"authority\":\"docs.github.com\",\"fragment\":\":~:text=Remote access is different from,or set it to `false`.\"},\"text\":\"TITLE: Steering a GitHub Copilot CLI session from another device - GitHub Docs\\nSNIPPET:Remote access is different from session syncing. Your Copilot CLI sessions are synced to your GitHub account by default, and synced sessions appear as view-only on GitHub.com and GitHub Mobile. These sessions are not steerable. To steer a session remotely, you must enable remote control. For more information about session syncing, see About GitHub Copilot CLI session data.\\n\\n## Prerequisites [...] Remote control lets you connect to a running Copilot CLI session from any browser or from GitHub Mobile. You can view session output, respond to permission requests, and continue working in the session without being at the machine where the session is running.\\n\\nThis article explains how to enable and use remote control. For more conceptual information, see About remote control of GitHub Copilot CLI sessions. [...] Remote control is disabled by default, but may be enabled in your Copilot settings file (typically `~/.copilot/settings.json`). You can ensure a session is not remotely controllable by:\\n\\n For a single session: Start the CLI with `--no-remote` to prevent remote control for that session, regardless of your settings file value.\\n Permanently: Remove the `\\\"remoteSessions\\\": true` setting from `~/.copilot/settings.json`, or set it to `false`.\"}]"
+            },
+            {
+              "type": "embed",
+              "isText": true,
+              "value": "\nHere is some relevent context from webpages across the internet:\nTITLE: Copilot CLI sessions in Visual Studio Code\nSNIPPET:The `\"/remote on\"` command lets you remote control a Copilot CLI session from github.com or the GitHub Mobile app. With remote control, you can monitor and steer your ongoing Copilot CLI sessions from anywhere, giving you more flexibility to keep work moving without being tied to your machine. You keep the full session context and history in sync across both VS Code and GitHub.\n\nTip [...] 1. Start or resume a Copilot CLI session from the Chat view.\n2. Enter `\"/remote on\"` in the chat input to enable remote control and create the linked GitHub task page.\n3. Select Open on GitHub to open the linked task page or scan the QR code to open it on your mobile device.\n\nRun `\"/remote\"` at any time to check the current remote-control status. The `\"/remote\"` command only shows status and does not enable or disable remote control. [...] To stop mirroring the session to GitHub, enter `\"/remote off\"` in the chat input.\n\nTo disable remote control support for Copilot CLI sessions in VS Code, disable the   github.copilot.chat.cli.remote.enabled   Open in VS Code Open in VS Code Insiders   setting.\n\nNote \n\nRemote control requires GitHub authentication in VS Code and a workspace that maps to a GitHub repository. If additional GitHub permissions are needed, VS Code prompts you to grant them before remote control is enabled.\nTITLE: Remote control for Copilot CLI sessions now generally available on mobile, web, and VS Code - GitHub Changelog\nSNIPPET:When remote control is enabled, Copilot streams your CLI session activity in real time, so you can view and steer your sessions on the go. Simply kick off a Copilot CLI session in the terminal, VS Code, or JetBrains, then monitor or steer it from the GitHub Mobile app or github.com.\n\n### Built for staying productive from your phone [...] Download the latest version of VS Code.\n Enable the `github.copilot.chat.cli.remote.enabled` setting.\n Start or resume a Copilot CLI session from the Chat view.\n Enter `/remote on` in the chat input to enable remote control and create the linked GitHub task page.\n Select Open on GitHub to open the linked task page.\n\n> Note: If you’re a Copilot Business or Copilot Enterprise user, an administrator will have to enable remote control and CLI policies before you can use it. [...] Run `/update` to make sure you’re on the latest version of Copilot CLI.\n Start a remote session with `copilot --remote`, or enable it midsession with `/remote on`.\n Scan the QR code or open the link in the GitHub Mobile app or on github.com.\n For longer runs, use `/keep-alive` to help keep your machine awake.\n View your sessions in the Agents tab in the repository.\nTITLE: GitHub Copilot CLI Remote Sessions - Code From Your Couch, The Beach or anywhere!\nSNIPPET:GitHub has just released some mind-blowing functionality. You can now remote control your GitHub CLI session that is running on your desktop through your phone, through your web, from another device. Let's just go check out what it can do and how to set it up. [music] Now, I'm going to be bold and assume that you already know what Copilot is. Unless you have been sleeping under a rock, um I think it has been very hard to miss. It's in your VS Code, it's in your Visual Studio. Hopefully, you've [...] In this video I show you how it works and what you can do with it.\n\nGet started:\ncopilot --remote\n\nOr enable it mid-session:\n/remote\n\nFrom the web or mobile you can:\n- Send follow-up messages to steer the agent\n- Review and modify plans before implementation\n- Switch between plan, interactive, and autopilot mode\n- Approve or deny permission requests\n- Respond to questions from Copilot\n\nEverything stays in sync. Each session is private and visible only to you. [...] # GitHub Copilot CLI Remote Sessions - Code From Your Couch, The Beach or anywhere!\n## Gerald Versluis\n106000 subscribers\n57 likes\n\n### Description\n2293 views\nPosted: 14 Apr 2026\nGitHub Copilot CLI just got remote sessions and it changes how you interact with the agent. Start a task on your machine, then monitor and steer it from your browser or phone while you're away from your desk.\n\nMultiple parallel Copilot sessions with remote control? Check out PolyPilot:\nTITLE: Sync Copilot sessions to GitHub\nSNIPPET:By default, VS Code syncs your chat sessions to your GitHub account, including all local agent sessions. Synced sessions are private to you and are not visible to anyone else unless you explicitly share them. They appear on GitHub.com in the Agents tab of your repository, enabling session insights to query across all your sessions, including those from Copilot CLI, coding agent, code review, and the GitHub Copilot Desktop app.\n\n## Opt out of session sync [...] You can opt out at any time by setting   chat.sessionSync.enabled   Open in VS Code Open in VS Code Insiders  This setting is managed at the organization level. Contact your administrator to change it.ORG to `false`. Existing synced sessions remain on GitHub.com until you delete them. [...] To keep session data local only, set   chat.sessionSync.enabled   Open in VS Code Open in VS Code Insiders  This setting is managed at the organization level. Contact your administrator to change it.ORG to `false`. When you opt out, session data stays on your machine and you can only query it locally.\n\n## Exclude repositories from sync\nTITLE: Steering a GitHub Copilot CLI session from another device - GitHub Docs\nSNIPPET:Remote access is different from session syncing. Your Copilot CLI sessions are synced to your GitHub account by default, and synced sessions appear as view-only on GitHub.com and GitHub Mobile. These sessions are not steerable. To steer a session remotely, you must enable remote control. For more information about session syncing, see About GitHub Copilot CLI session data.\n\n## Prerequisites [...] Remote control lets you connect to a running Copilot CLI session from any browser or from GitHub Mobile. You can view session output, respond to permission requests, and continue working in the session without being at the machine where the session is running.\n\nThis article explains how to enable and use remote control. For more conceptual information, see About remote control of GitHub Copilot CLI sessions. [...] Remote control is disabled by default, but may be enabled in your Copilot settings file (typically `~/.copilot/settings.json`). You can ensure a session is not remotely controllable by:\n\n For a single session: Start the CLI with `--no-remote` to prevent remote control for that session, regardless of your settings file value.\n Permanently: Remove the `\"remoteSessions\": true` setting from `~/.copilot/settings.json`, or set it to `false`."
+            }
+          ]
+        },
+        "toolCallId": "call-c48cd45b-8b4e-433b-bd29-062b1c4bd06e-0",
+        "toolId": "vscode-websearchforcopilot_webSearch"
+      },
+      {
+        "kind": "toolInvocationSerialized",
+        "invocationMessage": "正在 Web 上搜索“GitHub Copilot Chat remote access mobile phone VS Code”",
+        "isConfirmed": {
+          "type": 1
+        },
+        "isComplete": true,
+        "source": {
+          "type": "extension",
+          "label": "Web Search for Copilot",
+          "extensionId": {
+            "value": "ms-vscode.vscode-websearchforcopilot",
+            "_lower": "ms-vscode.vscode-websearchforcopilot"
+          }
+        },
+        "resultDetails": {
+          "input": "{\n  \"query\": \"GitHub Copilot Chat remote access mobile phone VS Code\"\n}",
+          "output": [
+            {
+              "type": "embed",
+              "isText": true,
+              "value": "Here is some relevent context from webpages across the internet:\n[{\"file\":{\"$mid\":1,\"path\":\"/microsoft/vscode/issues/298406\",\"scheme\":\"https\",\"authority\":\"github.com\",\"fragment\":\":~:text=GitHub Copilot Chat sessions are,sync across all connected surfaces.\"},\"text\":\"TITLE: Add Remote Control Support to GitHub Copilot Chat · Issue #298406 · microsoft/vscode · GitHub\\nSNIPPET:GitHub Copilot Chat sessions are currently locked to the VS Code window they started in. Adding a remote control feature would let users connect to an ongoing local Copilot Chat session from the GitHub Mobile app or any browser, without losing conversation history or context. This makes it possible to start a task at your desk and continue guiding it from your phone or another machine — with messages staying in sync across all connected surfaces.\"},{\"file\":{\"$mid\":1,\"path\":\"/Davidobot/vscode-copilot-chat-sidecar\",\"scheme\":\"https\",\"authority\":\"github.com\",\"fragment\":\":~:text=Sidecar is a lightweight orchestration, and streaming assistant chunks.\"},\"text\":\"TITLE: GitHub - Davidobot/vscode-copilot-chat-sidecar: Copilot Chat extension for VS Code w/ a mobile sidecar · GitHub\\nSNIPPET:Sidecar is a lightweight orchestration layer for mobile access to your active Copilot Chat workflow. It lets a phone sync with and interact with the same chat session that is open on desktop, without adding relay infrastructure or installing a native phone app.\\n\\n## Why this exists\\n\\nPrimarily because I like VS Code and don't use Claude Code - the former fits my workflow well, and I like the flexibilty Copilot provides whereby I can swap models on the fly.\\n\\nActual features of sidear: [...] ## Repository files navigation\\n\\n# Sidecar for VS Code's GitHub Copilot\\n\\nDispatch into VS Code's Copilot Chat from your phone, from anywhere\\n\\n> prototype; this is an early-stage experiment. It works, but expect rough edges. PRs are very welcome. [...] The extension starts a local HTTP + WebSocket bridge server on localhost.\\n Sidecar bootstraps Dev Tunnels directly by running `devtunnel host -p  --allow-anonymous` and using the resulting `.devtunnels.ms` endpoint.\\n If direct devtunnel bootstrap is unavailable or fails, Sidecar prompts you to install it.\\n A QR code in VS Code opens the PWA with a signed pairing URL (`ws` + session `token`).\\n The phone PWA syncs conversation list, history, and streaming assistant chunks.\"},{\"file\":{\"$mid\":1,\"path\":\"/how-to-activate-github-copilot-chat-in-vs-code\",\"scheme\":\"https\",\"authority\":\"blog.seeb4coding.in\",\"fragment\":\":~:text=1. Open VS Code: Launch,anything…” or a similar greeting.\"},\"text\":\"TITLE: How to Activate GitHub Copilot Chat in VS Code - SeeB4Coding\\nSNIPPET:1. Open VS Code: Launch Visual Studio Code.\\n2. Access Extensions View: Click on the Extensions icon in the Activity Bar on the side of the window (it looks like four squares, one detached). Alternatively, use the keyboard shortcut `Ctrl+Shift+X` (Windows/Linux) or `Cmd+Shift+X` (macOS).\\n3. Search for Copilot Chat: In the Extensions search bar, type `GitHub Copilot Chat`. [...] 1. Log in to GitHub: Go to github.com and sign in to your account.\\n2. Navigate to Copilot Settings: Click on your profile picture in the top-right corner, then select `Settings`.\\n3. Find Copilot: In the left sidebar, scroll down and click on `Copilot` under the ‘Access’ section.\\n4. Confirm Status: Here you’ll see your subscription status. If it’s active, you’re good to go. If not, you’ll see options to start a trial or purchase a subscription. Complete this step before proceeding. [...] 1. Access Chat View: Look for the new Copilot Chat icon in the Activity Bar on the left side of VS Code (it often looks like a speech bubble with a star or a Copilot logo). Click it.\\n2. Start a New Chat: A new panel will open. You’ll see a prompt to “Ask Copilot anything…” or a similar greeting.\"},{\"file\":{\"$mid\":1,\"path\":\"/24anisha/vscode-copilot-chat\",\"scheme\":\"https\",\"authority\":\"github.com\",\"fragment\":\":~:text=## Repository files navigation,suggestions with the Tab key.\"},\"text\":\"TITLE: GitHub - 24anisha/vscode-copilot-chat: Copilot Chat extension for VS Code · GitHub\\nSNIPPET:## Repository files navigation\\n\\n# GitHub Copilot - Your autonomous AI peer programmer\\n\\nGitHub Copilot is an AI peer programming tool that transforms how you write code in Visual Studio Code.\\n\\nGitHub Copilot agents handle complete coding tasks end-to-end, autonomously planning work, editing files, running commands, and self-correcting when they hit errors. You can also leverage inline suggestions for quick coding assistance and inline chat for precise, focused edits directly in the editor. [...] As Copilot Chat releases in lockstep with VS Code due to its deep UI integration, every new version of Copilot Chat is only compatible with the latest and newest release of VS Code. This means that if you are using an older version of VS Code, you will not be able to use the latest Copilot Chat.\\n\\nOnly the latest Copilot Chat versions will use the latest models provided by the Copilot service, as even minor model upgrades require prompt changes and fixes in the extension. [...] Receive intelligent inline suggestions as you type with ghost text suggestions and next edit suggestions, helping you write code faster. Copilot predicts your next logical change, and you can accept suggestions with the Tab key.\"},{\"file\":{\"$mid\":1,\"path\":\"/en/latest/user_guide/00f51f/configure-github-copilot-in-vs-code\",\"scheme\":\"https\",\"authority\":\"docs.dominodatalab.com\",\"fragment\":\":~:text=1. Install GitHub Copilot and,## Next steps\"},\"text\":\"TITLE: Configure GitHub Copilot in VS Code\\nSNIPPET:1. Install GitHub Copilot and Copilot Chat from the Microsoft Extension Marketplace in your local VS Code.\\n2. Authenticate with GitHub when prompted (see below).\\n3. Begin coding.\\n\\n### Set up for in-browser VS Code (code-server)\\n\\nFollow the steps below to manually install Copilot in your Domino Workspace.\\n\\n#### Step 1: Download the GitHub Copilot Extension\\n\\nTo install Copilot manually, you’ll need to download the .vsix files for both Copilot and Copilot Chat. [...] 1. Open any Domino project and create a new VS Code Workspace.\\n2. Select a Compute Environment that includes GitHub Copilot.\\n3. Click Launch to start the Workspace.\\n\\n## Set up GitHub Copilot\\n\\nYou can use Copilot in VS Code directly within Domino or through Remote SSH. Follow the steps below based on your access method.\\n\\n### For Remote SSH\\n\\nIf you’re using the VS Code Remote - SSH extension to connect from your local VS Code to a running Domino Workspace: [...] ```\\nRUN curl -o /tmp/github.copilot.vsix -LSsf  && \\\\ code-server --install-extension /tmp/github.copilot.vsix --force --extensions-dir /home/ubuntu/.local/share/code-server/extensions && \\\\ rm /tmp/github.copilot.vsix RUN \\\\ \\\\RUN curl -o /tmp/github-chat.vsix -LSsf  && \\\\ code-server --install-extension /tmp/github-chat.vsix --force --extensions-dir /home/ubuntu/.local/share/code-server/extensions && \\\\ rm /tmp/github-chat.vsix RUN \\\\ \\\\\\n```\\n\\n## Next steps\"}]"
+            },
+            {
+              "type": "embed",
+              "isText": true,
+              "value": "\nHere is some relevent context from webpages across the internet:\nTITLE: Add Remote Control Support to GitHub Copilot Chat · Issue #298406 · microsoft/vscode · GitHub\nSNIPPET:GitHub Copilot Chat sessions are currently locked to the VS Code window they started in. Adding a remote control feature would let users connect to an ongoing local Copilot Chat session from the GitHub Mobile app or any browser, without losing conversation history or context. This makes it possible to start a task at your desk and continue guiding it from your phone or another machine — with messages staying in sync across all connected surfaces.\nTITLE: GitHub - Davidobot/vscode-copilot-chat-sidecar: Copilot Chat extension for VS Code w/ a mobile sidecar · GitHub\nSNIPPET:Sidecar is a lightweight orchestration layer for mobile access to your active Copilot Chat workflow. It lets a phone sync with and interact with the same chat session that is open on desktop, without adding relay infrastructure or installing a native phone app.\n\n## Why this exists\n\nPrimarily because I like VS Code and don't use Claude Code - the former fits my workflow well, and I like the flexibilty Copilot provides whereby I can swap models on the fly.\n\nActual features of sidear: [...] ## Repository files navigation\n\n# Sidecar for VS Code's GitHub Copilot\n\nDispatch into VS Code's Copilot Chat from your phone, from anywhere\n\n> prototype; this is an early-stage experiment. It works, but expect rough edges. PRs are very welcome. [...] The extension starts a local HTTP + WebSocket bridge server on localhost.\n Sidecar bootstraps Dev Tunnels directly by running `devtunnel host -p  --allow-anonymous` and using the resulting `.devtunnels.ms` endpoint.\n If direct devtunnel bootstrap is unavailable or fails, Sidecar prompts you to install it.\n A QR code in VS Code opens the PWA with a signed pairing URL (`ws` + session `token`).\n The phone PWA syncs conversation list, history, and streaming assistant chunks.\nTITLE: How to Activate GitHub Copilot Chat in VS Code - SeeB4Coding\nSNIPPET:1. Open VS Code: Launch Visual Studio Code.\n2. Access Extensions View: Click on the Extensions icon in the Activity Bar on the side of the window (it looks like four squares, one detached). Alternatively, use the keyboard shortcut `Ctrl+Shift+X` (Windows/Linux) or `Cmd+Shift+X` (macOS).\n3. Search for Copilot Chat: In the Extensions search bar, type `GitHub Copilot Chat`. [...] 1. Log in to GitHub: Go to github.com and sign in to your account.\n2. Navigate to Copilot Settings: Click on your profile picture in the top-right corner, then select `Settings`.\n3. Find Copilot: In the left sidebar, scroll down and click on `Copilot` under the ‘Access’ section.\n4. Confirm Status: Here you’ll see your subscription status. If it’s active, you’re good to go. If not, you’ll see options to start a trial or purchase a subscription. Complete this step before proceeding. [...] 1. Access Chat View: Look for the new Copilot Chat icon in the Activity Bar on the left side of VS Code (it often looks like a speech bubble with a star or a Copilot logo). Click it.\n2. Start a New Chat: A new panel will open. You’ll see a prompt to “Ask Copilot anything…” or a similar greeting.\nTITLE: GitHub - 24anisha/vscode-copilot-chat: Copilot Chat extension for VS Code · GitHub\nSNIPPET:## Repository files navigation\n\n# GitHub Copilot - Your autonomous AI peer programmer\n\nGitHub Copilot is an AI peer programming tool that transforms how you write code in Visual Studio Code.\n\nGitHub Copilot agents handle complete coding tasks end-to-end, autonomously planning work, editing files, running commands, and self-correcting when they hit errors. You can also leverage inline suggestions for quick coding assistance and inline chat for precise, focused edits directly in the editor. [...] As Copilot Chat releases in lockstep with VS Code due to its deep UI integration, every new version of Copilot Chat is only compatible with the latest and newest release of VS Code. This means that if you are using an older version of VS Code, you will not be able to use the latest Copilot Chat.\n\nOnly the latest Copilot Chat versions will use the latest models provided by the Copilot service, as even minor model upgrades require prompt changes and fixes in the extension. [...] Receive intelligent inline suggestions as you type with ghost text suggestions and next edit suggestions, helping you write code faster. Copilot predicts your next logical change, and you can accept suggestions with the Tab key.\nTITLE: Configure GitHub Copilot in VS Code\nSNIPPET:1. Install GitHub Copilot and Copilot Chat from the Microsoft Extension Marketplace in your local VS Code.\n2. Authenticate with GitHub when prompted (see below).\n3. Begin coding.\n\n### Set up for in-browser VS Code (code-server)\n\nFollow the steps below to manually install Copilot in your Domino Workspace.\n\n#### Step 1: Download the GitHub Copilot Extension\n\nTo install Copilot manually, you’ll need to download the .vsix files for both Copilot and Copilot Chat. [...] 1. Open any Domino project and create a new VS Code Workspace.\n2. Select a Compute Environment that includes GitHub Copilot.\n3. Click Launch to start the Workspace.\n\n## Set up GitHub Copilot\n\nYou can use Copilot in VS Code directly within Domino or through Remote SSH. Follow the steps below based on your access method.\n\n### For Remote SSH\n\nIf you’re using the VS Code Remote - SSH extension to connect from your local VS Code to a running Domino Workspace: [...] ```\nRUN curl -o /tmp/github.copilot.vsix -LSsf  && \\ code-server --install-extension /tmp/github.copilot.vsix --force --extensions-dir /home/ubuntu/.local/share/code-server/extensions && \\ rm /tmp/github.copilot.vsix RUN \\ \\RUN curl -o /tmp/github-chat.vsix -LSsf  && \\ code-server --install-extension /tmp/github-chat.vsix --force --extensions-dir /home/ubuntu/.local/share/code-server/extensions && \\ rm /tmp/github-chat.vsix RUN \\ \\\n```\n\n## Next steps"
+            }
+          ]
+        },
+        "toolCallId": "call-c48cd45b-8b4e-433b-bd29-062b1c4bd06e-1",
+        "toolId": "vscode-websearchforcopilot_webSearch"
+      },
+      {
+        "kind": "toolInvocationSerialized",
+        "invocationMessage": "正在 Web 上搜索“vscode copilot agent remote control phone github”",
+        "isConfirmed": {
+          "type": 1
+        },
+        "isComplete": true,
+        "source": {
+          "type": "extension",
+          "label": "Web Search for Copilot",
+          "extensionId": {
+            "value": "ms-vscode.vscode-websearchforcopilot",
+            "_lower": "ms-vscode.vscode-websearchforcopilot"
+          }
+        },
+        "toolCallId": "call-c48cd45b-8b4e-433b-bd29-062b1c4bd06e-2",
+        "toolId": "vscode-websearchforcopilot_webSearch"
+      },
+      {
+        "kind": "toolInvocationSerialized",
+        "invocationMessage": "正在 Web 上搜索“remote control VS Code Copilot chat from phone session sync”",
+        "isConfirmed": {
+          "type": 1
+        },
+        "isComplete": true,
+        "source": {
+          "type": "extension",
+          "label": "Web Search for Copilot",
+          "extensionId": {
+            "value": "ms-vscode.vscode-websearchforcopilot",
+            "_lower": "ms-vscode.vscode-websearchforcopilot"
+          }
+        },
+        "resultDetails": {
+          "input": "{\n  \"query\": \"remote control VS Code Copilot chat from phone session sync\"\n}",
+          "output": [
+            {
+              "type": "embed",
+              "isText": true,
+              "value": "Here is some relevent context from webpages across the internet:\n[{\"file\":{\"$mid\":1,\"path\":\"/docs/agents/agent-types/copilot-cli\",\"scheme\":\"https\",\"authority\":\"code.visualstudio.com\",\"fragment\":\":~:text=The `\\\"/remote on\\\"` command lets,before remote control is enabled.\"},\"text\":\"TITLE: Copilot CLI sessions in Visual Studio Code\\nSNIPPET:The `\\\"/remote on\\\"` command lets you remote control a Copilot CLI session from github.com or the GitHub Mobile app. With remote control, you can monitor and steer your ongoing Copilot CLI sessions from anywhere, giving you more flexibility to keep work moving without being tied to your machine. You keep the full session context and history in sync across both VS Code and GitHub.\\n\\nTip [...] 1. Start or resume a Copilot CLI session from the Chat view.\\n2. Enter `\\\"/remote on\\\"` in the chat input to enable remote control and create the linked GitHub task page.\\n3. Select Open on GitHub to open the linked task page or scan the QR code to open it on your mobile device.\\n\\nRun `\\\"/remote\\\"` at any time to check the current remote-control status. The `\\\"/remote\\\"` command only shows status and does not enable or disable remote control. [...] To stop mirroring the session to GitHub, enter `\\\"/remote off\\\"` in the chat input.\\n\\nTo disable remote control support for Copilot CLI sessions in VS Code, disable the   github.copilot.chat.cli.remote.enabled   Open in VS Code Open in VS Code Insiders   setting.\\n\\nNote \\n\\nRemote control requires GitHub authentication in VS Code and a workspace that maps to a GitHub repository. If additional GitHub permissions are needed, VS Code prompts you to grant them before remote control is enabled.\"},{\"file\":{\"$mid\":1,\"path\":\"/changelog/2026-05-18-remote-control-for-copilot-cli-sessions-now-generally-available-on-mobile-web-and-vs-code\",\"scheme\":\"https\",\"authority\":\"github.blog\",\"fragment\":\":~:text=When remote control is enabled,Agents tab in the repository.\"},\"text\":\"TITLE: Remote control for Copilot CLI sessions now generally available on mobile, web, and VS Code - GitHub Changelog\\nSNIPPET:When remote control is enabled, Copilot streams your CLI session activity in real time, so you can view and steer your sessions on the go. Simply kick off a Copilot CLI session in the terminal, VS Code, or JetBrains, then monitor or steer it from the GitHub Mobile app or github.com.\\n\\n### Built for staying productive from your phone [...] Download the latest version of VS Code.\\n Enable the `github.copilot.chat.cli.remote.enabled` setting.\\n Start or resume a Copilot CLI session from the Chat view.\\n Enter `/remote on` in the chat input to enable remote control and create the linked GitHub task page.\\n Select Open on GitHub to open the linked task page.\\n\\n> Note: If you’re a Copilot Business or Copilot Enterprise user, an administrator will have to enable remote control and CLI policies before you can use it. [...] Run `/update` to make sure you’re on the latest version of Copilot CLI.\\n Start a remote session with `copilot --remote`, or enable it midsession with `/remote on`.\\n Scan the QR code or open the link in the GitHub Mobile app or on github.com.\\n For longer runs, use `/keep-alive` to help keep your machine awake.\\n View your sessions in the Agents tab in the repository.\"},{\"file\":{\"$mid\":1,\"path\":\"/watch\",\"scheme\":\"https\",\"authority\":\"www.youtube.com\",\"query\":\"v=nwDmyMY_rJc&vl=en\",\"fragment\":\":~:text=GitHub has just released some,remote control? Check out PolyPilot:\"},\"text\":\"TITLE: GitHub Copilot CLI Remote Sessions - Code From Your Couch, The Beach or anywhere!\\nSNIPPET:GitHub has just released some mind-blowing functionality. You can now remote control your GitHub CLI session that is running on your desktop through your phone, through your web, from another device. Let's just go check out what it can do and how to set it up. [music] Now, I'm going to be bold and assume that you already know what Copilot is. Unless you have been sleeping under a rock, um I think it has been very hard to miss. It's in your VS Code, it's in your Visual Studio. Hopefully, you've [...] In this video I show you how it works and what you can do with it.\\n\\nGet started:\\ncopilot --remote\\n\\nOr enable it mid-session:\\n/remote\\n\\nFrom the web or mobile you can:\\n- Send follow-up messages to steer the agent\\n- Review and modify plans before implementation\\n- Switch between plan, interactive, and autopilot mode\\n- Approve or deny permission requests\\n- Respond to questions from Copilot\\n\\nEverything stays in sync. Each session is private and visible only to you. [...] # GitHub Copilot CLI Remote Sessions - Code From Your Couch, The Beach or anywhere!\\n## Gerald Versluis\\n106000 subscribers\\n57 likes\\n\\n### Description\\n2293 views\\nPosted: 14 Apr 2026\\nGitHub Copilot CLI just got remote sessions and it changes how you interact with the agent. Start a task on your machine, then monitor and steer it from your browser or phone while you're away from your desk.\\n\\nMultiple parallel Copilot sessions with remote control? Check out PolyPilot:\"},{\"file\":{\"$mid\":1,\"path\":\"/docs/agents/sessions/session-sync\",\"scheme\":\"https\",\"authority\":\"code.visualstudio.com\",\"fragment\":\":~:text=By default,## Exclude repositories from sync\"},\"text\":\"TITLE: Sync Copilot sessions to GitHub\\nSNIPPET:By default, VS Code syncs your chat sessions to your GitHub account, including all local agent sessions. Synced sessions are private to you and are not visible to anyone else unless you explicitly share them. They appear on GitHub.com in the Agents tab of your repository, enabling session insights to query across all your sessions, including those from Copilot CLI, coding agent, code review, and the GitHub Copilot Desktop app.\\n\\n## Opt out of session sync [...] You can opt out at any time by setting   chat.sessionSync.enabled   Open in VS Code Open in VS Code Insiders  This setting is managed at the organization level. Contact your administrator to change it.ORG to `false`. Existing synced sessions remain on GitHub.com until you delete them. [...] To keep session data local only, set   chat.sessionSync.enabled   Open in VS Code Open in VS Code Insiders  This setting is managed at the organization level. Contact your administrator to change it.ORG to `false`. When you opt out, session data stays on your machine and you can only query it locally.\\n\\n## Exclude repositories from sync\"},{\"file\":{\"$mid\":1,\"path\":\"/copilot/how-tos/copilot-cli/use-copilot-cli/steer-remotely\",\"scheme\":\"https\",\"authority\":\"docs.github.com\",\"fragment\":\":~:text=Remote access is different from,or set it to `false`.\"},\"text\":\"TITLE: Steering a GitHub Copilot CLI session from another device - GitHub Docs\\nSNIPPET:Remote access is different from session syncing. Your Copilot CLI sessions are synced to your GitHub account by default, and synced sessions appear as view-only on GitHub.com and GitHub Mobile. These sessions are not steerable. To steer a session remotely, you must enable remote control. For more information about session syncing, see About GitHub Copilot CLI session data.\\n\\n## Prerequisites [...] Remote control lets you connect to a running Copilot CLI session from any browser or from GitHub Mobile. You can view session output, respond to permission requests, and continue working in the session without being at the machine where the session is running.\\n\\nThis article explains how to enable and use remote control. For more conceptual information, see About remote control of GitHub Copilot CLI sessions. [...] Remote control is disabled by default, but may be enabled in your Copilot settings file (typically `~/.copilot/settings.json`). You can ensure a session is not remotely controllable by:\\n\\n For a single session: Start the CLI with `--no-remote` to prevent remote control for that session, regardless of your settings file value.\\n Permanently: Remove the `\\\"remoteSessions\\\": true` setting from `~/.copilot/settings.json`, or set it to `false`.\"}]"
+            },
+            {
+              "type": "embed",
+              "isText": true,
+              "value": "\nHere is some relevent context from webpages across the internet:\nTITLE: Copilot CLI sessions in Visual Studio Code\nSNIPPET:The `\"/remote on\"` command lets you remote control a Copilot CLI session from github.com or the GitHub Mobile app. With remote control, you can monitor and steer your ongoing Copilot CLI sessions from anywhere, giving you more flexibility to keep work moving without being tied to your machine. You keep the full session context and history in sync across both VS Code and GitHub.\n\nTip [...] 1. Start or resume a Copilot CLI session from the Chat view.\n2. Enter `\"/remote on\"` in the chat input to enable remote control and create the linked GitHub task page.\n3. Select Open on GitHub to open the linked task page or scan the QR code to open it on your mobile device.\n\nRun `\"/remote\"` at any time to check the current remote-control status. The `\"/remote\"` command only shows status and does not enable or disable remote control. [...] To stop mirroring the session to GitHub, enter `\"/remote off\"` in the chat input.\n\nTo disable remote control support for Copilot CLI sessions in VS Code, disable the   github.copilot.chat.cli.remote.enabled   Open in VS Code Open in VS Code Insiders   setting.\n\nNote \n\nRemote control requires GitHub authentication in VS Code and a workspace that maps to a GitHub repository. If additional GitHub permissions are needed, VS Code prompts you to grant them before remote control is enabled.\nTITLE: Remote control for Copilot CLI sessions now generally available on mobile, web, and VS Code - GitHub Changelog\nSNIPPET:When remote control is enabled, Copilot streams your CLI session activity in real time, so you can view and steer your sessions on the go. Simply kick off a Copilot CLI session in the terminal, VS Code, or JetBrains, then monitor or steer it from the GitHub Mobile app or github.com.\n\n### Built for staying productive from your phone [...] Download the latest version of VS Code.\n Enable the `github.copilot.chat.cli.remote.enabled` setting.\n Start or resume a Copilot CLI session from the Chat view.\n Enter `/remote on` in the chat input to enable remote control and create the linked GitHub task page.\n Select Open on GitHub to open the linked task page.\n\n> Note: If you’re a Copilot Business or Copilot Enterprise user, an administrator will have to enable remote control and CLI policies before you can use it. [...] Run `/update` to make sure you’re on the latest version of Copilot CLI.\n Start a remote session with `copilot --remote`, or enable it midsession with `/remote on`.\n Scan the QR code or open the link in the GitHub Mobile app or on github.com.\n For longer runs, use `/keep-alive` to help keep your machine awake.\n View your sessions in the Agents tab in the repository.\nTITLE: GitHub Copilot CLI Remote Sessions - Code From Your Couch, The Beach or anywhere!\nSNIPPET:GitHub has just released some mind-blowing functionality. You can now remote control your GitHub CLI session that is running on your desktop through your phone, through your web, from another device. Let's just go check out what it can do and how to set it up. [music] Now, I'm going to be bold and assume that you already know what Copilot is. Unless you have been sleeping under a rock, um I think it has been very hard to miss. It's in your VS Code, it's in your Visual Studio. Hopefully, you've [...] In this video I show you how it works and what you can do with it.\n\nGet started:\ncopilot --remote\n\nOr enable it mid-session:\n/remote\n\nFrom the web or mobile you can:\n- Send follow-up messages to steer the agent\n- Review and modify plans before implementation\n- Switch between plan, interactive, and autopilot mode\n- Approve or deny permission requests\n- Respond to questions from Copilot\n\nEverything stays in sync. Each session is private and visible only to you. [...] # GitHub Copilot CLI Remote Sessions - Code From Your Couch, The Beach or anywhere!\n## Gerald Versluis\n106000 subscribers\n57 likes\n\n### Description\n2293 views\nPosted: 14 Apr 2026\nGitHub Copilot CLI just got remote sessions and it changes how you interact with the agent. Start a task on your machine, then monitor and steer it from your browser or phone while you're away from your desk.\n\nMultiple parallel Copilot sessions with remote control? Check out PolyPilot:\nTITLE: Sync Copilot sessions to GitHub\nSNIPPET:By default, VS Code syncs your chat sessions to your GitHub account, including all local agent sessions. Synced sessions are private to you and are not visible to anyone else unless you explicitly share them. They appear on GitHub.com in the Agents tab of your repository, enabling session insights to query across all your sessions, including those from Copilot CLI, coding agent, code review, and the GitHub Copilot Desktop app.\n\n## Opt out of session sync [...] You can opt out at any time by setting   chat.sessionSync.enabled   Open in VS Code Open in VS Code Insiders  This setting is managed at the organization level. Contact your administrator to change it.ORG to `false`. Existing synced sessions remain on GitHub.com until you delete them. [...] To keep session data local only, set   chat.sessionSync.enabled   Open in VS Code Open in VS Code Insiders  This setting is managed at the organization level. Contact your administrator to change it.ORG to `false`. When you opt out, session data stays on your machine and you can only query it locally.\n\n## Exclude repositories from sync\nTITLE: Steering a GitHub Copilot CLI session from another device - GitHub Docs\nSNIPPET:Remote access is different from session syncing. Your Copilot CLI sessions are synced to your GitHub account by default, and synced sessions appear as view-only on GitHub.com and GitHub Mobile. These sessions are not steerable. To steer a session remotely, you must enable remote control. For more information about session syncing, see About GitHub Copilot CLI session data.\n\n## Prerequisites [...] Remote control lets you connect to a running Copilot CLI session from any browser or from GitHub Mobile. You can view session output, respond to permission requests, and continue working in the session without being at the machine where the session is running.\n\nThis article explains how to enable and use remote control. For more conceptual information, see About remote control of GitHub Copilot CLI sessions. [...] Remote control is disabled by default, but may be enabled in your Copilot settings file (typically `~/.copilot/settings.json`). You can ensure a session is not remotely controllable by:\n\n For a single session: Start the CLI with `--no-remote` to prevent remote control for that session, regardless of your settings file value.\n Permanently: Remove the `\"remoteSessions\": true` setting from `~/.copilot/settings.json`, or set it to `false`."
+            }
+          ]
+        },
+        "toolCallId": "call-c48cd45b-8b4e-433b-bd29-062b1c4bd06e-0",
+        "toolId": "vscode-websearchforcopilot_webSearch"
+      },
+      {
+        "kind": "toolInvocationSerialized",
+        "invocationMessage": "正在 Web 上搜索“GitHub Copilot Chat remote access mobile phone VS Code”",
+        "isConfirmed": {
+          "type": 1
+        },
+        "isComplete": true,
+        "source": {
+          "type": "extension",
+          "label": "Web Search for Copilot",
+          "extensionId": {
+            "value": "ms-vscode.vscode-websearchforcopilot",
+            "_lower": "ms-vscode.vscode-websearchforcopilot"
+          }
+        },
+        "resultDetails": {
+          "input": "{\n  \"query\": \"GitHub Copilot Chat remote access mobile phone VS Code\"\n}",
+          "output": [
+            {
+              "type": "embed",
+              "isText": true,
+              "value": "Here is some relevent context from webpages across the internet:\n[{\"file\":{\"$mid\":1,\"path\":\"/microsoft/vscode/issues/298406\",\"scheme\":\"https\",\"authority\":\"github.com\",\"fragment\":\":~:text=GitHub Copilot Chat sessions are,sync across all connected surfaces.\"},\"text\":\"TITLE: Add Remote Control Support to GitHub Copilot Chat · Issue #298406 · microsoft/vscode · GitHub\\nSNIPPET:GitHub Copilot Chat sessions are currently locked to the VS Code window they started in. Adding a remote control feature would let users connect to an ongoing local Copilot Chat session from the GitHub Mobile app or any browser, without losing conversation history or context. This makes it possible to start a task at your desk and continue guiding it from your phone or another machine — with messages staying in sync across all connected surfaces.\"},{\"file\":{\"$mid\":1,\"path\":\"/Davidobot/vscode-copilot-chat-sidecar\",\"scheme\":\"https\",\"authority\":\"github.com\",\"fragment\":\":~:text=Sidecar is a lightweight orchestration, and streaming assistant chunks.\"},\"text\":\"TITLE: GitHub - Davidobot/vscode-copilot-chat-sidecar: Copilot Chat extension for VS Code w/ a mobile sidecar · GitHub\\nSNIPPET:Sidecar is a lightweight orchestration layer for mobile access to your active Copilot Chat workflow. It lets a phone sync with and interact with the same chat session that is open on desktop, without adding relay infrastructure or installing a native phone app.\\n\\n## Why this exists\\n\\nPrimarily because I like VS Code and don't use Claude Code - the former fits my workflow well, and I like the flexibilty Copilot provides whereby I can swap models on the fly.\\n\\nActual features of sidear: [...] ## Repository files navigation\\n\\n# Sidecar for VS Code's GitHub Copilot\\n\\nDispatch into VS Code's Copilot Chat from your phone, from anywhere\\n\\n> prototype; this is an early-stage experiment. It works, but expect rough edges. PRs are very welcome. [...] The extension starts a local HTTP + WebSocket bridge server on localhost.\\n Sidecar bootstraps Dev Tunnels directly by running `devtunnel host -p  --allow-anonymous` and using the resulting `.devtunnels.ms` endpoint.\\n If direct devtunnel bootstrap is unavailable or fails, Sidecar prompts you to install it.\\n A QR code in VS Code opens the PWA with a signed pairing URL (`ws` + session `token`).\\n The phone PWA syncs conversation list, history, and streaming assistant chunks.\"},{\"file\":{\"$mid\":1,\"path\":\"/how-to-activate-github-copilot-chat-in-vs-code\",\"scheme\":\"https\",\"authority\":\"blog.seeb4coding.in\",\"fragment\":\":~:text=1. Open VS Code: Launch,anything…” or a similar greeting.\"},\"text\":\"TITLE: How to Activate GitHub Copilot Chat in VS Code - SeeB4Coding\\nSNIPPET:1. Open VS Code: Launch Visual Studio Code.\\n2. Access Extensions View: Click on the Extensions icon in the Activity Bar on the side of the window (it looks like four squares, one detached). Alternatively, use the keyboard shortcut `Ctrl+Shift+X` (Windows/Linux) or `Cmd+Shift+X` (macOS).\\n3. Search for Copilot Chat: In the Extensions search bar, type `GitHub Copilot Chat`. [...] 1. Log in to GitHub: Go to github.com and sign in to your account.\\n2. Navigate to Copilot Settings: Click on your profile picture in the top-right corner, then select `Settings`.\\n3. Find Copilot: In the left sidebar, scroll down and click on `Copilot` under the ‘Access’ section.\\n4. Confirm Status: Here you’ll see your subscription status. If it’s active, you’re good to go. If not, you’ll see options to start a trial or purchase a subscription. Complete this step before proceeding. [...] 1. Access Chat View: Look for the new Copilot Chat icon in the Activity Bar on the left side of VS Code (it often looks like a speech bubble with a star or a Copilot logo). Click it.\\n2. Start a New Chat: A new panel will open. You’ll see a prompt to “Ask Copilot anything…” or a similar greeting.\"},{\"file\":{\"$mid\":1,\"path\":\"/24anisha/vscode-copilot-chat\",\"scheme\":\"https\",\"authority\":\"github.com\",\"fragment\":\":~:text=## Repository files navigation,suggestions with the Tab key.\"},\"text\":\"TITLE: GitHub - 24anisha/vscode-copilot-chat: Copilot Chat extension for VS Code · GitHub\\nSNIPPET:## Repository files navigation\\n\\n# GitHub Copilot - Your autonomous AI peer programmer\\n\\nGitHub Copilot is an AI peer programming tool that transforms how you write code in Visual Studio Code.\\n\\nGitHub Copilot agents handle complete coding tasks end-to-end, autonomously planning work, editing files, running commands, and self-correcting when they hit errors. You can also leverage inline suggestions for quick coding assistance and inline chat for precise, focused edits directly in the editor. [...] As Copilot Chat releases in lockstep with VS Code due to its deep UI integration, every new version of Copilot Chat is only compatible with the latest and newest release of VS Code. This means that if you are using an older version of VS Code, you will not be able to use the latest Copilot Chat.\\n\\nOnly the latest Copilot Chat versions will use the latest models provided by the Copilot service, as even minor model upgrades require prompt changes and fixes in the extension. [...] Receive intelligent inline suggestions as you type with ghost text suggestions and next edit suggestions, helping you write code faster. Copilot predicts your next logical change, and you can accept suggestions with the Tab key.\"},{\"file\":{\"$mid\":1,\"path\":\"/en/latest/user_guide/00f51f/configure-github-copilot-in-vs-code\",\"scheme\":\"https\",\"authority\":\"docs.dominodatalab.com\",\"fragment\":\":~:text=1. Install GitHub Copilot and,## Next steps\"},\"text\":\"TITLE: Configure GitHub Copilot in VS Code\\nSNIPPET:1. Install GitHub Copilot and Copilot Chat from the Microsoft Extension Marketplace in your local VS Code.\\n2. Authenticate with GitHub when prompted (see below).\\n3. Begin coding.\\n\\n### Set up for in-browser VS Code (code-server)\\n\\nFollow the steps below to manually install Copilot in your Domino Workspace.\\n\\n#### Step 1: Download the GitHub Copilot Extension\\n\\nTo install Copilot manually, you’ll need to download the .vsix files for both Copilot and Copilot Chat. [...] 1. Open any Domino project and create a new VS Code Workspace.\\n2. Select a Compute Environment that includes GitHub Copilot.\\n3. Click Launch to start the Workspace.\\n\\n## Set up GitHub Copilot\\n\\nYou can use Copilot in VS Code directly within Domino or through Remote SSH. Follow the steps below based on your access method.\\n\\n### For Remote SSH\\n\\nIf you’re using the VS Code Remote - SSH extension to connect from your local VS Code to a running Domino Workspace: [...] ```\\nRUN curl -o /tmp/github.copilot.vsix -LSsf  && \\\\ code-server --install-extension /tmp/github.copilot.vsix --force --extensions-dir /home/ubuntu/.local/share/code-server/extensions && \\\\ rm /tmp/github.copilot.vsix RUN \\\\ \\\\RUN curl -o /tmp/github-chat.vsix -LSsf  && \\\\ code-server --install-extension /tmp/github-chat.vsix --force --extensions-dir /home/ubuntu/.local/share/code-server/extensions && \\\\ rm /tmp/github-chat.vsix RUN \\\\ \\\\\\n```\\n\\n## Next steps\"}]"
+            },
+            {
+              "type": "embed",
+              "isText": true,
+              "value": "\nHere is some relevent context from webpages across the internet:\nTITLE: Add Remote Control Support to GitHub Copilot Chat · Issue #298406 · microsoft/vscode · GitHub\nSNIPPET:GitHub Copilot Chat sessions are currently locked to the VS Code window they started in. Adding a remote control feature would let users connect to an ongoing local Copilot Chat session from the GitHub Mobile app or any browser, without losing conversation history or context. This makes it possible to start a task at your desk and continue guiding it from your phone or another machine — with messages staying in sync across all connected surfaces.\nTITLE: GitHub - Davidobot/vscode-copilot-chat-sidecar: Copilot Chat extension for VS Code w/ a mobile sidecar · GitHub\nSNIPPET:Sidecar is a lightweight orchestration layer for mobile access to your active Copilot Chat workflow. It lets a phone sync with and interact with the same chat session that is open on desktop, without adding relay infrastructure or installing a native phone app.\n\n## Why this exists\n\nPrimarily because I like VS Code and don't use Claude Code - the former fits my workflow well, and I like the flexibilty Copilot provides whereby I can swap models on the fly.\n\nActual features of sidear: [...] ## Repository files navigation\n\n# Sidecar for VS Code's GitHub Copilot\n\nDispatch into VS Code's Copilot Chat from your phone, from anywhere\n\n> prototype; this is an early-stage experiment. It works, but expect rough edges. PRs are very welcome. [...] The extension starts a local HTTP + WebSocket bridge server on localhost.\n Sidecar bootstraps Dev Tunnels directly by running `devtunnel host -p  --allow-anonymous` and using the resulting `.devtunnels.ms` endpoint.\n If direct devtunnel bootstrap is unavailable or fails, Sidecar prompts you to install it.\n A QR code in VS Code opens the PWA with a signed pairing URL (`ws` + session `token`).\n The phone PWA syncs conversation list, history, and streaming assistant chunks.\nTITLE: How to Activate GitHub Copilot Chat in VS Code - SeeB4Coding\nSNIPPET:1. Open VS Code: Launch Visual Studio Code.\n2. Access Extensions View: Click on the Extensions icon in the Activity Bar on the side of the window (it looks like four squares, one detached). Alternatively, use the keyboard shortcut `Ctrl+Shift+X` (Windows/Linux) or `Cmd+Shift+X` (macOS).\n3. Search for Copilot Chat: In the Extensions search bar, type `GitHub Copilot Chat`. [...] 1. Log in to GitHub: Go to github.com and sign in to your account.\n2. Navigate to Copilot Settings: Click on your profile picture in the top-right corner, then select `Settings`.\n3. Find Copilot: In the left sidebar, scroll down and click on `Copilot` under the ‘Access’ section.\n4. Confirm Status: Here you’ll see your subscription status. If it’s active, you’re good to go. If not, you’ll see options to start a trial or purchase a subscription. Complete this step before proceeding. [...] 1. Access Chat View: Look for the new Copilot Chat icon in the Activity Bar on the left side of VS Code (it often looks like a speech bubble with a star or a Copilot logo). Click it.\n2. Start a New Chat: A new panel will open. You’ll see a prompt to “Ask Copilot anything…” or a similar greeting.\nTITLE: GitHub - 24anisha/vscode-copilot-chat: Copilot Chat extension for VS Code · GitHub\nSNIPPET:## Repository files navigation\n\n# GitHub Copilot - Your autonomous AI peer programmer\n\nGitHub Copilot is an AI peer programming tool that transforms how you write code in Visual Studio Code.\n\nGitHub Copilot agents handle complete coding tasks end-to-end, autonomously planning work, editing files, running commands, and self-correcting when they hit errors. You can also leverage inline suggestions for quick coding assistance and inline chat for precise, focused edits directly in the editor. [...] As Copilot Chat releases in lockstep with VS Code due to its deep UI integration, every new version of Copilot Chat is only compatible with the latest and newest release of VS Code. This means that if you are using an older version of VS Code, you will not be able to use the latest Copilot Chat.\n\nOnly the latest Copilot Chat versions will use the latest models provided by the Copilot service, as even minor model upgrades require prompt changes and fixes in the extension. [...] Receive intelligent inline suggestions as you type with ghost text suggestions and next edit suggestions, helping you write code faster. Copilot predicts your next logical change, and you can accept suggestions with the Tab key.\nTITLE: Configure GitHub Copilot in VS Code\nSNIPPET:1. Install GitHub Copilot and Copilot Chat from the Microsoft Extension Marketplace in your local VS Code.\n2. Authenticate with GitHub when prompted (see below).\n3. Begin coding.\n\n### Set up for in-browser VS Code (code-server)\n\nFollow the steps below to manually install Copilot in your Domino Workspace.\n\n#### Step 1: Download the GitHub Copilot Extension\n\nTo install Copilot manually, you’ll need to download the .vsix files for both Copilot and Copilot Chat. [...] 1. Open any Domino project and create a new VS Code Workspace.\n2. Select a Compute Environment that includes GitHub Copilot.\n3. Click Launch to start the Workspace.\n\n## Set up GitHub Copilot\n\nYou can use Copilot in VS Code directly within Domino or through Remote SSH. Follow the steps below based on your access method.\n\n### For Remote SSH\n\nIf you’re using the VS Code Remote - SSH extension to connect from your local VS Code to a running Domino Workspace: [...] ```\nRUN curl -o /tmp/github.copilot.vsix -LSsf  && \\ code-server --install-extension /tmp/github.copilot.vsix --force --extensions-dir /home/ubuntu/.local/share/code-server/extensions && \\ rm /tmp/github.copilot.vsix RUN \\ \\RUN curl -o /tmp/github-chat.vsix -LSsf  && \\ code-server --install-extension /tmp/github-chat.vsix --force --extensions-dir /home/ubuntu/.local/share/code-server/extensions && \\ rm /tmp/github-chat.vsix RUN \\ \\\n```\n\n## Next steps"
+            }
+          ]
+        },
+        "toolCallId": "call-c48cd45b-8b4e-433b-bd29-062b1c4bd06e-1",
+        "toolId": "vscode-websearchforcopilot_webSearch"
+      },
+      {
+        "kind": "toolInvocationSerialized",
+        "invocationMessage": "正在 Web 上搜索“vscode copilot agent remote control phone github”",
+        "isConfirmed": {
+          "type": 1
+        },
+        "isComplete": true,
+        "source": {
+          "type": "extension",
+          "label": "Web Search for Copilot",
+          "extensionId": {
+            "value": "ms-vscode.vscode-websearchforcopilot",
+            "_lower": "ms-vscode.vscode-websearchforcopilot"
+          }
+        },
+        "toolCallId": "call-c48cd45b-8b4e-433b-bd29-062b1c4bd06e-2",
+        "toolId": "vscode-websearchforcopilot_webSearch"
+      },
+      {
+        "kind": "toolInvocationSerialized",
+        "invocationMessage": "正在 Web 上搜索“vscode copilot agent remote control phone github”",
+        "isConfirmed": {
+          "type": 1
+        },
+        "isComplete": true,
+        "source": {
+          "type": "extension",
+          "label": "Web Search for Copilot",
+          "extensionId": {
+            "value": "ms-vscode.vscode-websearchforcopilot",
+            "_lower": "ms-vscode.vscode-websearchforcopilot"
+          }
+        },
+        "resultDetails": {
+          "input": "{\n  \"query\": \"vscode copilot agent remote control phone github\"\n}",
+          "output": [
+            {
+              "type": "embed",
+              "isText": true,
+              "value": "Here is some relevent context from webpages across the internet:\n[{\"file\":{\"$mid\":1,\"path\":\"/docs/agents/agent-types/copilot-cli\",\"scheme\":\"https\",\"authority\":\"code.visualstudio.com\",\"fragment\":\":~:text=The `\\\"/remote on\\\"` command lets,before remote control is enabled.\"},\"text\":\"TITLE: Copilot CLI sessions in Visual Studio Code\\nSNIPPET:The `\\\"/remote on\\\"` command lets you remote control a Copilot CLI session from github.com or the GitHub Mobile app. With remote control, you can monitor and steer your ongoing Copilot CLI sessions from anywhere, giving you more flexibility to keep work moving without being tied to your machine. You keep the full session context and history in sync across both VS Code and GitHub.\\n\\nTip [...] 1. Start or resume a Copilot CLI session from the Chat view.\\n2. Enter `\\\"/remote on\\\"` in the chat input to enable remote control and create the linked GitHub task page.\\n3. Select Open on GitHub to open the linked task page or scan the QR code to open it on your mobile device.\\n\\nRun `\\\"/remote\\\"` at any time to check the current remote-control status. The `\\\"/remote\\\"` command only shows status and does not enable or disable remote control. [...] To stop mirroring the session to GitHub, enter `\\\"/remote off\\\"` in the chat input.\\n\\nTo disable remote control support for Copilot CLI sessions in VS Code, disable the   github.copilot.chat.cli.remote.enabled   Open in VS Code Open in VS Code Insiders   setting.\\n\\nNote \\n\\nRemote control requires GitHub authentication in VS Code and a workspace that maps to a GitHub repository. If additional GitHub permissions are needed, VS Code prompts you to grant them before remote control is enabled.\"},{\"file\":{\"$mid\":1,\"path\":\"/imatulsrivas/i-built-a-vs-code-extension-so-you-can-respond-to-github-copilot-agent-from-your-phone-n0o\",\"scheme\":\"https\",\"authority\":\"dev.to\",\"fragment\":\":~:text=## Links,## Links\"},\"text\":\"TITLE: I built a VS Code extension so you can respond to GitHub Copilot agent from your phone - DEV Community\\nSNIPPET:## Links\\n\\n 🛒 Marketplace: marketplace.visualstudio.com/items?itemName=atulhritik.copilot-remote\\n 💳 Buy license (₹49 / ~$6): agent-handle.vercel.app\\n 📱 Phone PWA: pwa-six-pi.vercel.app\\n\\nOne-time purchase, no subscription, no recurring costs. Curious what you think — especially about the tunnel approach.\\n\\n## Top comments (0)\\n\\nSubscribe\\n\\nFor further actions, you may consider blocking this person and/or reporting abuse\\n\\nDEV Community [...] I built Copilot Remote Control to cut that chain.\\n\\n## What it does\\n\\nYour phone becomes a live VS Code chat panel. Every message the agent prints appears on your phone in real time. When the agent stops and needs input, your phone buzzes in your pocket. You glance at it, type \\\"yes\\\", put it back. Agent continues. You never left your meeting.\\n\\nNo dead time. No wasted cycles.\\n\\n## The architecture (no third-party server) [...] 1. Buy & activate at agent-handle.vercel.app (₹49 / ~$6 one-time). Paste the license key in VS Code.\\n2. Scan the QR code that appears in the sidebar panel with your phone camera.\\n3. Walk away. Your phone shows everything the agent is doing, in real time.\\n4. Respond when it buzzes. Firebase FCM pushes a notification when the agent needs input.\\n\\nYou can also send files from your phone — screenshots, PDFs, requirement docs — directly into your VS Code workspace.\\n\\n## Links\"},{\"file\":{\"$mid\":1,\"path\":\"/changelog/2026-05-18-remote-control-for-copilot-cli-sessions-now-generally-available-on-mobile-web-and-vs-code\",\"scheme\":\"https\",\"authority\":\"github.blog\",\"fragment\":\":~:text=When remote control is enabled,keep it moving from anywhere.\"},\"text\":\"TITLE: Remote control for Copilot CLI sessions now generally available on ...\\nSNIPPET:When remote control is enabled, Copilot streams your CLI session activity in real time, so you can view and steer your sessions on the go. Simply kick off a Copilot CLI session in the terminal, VS Code, or JetBrains, then monitor or steer it from the GitHub Mobile app or github.com.\\n\\n### Built for staying productive from your phone [...] Download the latest version of VS Code.\\n Enable the `github.copilot.chat.cli.remote.enabled` setting.\\n Start or resume a Copilot CLI session from the Chat view.\\n Enter `/remote on` in the chat input to enable remote control and create the linked GitHub task page.\\n Select Open on GitHub to open the linked task page.\\n\\n> Note: If you’re a Copilot Business or Copilot Enterprise user, an administrator will have to enable remote control and CLI policies before you can use it. [...] Skip to content   Skip to sidebar \\n\\n/  Blog\\n\\nTry GitHub Copilot CLI   Attend GitHub Universe\\n\\nBack to changelog\\n\\nRelease\\n\\n• 2 minute read\\n\\n# Remote control for Copilot CLI sessions now generally available on mobile, web, and VS Code\\n\\nRemote control for Copilot CLI sessions is now generally available on GitHub Mobile and github.com, so you can start work in your terminal and keep it moving from anywhere.\"},{\"file\":{\"$mid\":1,\"path\":\"/orgs/community/discussions/186045\",\"scheme\":\"https\",\"authority\":\"github.com\",\"fragment\":\":~:text=| Product: GitHub Mobile Copilot,transcript to a secure Copilot\"},\"text\":\"TITLE: Remote view & control of local GitHub Copilot sessions (monitor and steer ...\\nSNIPPET:| Product: GitHub Mobile Copilot — VS Code / Local / Copilot sessions  Summary  Allow users to opt-in to share local Copilot chat sessions from VS Code to a remote Copilot dashboard/collaborator view so teammates or owners can monitor, join, and steer agents working in a local repository easily with mobile ui screens  Problem / Motivation  Local Copilot chat sessions and agent state live only on the developer’s machine. This prevents:    Remote teammates, reviewers, or managers from monitoring [...] to a secure Copilot dashboard or collaborator UI. Core capabilities:    Opt-in per-session toggle in VS Code with a visible session ID and explicit consent prompt.  Remote dashboard (web or GitHub-integrated UI) listing active shared sessions with metadata: repo, branch, open file(s), timestamp, session name, and participants.  Read-only live view of the chat transcript and a live preview of files being edited (no automatic code upload unless explicitly enabled).  Remote steering controls:   + [...] from monitoring agent behavior or progress without screen sharing or Live Share.  Easy collaboration where a remote reviewer can suggest prompts or corrections to an active session.  Auditability and reproducibility of what the agent suggested and why (important for debugging, security review, and compliance).   Proposed solution  Add an opt-in “Share session” capability for local VS Code Copilot sessions that streams session metadata and an optionally shareable transcript to a secure Copilot\"},{\"file\":{\"$mid\":1,\"path\":\"/en/copilot/concepts/agents/copilot-cli/about-remote-control\",\"scheme\":\"https\",\"authority\":\"docs.github.com\",\"fragment\":\":~:text=## Accessing a session remotely,## Administering remote control\"},\"text\":\"TITLE: About remote control of GitHub Copilot CLI sessions\\nSNIPPET:## Accessing a session remotely\\n\\nWhen you enable remote control for a Copilot CLI session, you can go to GitHub.com or GitHub Mobile and find the session in the list of your recent agent sessions. The remote interface is updated in real time, allowing you to monitor ongoing output from the session and respond to prompts and permission requests as they come in. [...] You step away from your workstation: Keep interacting with Copilot from your phone or another device, without returning to the machine where the session is running.\\n A long-running task needs your input: Approve permission requests and answer questions as they come up, so the task isn't blocked while you're away.\\n You want a quick status check: Glance at session progress from GitHub Mobile while you work on something else.\\n\\n## Prerequisites\\n\\nRemote control requires: [...] Session events (conversation messages, tool execution events, and permission requests) are sent from your local machine to GitHub.\\n Remote commands are polled by Copilot CLI from GitHub and injected into your local session.\\n The CLI continues to run locally. All shell commands, file operations, and tool executions happen on your machine. Remote control does not grant direct access to your machine beyond what the CLI agent can do within the session.\\n\\n## Administering remote control\"}]"
+            },
+            {
+              "type": "embed",
+              "isText": true,
+              "value": "\nHere is some relevent context from webpages across the internet:\nTITLE: Copilot CLI sessions in Visual Studio Code\nSNIPPET:The `\"/remote on\"` command lets you remote control a Copilot CLI session from github.com or the GitHub Mobile app. With remote control, you can monitor and steer your ongoing Copilot CLI sessions from anywhere, giving you more flexibility to keep work moving without being tied to your machine. You keep the full session context and history in sync across both VS Code and GitHub.\n\nTip [...] 1. Start or resume a Copilot CLI session from the Chat view.\n2. Enter `\"/remote on\"` in the chat input to enable remote control and create the linked GitHub task page.\n3. Select Open on GitHub to open the linked task page or scan the QR code to open it on your mobile device.\n\nRun `\"/remote\"` at any time to check the current remote-control status. The `\"/remote\"` command only shows status and does not enable or disable remote control. [...] To stop mirroring the session to GitHub, enter `\"/remote off\"` in the chat input.\n\nTo disable remote control support for Copilot CLI sessions in VS Code, disable the   github.copilot.chat.cli.remote.enabled   Open in VS Code Open in VS Code Insiders   setting.\n\nNote \n\nRemote control requires GitHub authentication in VS Code and a workspace that maps to a GitHub repository. If additional GitHub permissions are needed, VS Code prompts you to grant them before remote control is enabled.\nTITLE: I built a VS Code extension so you can respond to GitHub Copilot agent from your phone - DEV Community\nSNIPPET:## Links\n\n 🛒 Marketplace: marketplace.visualstudio.com/items?itemName=atulhritik.copilot-remote\n 💳 Buy license (₹49 / ~$6): agent-handle.vercel.app\n 📱 Phone PWA: pwa-six-pi.vercel.app\n\nOne-time purchase, no subscription, no recurring costs. Curious what you think — especially about the tunnel approach.\n\n## Top comments (0)\n\nSubscribe\n\nFor further actions, you may consider blocking this person and/or reporting abuse\n\nDEV Community [...] I built Copilot Remote Control to cut that chain.\n\n## What it does\n\nYour phone becomes a live VS Code chat panel. Every message the agent prints appears on your phone in real time. When the agent stops and needs input, your phone buzzes in your pocket. You glance at it, type \"yes\", put it back. Agent continues. You never left your meeting.\n\nNo dead time. No wasted cycles.\n\n## The architecture (no third-party server) [...] 1. Buy & activate at agent-handle.vercel.app (₹49 / ~$6 one-time). Paste the license key in VS Code.\n2. Scan the QR code that appears in the sidebar panel with your phone camera.\n3. Walk away. Your phone shows everything the agent is doing, in real time.\n4. Respond when it buzzes. Firebase FCM pushes a notification when the agent needs input.\n\nYou can also send files from your phone — screenshots, PDFs, requirement docs — directly into your VS Code workspace.\n\n## Links\nTITLE: Remote control for Copilot CLI sessions now generally available on ...\nSNIPPET:When remote control is enabled, Copilot streams your CLI session activity in real time, so you can view and steer your sessions on the go. Simply kick off a Copilot CLI session in the terminal, VS Code, or JetBrains, then monitor or steer it from the GitHub Mobile app or github.com.\n\n### Built for staying productive from your phone [...] Download the latest version of VS Code.\n Enable the `github.copilot.chat.cli.remote.enabled` setting.\n Start or resume a Copilot CLI session from the Chat view.\n Enter `/remote on` in the chat input to enable remote control and create the linked GitHub task page.\n Select Open on GitHub to open the linked task page.\n\n> Note: If you’re a Copilot Business or Copilot Enterprise user, an administrator will have to enable remote control and CLI policies before you can use it. [...] Skip to content   Skip to sidebar \n\n/  Blog\n\nTry GitHub Copilot CLI   Attend GitHub Universe\n\nBack to changelog\n\nRelease\n\n• 2 minute read\n\n# Remote control for Copilot CLI sessions now generally available on mobile, web, and VS Code\n\nRemote control for Copilot CLI sessions is now generally available on GitHub Mobile and github.com, so you can start work in your terminal and keep it moving from anywhere.\nTITLE: Remote view & control of local GitHub Copilot sessions (monitor and steer ...\nSNIPPET:| Product: GitHub Mobile Copilot — VS Code / Local / Copilot sessions  Summary  Allow users to opt-in to share local Copilot chat sessions from VS Code to a remote Copilot dashboard/collaborator view so teammates or owners can monitor, join, and steer agents working in a local repository easily with mobile ui screens  Problem / Motivation  Local Copilot chat sessions and agent state live only on the developer’s machine. This prevents:    Remote teammates, reviewers, or managers from monitoring [...] to a secure Copilot dashboard or collaborator UI. Core capabilities:    Opt-in per-session toggle in VS Code with a visible session ID and explicit consent prompt.  Remote dashboard (web or GitHub-integrated UI) listing active shared sessions with metadata: repo, branch, open file(s), timestamp, session name, and participants.  Read-only live view of the chat transcript and a live preview of files being edited (no automatic code upload unless explicitly enabled).  Remote steering controls:   + [...] from monitoring agent behavior or progress without screen sharing or Live Share.  Easy collaboration where a remote reviewer can suggest prompts or corrections to an active session.  Auditability and reproducibility of what the agent suggested and why (important for debugging, security review, and compliance).   Proposed solution  Add an opt-in “Share session” capability for local VS Code Copilot sessions that streams session metadata and an optionally shareable transcript to a secure Copilot\nTITLE: About remote control of GitHub Copilot CLI sessions\nSNIPPET:## Accessing a session remotely\n\nWhen you enable remote control for a Copilot CLI session, you can go to GitHub.com or GitHub Mobile and find the session in the list of your recent agent sessions. The remote interface is updated in real time, allowing you to monitor ongoing output from the session and respond to prompts and permission requests as they come in. [...] You step away from your workstation: Keep interacting with Copilot from your phone or another device, without returning to the machine where the session is running.\n A long-running task needs your input: Approve permission requests and answer questions as they come up, so the task isn't blocked while you're away.\n You want a quick status check: Glance at session progress from GitHub Mobile while you work on something else.\n\n## Prerequisites\n\nRemote control requires: [...] Session events (conversation messages, tool execution events, and permission requests) are sent from your local machine to GitHub.\n Remote commands are polled by Copilot CLI from GitHub and injected into your local session.\n The CLI continues to run locally. All shell commands, file operations, and tool executions happen on your machine. Remote control does not grant direct access to your machine beyond what the CLI agent can do within the session.\n\n## Administering remote control"
+            }
+          ]
+        },
+        "toolCallId": "call-c48cd45b-8b4e-433b-bd29-062b1c4bd06e-2",
+        "toolId": "vscode-websearchforcopilot_webSearch"
+      },
+      {
+        "kind": "toolInvocationSerialized",
+        "invocationMessage": "正在 Web 上搜索“\"copilot\" \"vscode\" \"remote\" \"phone\" OR \"mobile\" chat session sync”",
+        "isConfirmed": {
+          "type": 1
+        },
+        "isComplete": true,
+        "source": {
+          "type": "extension",
+          "label": "Web Search for Copilot",
+          "extensionId": {
+            "value": "ms-vscode.vscode-websearchforcopilot",
+            "_lower": "ms-vscode.vscode-websearchforcopilot"
+          }
+        },
+        "resultDetails": {
+          "input": "{\n  \"query\": \"\\\"copilot\\\" \\\"vscode\\\" \\\"remote\\\" \\\"phone\\\" OR \\\"mobile\\\" chat session sync\"\n}",
+          "output": [
+            {
+              "type": "embed",
+              "isText": true,
+              "value": "Here is some relevent context from webpages across the internet:\n[{\"file\":{\"$mid\":1,\"path\":\"/microsoft/vscode/issues/298406\",\"scheme\":\"https\",\"authority\":\"github.com\",\"fragment\":\":~:text=GitHub Copilot Chat sessions are,### Uh oh!\"},\"text\":\"TITLE: Add Remote Control Support to GitHub Copilot Chat · Issue #298406 · microsoft/vscode · GitHub\\nSNIPPET:GitHub Copilot Chat sessions are currently locked to the VS Code window they started in. Adding a remote control feature would let users connect to an ongoing local Copilot Chat session from the GitHub Mobile app or any browser, without losing conversation history or context. This makes it possible to start a task at your desk and continue guiding it from your phone or another machine — with messages staying in sync across all connected surfaces. [...] VS Code version: Code - Insiders 1.110.0-insider (37f3964, 2026-02-27T03:12:42.551Z)  \\n OS version: Windows\\\\_NT x64 10.0.26200  \\n Modes:  \\n Remote OS version: Linux x64 6.6.87.2-microsoft-standard-WSL2\\n\\nReactions are currently unavailable\\n\\n## Metadata\\n\\n## Metadata\\n\\n### Assignees\\n\\nNo labels\\n\\nNo labels\\n\\nNo type\\n\\nNo projects\\n\\nNo milestone\\n\\nNone yet\\n\\nNo branches or pull requests\\n\\n## Issue actions\\n\\nYou can’t perform that action at this time. [...] Skip to content   \\n\\n## Navigation Menu\\n\\nSign in \\n\\nAppearance settings\\n\\n# Search code, repositories, users, issues, pull requests...\\n\\nSearch syntax tips\\n\\nSign in\\n\\n Sign up \\n\\nAppearance settings\\n\\nYou signed in with another tab or window. Reload to refresh your session. You signed out in another tab or window. Reload to refresh your session. You switched accounts on another tab or window. Reload to refresh your session. Dismiss alert\\n\\n{{ message }}\\n\\n### Uh oh!\"},{\"file\":{\"$mid\":1,\"path\":\"/docs/agents/agent-types/copilot-cli\",\"scheme\":\"https\",\"authority\":\"code.visualstudio.com\",\"fragment\":\":~:text=The `\\\"/remote on\\\"` command lets,before remote control is enabled.\"},\"text\":\"TITLE: Copilot CLI sessions in Visual Studio Code\\nSNIPPET:The `\\\"/remote on\\\"` command lets you remote control a Copilot CLI session from github.com or the GitHub Mobile app. With remote control, you can monitor and steer your ongoing Copilot CLI sessions from anywhere, giving you more flexibility to keep work moving without being tied to your machine. You keep the full session context and history in sync across both VS Code and GitHub.\\n\\nTip [...] 1. Start or resume a Copilot CLI session from the Chat view.\\n2. Enter `\\\"/remote on\\\"` in the chat input to enable remote control and create the linked GitHub task page.\\n3. Select Open on GitHub to open the linked task page or scan the QR code to open it on your mobile device.\\n\\nRun `\\\"/remote\\\"` at any time to check the current remote-control status. The `\\\"/remote\\\"` command only shows status and does not enable or disable remote control. [...] To stop mirroring the session to GitHub, enter `\\\"/remote off\\\"` in the chat input.\\n\\nTo disable remote control support for Copilot CLI sessions in VS Code, disable the   github.copilot.chat.cli.remote.enabled   Open in VS Code Open in VS Code Insiders   setting.\\n\\nNote \\n\\nRemote control requires GitHub authentication in VS Code and a workspace that maps to a GitHub repository. If additional GitHub permissions are needed, VS Code prompts you to grant them before remote control is enabled.\"},{\"file\":{\"$mid\":1,\"path\":\"/watch\",\"scheme\":\"https\",\"authority\":\"www.youtube.com\",\"query\":\"v=nwDmyMY_rJc&vl=en\",\"fragment\":\":~:text=In this video I show,Um one thing I immediately\"},\"text\":\"TITLE: GitHub Copilot CLI Remote Sessions - Code From Your Couch, The ...\\nSNIPPET:In this video I show you how it works and what you can do with it.\\n\\nGet started:\\ncopilot --remote\\n\\nOr enable it mid-session:\\n/remote\\n\\nFrom the web or mobile you can:\\n- Send follow-up messages to steer the agent\\n- Review and modify plans before implementation\\n- Switch between plan, interactive, and autopilot mode\\n- Approve or deny permission requests\\n- Respond to questions from Copilot\\n\\nEverything stays in sync. Each session is private and visible only to you. [...] GitHub has just released some mind-blowing functionality. You can now remote control your GitHub CLI session that is running on your desktop through your phone, through your web, from another device. Let's just go check out what it can do and how to set it up. [music] Now, I'm going to be bold and assume that you already know what Copilot is. Unless you have been sleeping under a rock, um I think it has been very hard to miss. It's in your VS Code, it's in your Visual Studio. Hopefully, you've [...] with Copilot {dash} {dash} remote or {slash} remote from the Copilot CLI tool. Now, if you want to do it on mobile, uh make sure to have the beta release on Google Play or iOS TestFlight. I have all of that, I'm going to show you all of that, so that's cool. Now, one thing that I did immediately find out, I have a terminal window right here with a sample MAUI um project um and we'll see if we can get that to run here on my local machine using all kinds of other tools. Um one thing I immediately\"},{\"file\":{\"$mid\":1,\"path\":\"/docs/agents/sessions/session-sync\",\"scheme\":\"https\",\"authority\":\"code.visualstudio.com\",\"fragment\":\":~:text=By default,to your GitHub account |\"},\"text\":\"TITLE: Sync Copilot sessions to GitHub\\nSNIPPET:By default, VS Code syncs your chat sessions to your GitHub account, including all local agent sessions. Synced sessions are private to you and are not visible to anyone else unless you explicitly share them. They appear on GitHub.com in the Agents tab of your repository, enabling session insights to query across all your sessions, including those from Copilot CLI, coding agent, code review, and the GitHub Copilot Desktop app.\\n\\n## Opt out of session sync [...] GitHub.com enterprise policy (\\\"Store local sessions in the Cloud\\\"): enterprise and organization owners configure this on GitHub.com to enable or disable cloud sync for their users.\\n VS Code group policy (`CopilotSessionSync`): when disabled, the   chat.sessionSync.enabled   Open in VS Code Open in VS Code Insiders  This setting is managed at the organization level. Contact your administrator to change it.ORG setting is forced to `false` and sessions stay local only.\\n\\nImportant [...] | Setting | Default | Description |\\n --- \\n| github.copilot.chat.localIndex.enabled   Open in VS Code Open in VS Code Insiders | `true` | Enable local session tracking (prerequisite for sync) |\\n| chat.sessionSync.enabled   Open in VS Code Open in VS Code Insiders  This setting is managed at the organization level. Contact your administrator to change it.ORG | `true` | Sync sessions to your GitHub account |\"},{\"file\":{\"$mid\":1,\"path\":\"/changelog/2026-05-18-remote-control-for-copilot-cli-sessions-now-generally-available-on-mobile-web-and-vs-code\",\"scheme\":\"https\",\"authority\":\"github.blog\",\"fragment\":\":~:text=Download the latest version of,keep it moving from anywhere.\"},\"text\":\"TITLE: Remote control for Copilot CLI sessions now generally available on ...\\nSNIPPET:Download the latest version of VS Code.\\n Enable the `github.copilot.chat.cli.remote.enabled` setting.\\n Start or resume a Copilot CLI session from the Chat view.\\n Enter `/remote on` in the chat input to enable remote control and create the linked GitHub task page.\\n Select Open on GitHub to open the linked task page.\\n\\n> Note: If you’re a Copilot Business or Copilot Enterprise user, an administrator will have to enable remote control and CLI policies before you can use it. [...] When remote control is enabled, Copilot streams your CLI session activity in real time, so you can view and steer your sessions on the go. Simply kick off a Copilot CLI session in the terminal, VS Code, or JetBrains, then monitor or steer it from the GitHub Mobile app or github.com.\\n\\n### Built for staying productive from your phone [...] Skip to content   Skip to sidebar \\n\\n/  Blog\\n\\nTry GitHub Copilot CLI   Attend GitHub Universe\\n\\nBack to changelog\\n\\nRelease\\n\\n• 2 minute read\\n\\n# Remote control for Copilot CLI sessions now generally available on mobile, web, and VS Code\\n\\nRemote control for Copilot CLI sessions is now generally available on GitHub Mobile and github.com, so you can start work in your terminal and keep it moving from anywhere.\"}]"
+            },
+            {
+              "type": "embed",
+              "isText": true,
+              "value": "\nHere is some relevent context from webpages across the internet:\nTITLE: Add Remote Control Support to GitHub Copilot Chat · Issue #298406 · microsoft/vscode · GitHub\nSNIPPET:GitHub Copilot Chat sessions are currently locked to the VS Code window they started in. Adding a remote control feature would let users connect to an ongoing local Copilot Chat session from the GitHub Mobile app or any browser, without losing conversation history or context. This makes it possible to start a task at your desk and continue guiding it from your phone or another machine — with messages staying in sync across all connected surfaces. [...] VS Code version: Code - Insiders 1.110.0-insider (37f3964, 2026-02-27T03:12:42.551Z)  \n OS version: Windows\\_NT x64 10.0.26200  \n Modes:  \n Remote OS version: Linux x64 6.6.87.2-microsoft-standard-WSL2\n\nReactions are currently unavailable\n\n## Metadata\n\n## Metadata\n\n### Assignees\n\nNo labels\n\nNo labels\n\nNo type\n\nNo projects\n\nNo milestone\n\nNone yet\n\nNo branches or pull requests\n\n## Issue actions\n\nYou can’t perform that action at this time. [...] Skip to content   \n\n## Navigation Menu\n\nSign in \n\nAppearance settings\n\n# Search code, repositories, users, issues, pull requests...\n\nSearch syntax tips\n\nSign in\n\n Sign up \n\nAppearance settings\n\nYou signed in with another tab or window. Reload to refresh your session. You signed out in another tab or window. Reload to refresh your session. You switched accounts on another tab or window. Reload to refresh your session. Dismiss alert\n\n{{ message }}\n\n### Uh oh!\nTITLE: Copilot CLI sessions in Visual Studio Code\nSNIPPET:The `\"/remote on\"` command lets you remote control a Copilot CLI session from github.com or the GitHub Mobile app. With remote control, you can monitor and steer your ongoing Copilot CLI sessions from anywhere, giving you more flexibility to keep work moving without being tied to your machine. You keep the full session context and history in sync across both VS Code and GitHub.\n\nTip [...] 1. Start or resume a Copilot CLI session from the Chat view.\n2. Enter `\"/remote on\"` in the chat input to enable remote control and create the linked GitHub task page.\n3. Select Open on GitHub to open the linked task page or scan the QR code to open it on your mobile device.\n\nRun `\"/remote\"` at any time to check the current remote-control status. The `\"/remote\"` command only shows status and does not enable or disable remote control. [...] To stop mirroring the session to GitHub, enter `\"/remote off\"` in the chat input.\n\nTo disable remote control support for Copilot CLI sessions in VS Code, disable the   github.copilot.chat.cli.remote.enabled   Open in VS Code Open in VS Code Insiders   setting.\n\nNote \n\nRemote control requires GitHub authentication in VS Code and a workspace that maps to a GitHub repository. If additional GitHub permissions are needed, VS Code prompts you to grant them before remote control is enabled.\nTITLE: GitHub Copilot CLI Remote Sessions - Code From Your Couch, The ...\nSNIPPET:In this video I show you how it works and what you can do with it.\n\nGet started:\ncopilot --remote\n\nOr enable it mid-session:\n/remote\n\nFrom the web or mobile you can:\n- Send follow-up messages to steer the agent\n- Review and modify plans before implementation\n- Switch between plan, interactive, and autopilot mode\n- Approve or deny permission requests\n- Respond to questions from Copilot\n\nEverything stays in sync. Each session is private and visible only to you. [...] GitHub has just released some mind-blowing functionality. You can now remote control your GitHub CLI session that is running on your desktop through your phone, through your web, from another device. Let's just go check out what it can do and how to set it up. [music] Now, I'm going to be bold and assume that you already know what Copilot is. Unless you have been sleeping under a rock, um I think it has been very hard to miss. It's in your VS Code, it's in your Visual Studio. Hopefully, you've [...] with Copilot {dash} {dash} remote or {slash} remote from the Copilot CLI tool. Now, if you want to do it on mobile, uh make sure to have the beta release on Google Play or iOS TestFlight. I have all of that, I'm going to show you all of that, so that's cool. Now, one thing that I did immediately find out, I have a terminal window right here with a sample MAUI um project um and we'll see if we can get that to run here on my local machine using all kinds of other tools. Um one thing I immediately\nTITLE: Sync Copilot sessions to GitHub\nSNIPPET:By default, VS Code syncs your chat sessions to your GitHub account, including all local agent sessions. Synced sessions are private to you and are not visible to anyone else unless you explicitly share them. They appear on GitHub.com in the Agents tab of your repository, enabling session insights to query across all your sessions, including those from Copilot CLI, coding agent, code review, and the GitHub Copilot Desktop app.\n\n## Opt out of session sync [...] GitHub.com enterprise policy (\"Store local sessions in the Cloud\"): enterprise and organization owners configure this on GitHub.com to enable or disable cloud sync for their users.\n VS Code group policy (`CopilotSessionSync`): when disabled, the   chat.sessionSync.enabled   Open in VS Code Open in VS Code Insiders  This setting is managed at the organization level. Contact your administrator to change it.ORG setting is forced to `false` and sessions stay local only.\n\nImportant [...] | Setting | Default | Description |\n --- \n| github.copilot.chat.localIndex.enabled   Open in VS Code Open in VS Code Insiders | `true` | Enable local session tracking (prerequisite for sync) |\n| chat.sessionSync.enabled   Open in VS Code Open in VS Code Insiders  This setting is managed at the organization level. Contact your administrator to change it.ORG | `true` | Sync sessions to your GitHub account |\nTITLE: Remote control for Copilot CLI sessions now generally available on ...\nSNIPPET:Download the latest version of VS Code.\n Enable the `github.copilot.chat.cli.remote.enabled` setting.\n Start or resume a Copilot CLI session from the Chat view.\n Enter `/remote on` in the chat input to enable remote control and create the linked GitHub task page.\n Select Open on GitHub to open the linked task page.\n\n> Note: If you’re a Copilot Business or Copilot Enterprise user, an administrator will have to enable remote control and CLI policies before you can use it. [...] When remote control is enabled, Copilot streams your CLI session activity in real time, so you can view and steer your sessions on the go. Simply kick off a Copilot CLI session in the terminal, VS Code, or JetBrains, then monitor or steer it from the GitHub Mobile app or github.com.\n\n### Built for staying productive from your phone [...] Skip to content   Skip to sidebar \n\n/  Blog\n\nTry GitHub Copilot CLI   Attend GitHub Universe\n\nBack to changelog\n\nRelease\n\n• 2 minute read\n\n# Remote control for Copilot CLI sessions now generally available on mobile, web, and VS Code\n\nRemote control for Copilot CLI sessions is now generally available on GitHub Mobile and github.com, so you can start work in your terminal and keep it moving from anywhere."
+            }
+          ]
+        },
+        "toolCallId": "call-c48cd45b-8b4e-433b-bd29-062b1c4bd06e-3",
+        "toolId": "vscode-websearchforcopilot_webSearch"
+      }
+    ],
+    "confirm": [],
+    "other_top": [
+      {
+        "kind": 1,
+        "k": [
+          "inputState",
+          "permissionLevel"
+        ],
+        "has_v": true,
+        "has_i": false
+      },
+      {
+        "kind": 1,
+        "k": [
+          "inputState",
+          "inputText"
+        ],
+        "has_v": true,
+        "has_i": false
+      },
+      {
+        "kind": 1,
+        "k": [
+          "inputState",
+          "selections"
+        ],
+        "has_v": true,
+        "has_i": false
+      },
+      {
+        "kind": 1,
+        "k": [
+          "inputState",
+          "inputText"
+        ],
+        "has_v": true,
+        "has_i": false
+      },
+      {
+        "kind": 1,
+        "k": [
+          "inputState",
+          "selections"
+        ],
+        "has_v": true,
+        "has_i": false
+      },
+      {
+        "kind": 1,
+        "k": [
+          "inputState",
+          "inputText"
+        ],
+        "has_v": true,
+        "has_i": false
+      },
+      {
+        "kind": 1,
+        "k": [
+          "inputState",
+          "selections"
+        ],
+        "has_v": true,
+        "has_i": false
+      },
+      {
+        "kind": 1,
+        "k": [
+          "inputState",
+          "inputText"
+        ],
+        "has_v": true,
+        "has_i": false
+      },
+      {
+        "kind": 1,
+        "k": [
+          "inputState",
+          "selections"
+        ],
+        "has_v": true,
+        "has_i": false
+      },
+      {
+        "kind": 1,
+        "k": [
+          "inputState",
+          "inputText"
+        ],
+        "has_v": true,
+        "has_i": false
+      },
+      {
+        "kind": 1,
+        "k": [
+          "inputState",
+          "selections"
+        ],
+        "has_v": true,
+        "has_i": false
+      },
+      {
+        "kind": 1,
+        "k": [
+          "inputState",
+          "inputText"
+        ],
+        "has_v": true,
+        "has_i": false
+      },
+      {
+        "kind": 1,
+        "k": [
+          "inputState",
+          "selections"
+        ],
+        "has_v": true,
+        "has_i": false
+      }
+    ]
+  },
+  "seen_requests": 4,
+  "resp_paths": [
+    "requests/0/response",
+    "requests/1/response",
+    "requests/2/response",
+    "requests/3/response",
+    "requests/4/response"
+  ]
+}

@@ -1,0 +1,1 @@
+function uS({msg:e,onConfirm:t}){switch(e.role){case"user":return P.jsx(aS,{msg:e});case"agent":return P.jsx(sS,{msg:e});case"tool":return P.jsx(fS,{msg:e});case"confirm":return P.jsx(pS,{msg:e,onConfirm:t});case"system":return P.jsx(hS,{msg:e});case"typing":return P.jsx(dS,{});default:return null}}

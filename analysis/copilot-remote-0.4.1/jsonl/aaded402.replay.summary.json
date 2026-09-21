@@ -1,0 +1,13 @@
+{
+  "file": "/Users/xin/Library/Application Support/Code/User/workspaceStorage/4cfb0b6fc59d641b94989f31b1b09c06/chatSessions/aaded402-24a6-44cc-9c95-f48ea6e7cc8c.jsonl",
+  "linesRead": 45,
+  "eventCounts": {
+    "USER_MESSAGE": 1,
+    "COPILOT_TYPING": 1,
+    "tool": 71,
+    "COPILOT_DONE": 2,
+    "AGENT_STREAM_SET": 1
+  },
+  "requestIds": 1
+}
+wrote /Users/xin/Desktop/sidecar_remote/analysis/copilot-remote-0.4.1/jsonl/aaded402.events.jsonl
