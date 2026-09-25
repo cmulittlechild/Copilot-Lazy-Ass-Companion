@@ -55,3 +55,5 @@ PWA ↔ VS Code bridge。仓库 `~/repos/sidecar_remote/projects/companion-open`
 - 验证"已投去重"类修复双测：目标 stray 不再冒 + 回放/跟随不受影响；点选后看 feed 空不空是最快判据（注意：手机点选 n=1 仅提示是设计行为，勿误判回归）。
 - 工具轮验证用"建文件+验证"提示可一次覆盖 THINKING/TOOL_CALL/步骤组/文件实证。
 - 边界重投影有 sessiondb 变体：回放过的答案可能在下轮发信后经 db 行再投。
+- 前缀比对类压制的对抗验证必含同题重问——确认 seq 放行（重问抬 userSeq 后 isUtAnswered=false）。
+- 重投影压制须分通道验证：sessiondb 行去重≠t 流投影；stray 判据=发信后 +2s 内冒上轮答案泡+监控 STREAM_START id=t1m*。

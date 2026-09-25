@@ -195,6 +195,8 @@ export class TranscriptWatcher {
   private emittedAgentUtKeys = new Map<string, number>();
   /** 已答轮次的迟到 requests/N 流：START 判定后被整流丢弃的 streamId 集合 */
   private suppressedFallbackStreams = new Set<string>();
+  /** ut → 已投答案正文键：迟到重投影的文本形态与已投版本不同时，按「同问题已投答案」模糊压制 */
+  private emittedTextByUt = new Map<string, string>();
   /** 规范化用户文 → 最近一次该问题发出的用户消息序号 */
   private userSeqByUt = new Map<string, number>();
   /** 已发出 USER_MESSAGE / 注入提问的单调序号（判断「记录之后是否有新提问」） */
@@ -1344,8 +1346,11 @@ export class TranscriptWatcher {
     const keys = this.dedupeKeys(text, ctx);
     if (!keys.length) return;
     for (const k of keys) {
-      if (k.includes('::ut=')) this.emittedAgentUtKeys.set(k, this.userEmitSeq);
-      else this.emittedAgentTextKeys.add(k);
+      if (k.includes('::ut=')) {
+        this.emittedAgentUtKeys.set(k, this.userEmitSeq);
+        const ut = k.slice(k.indexOf('::ut=') + 5);
+        if (ut) this.emittedTextByUt.set(ut, this.agentTextKey(text));
+      } else this.emittedAgentTextKeys.add(k);
     }
     if (this.emittedAgentUtKeys.size > 400) {
       const arr = [...this.emittedAgentUtKeys];
@@ -1841,6 +1846,15 @@ export class TranscriptWatcher {
     // 同时查 stale pending 兜底。
     const resolvedUt = this.resolveUtForTs(tsMs);
     if (this.isReplayedFor(content, resolvedUt) || this.isStalePendingReplay(content)) return;
+    // 同问题答案文本变体压制：迟到记录的正文与已投版本形态不同（markdown/db 差异）
+    // 键未命中时按「该问题已投答案」的前 40 字前缀比对——同题重问由 seq 放行。
+    if (resolvedUt && this.isUtAnswered(resolvedUt)) {
+      const prev = this.emittedTextByUt.get(resolvedUt) || '';
+      const cur = this.agentTextKey(content);
+      const a = cur.slice(0, 40);
+      const b = prev.slice(0, 40);
+      if (a.length >= 12 && a === b) return;
+    }
     // 用户可见正文（非 monologue 路径才会进这里）
     this.turnEmittedVisibleAgent = true;
     // 0.5.18：工具后的新正文用独立 streamId，避免与上一截正文/tool 合并成「堆积」

@@ -25,6 +25,79 @@ import { WorkspaceIndex } from "./workspaceIndex";
 let bridge: BridgeServer | undefined;
 let watcher: SessionWatcher | undefined;
 let transcriptWatcher: TranscriptWatcher | undefined;
+
+/** 正文规范化（dedupe 用）：剥 markdown 强调+压空白+截断，与 transcriptWatcher.agentTextKey 同形 */
+function replayTextKey(text: string): string {
+  return String(text || "")
+    .replace(/[*_`~]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 160);
+}
+
+/**
+ * 把 sessiondb turns 里 chatSessions 尚未写盘的回答合回回放：
+ * - 已在 hist 里的回答（按规范化文本键）跳过
+ * - 缺失的回答插到其 user_message 对应的 USER_MESSAGE 之后；
+ *   找不到对应用户文（sessiondb-only）则 USER+AGENT 一对追加到尾部
+ */
+function buildReplayWithDbBackfill(
+  hist: Array<Record<string, unknown> | null | undefined>,
+  dbTurns:
+    | Array<{ id: number; user_message: string | null; assistant_response: string | null }>
+    | undefined,
+  sid: string | undefined,
+): Array<Record<string, unknown>> {
+  const out = hist.filter(Boolean) as Array<Record<string, unknown>>; // eslint-disable-line @typescript-eslint/no-explicit-any
+  if (!dbTurns || !dbTurns.length || !sid) return out;
+  const seen = new Set(
+    out
+      .filter((e) => e?.type === "AGENT_MESSAGE")
+      .map((e) => replayTextKey(String((e as { text?: string }).text || ""))),
+  );
+  const tail: Array<Record<string, unknown>> = [];
+  for (const r of dbTurns) {
+    const ans = String(r.assistant_response || "").trim();
+    if (!ans) continue;
+    if (seen.has(replayTextKey(ans))) continue;
+    const ev: Record<string, unknown> = {
+      type: "AGENT_MESSAGE",
+      text: ans,
+      streamId: `sessiondb/${sid}/${r.id}`,
+      requestIndex: -1,
+      timestamp: Date.now(),
+      _ut: r.user_message || undefined,
+    };
+    // 找该回答所属的用户消息位置：最后一个与该 user_message 同文的 USER_MESSAGE
+    const uKey = replayTextKey(String(r.user_message || ""));
+    let inserted = false;
+    if (uKey) {
+      for (let i = out.length - 1; i >= 0; i--) {
+        const e = out[i];
+        if (
+          e?.type === "USER_MESSAGE" &&
+          replayTextKey(String((e as { text?: string }).text || "")) === uKey
+        ) {
+          out.splice(i + 1, 0, ev);
+          inserted = true;
+          break;
+        }
+      }
+    }
+    if (!inserted) {
+      if (uKey) {
+        tail.push({
+          type: "USER_MESSAGE",
+          text: String(r.user_message || ""),
+          timestamp: Date.now(),
+        });
+      }
+      tail.push(ev);
+    }
+    seen.add(replayTextKey(ans));
+  }
+  return out.concat(tail);
+}
 function rebindTranscriptForSession(file: string) {
   if (!transcriptWatcher || !file) return;
   try {
@@ -324,10 +397,21 @@ export async function activate(context: vscode.ExtensionContext) {
           }
           reply({ type: "SESSION_SELECTED", file, ok, timestamp: Date.now() });
           if (ok) {
-            // 不再向手机重放历史——用户要求切会话直接进入实时态，避免从头滑到尾的洪水。
-            // replaySession 仍会清空手机端 feed 并绑定到该会话；回放内容只有切换提示。
+            // 完整同步：回放该会话历史 + sessiondb 补全 chatSessions 尚未写盘的回答
+            // （HISTORY_REPLAY 瞬时渲染，不走打字机，不会有滑到尾的动画洪水）。
+            const sidSel = file
+              .split("/")
+              .pop()
+              ?.replace(/\.jsonl$/, "");
+            const merged = buildReplayWithDbBackfill(
+              ok && file ? (watcher?.projectHistory(file, 20) ?? []) : [],
+              transcriptWatcher?.sessionDbRecentTurns(20, sidSel),
+              sidSel,
+            );
+            transcriptWatcher?.seedFromHistory(merged.filter((e) => (e as { streamId?: string }).streamId?.startsWith("sessiondb/")) as never);
             bridge?.replaySession(
               [
+                ...merged,
                 {
                   type: "SYSTEM_MESSAGE",
                   text: `已切换到会话: ${file.split("/").pop()}`,
@@ -554,47 +638,21 @@ export async function activate(context: vscode.ExtensionContext) {
                 title,
                 timestamp: Date.now(),
               });
-              // 补最后一轮：答案可能已在 session-store.db 落库但 chatSessions 还没写盘
-              // （跟随游标 rebind 跳到行尾，迟发也补不上）——把缺失的回答并进回放尾部。
-              const seen = new Set(
-                hist
-                  .filter((e) => e?.type === "AGENT_MESSAGE")
-                  .map((e) =>
-                    String((e as { text?: string }).text || "")
-                      .replace(/[*_`~]/g, "")
-                      .replace(/\s+/g, " ")
-                      .trim()
-                      .slice(0, 160),
-                  ),
-              );
+              // 合并 db 补全：chatSessions 尚未写盘的回答（含中间轮次）按用户文位置插回回放
               const sidForDb = base ? base.replace(/\.jsonl$/, "") : "";
-              const dbTurns = sidForDb
-                ? (transcriptWatcher?.sessionDbRecentTurns(5, sidForDb) ?? [])
-                : [];
-              const backfill = dbTurns
-                .filter((r) => {
-                  const t = String(r.assistant_response || "").trim();
-                  if (!t) return false;
-                  const k = t
-                    .replace(/[*_`~]/g, "")
-                    .replace(/\s+/g, " ")
-                    .trim()
-                    .slice(0, 160);
-                  return !seen.has(k);
-                })
-                .map((r) => ({
-                  type: "AGENT_MESSAGE",
-                  text: String(r.assistant_response),
-                  streamId: `sessiondb/${sidForDb}/${r.id}`,
-                  requestIndex: -1,
-                  timestamp: Date.now(),
-                  _ut: r.user_message || undefined,
-                }));
-              transcriptWatcher?.seedFromHistory(backfill);
+              const mergedHist = buildReplayWithDbBackfill(
+                hist,
+                transcriptWatcher?.sessionDbRecentTurns(20, sidForDb),
+                sidForDb,
+              );
+              transcriptWatcher?.seedFromHistory(
+                mergedHist.filter((e) =>
+                  (e as { streamId?: string }).streamId?.startsWith("sessiondb/"),
+                ) as never,
+              );
               bridge?.replaySession(
                 [
-                  ...hist,
-                  ...backfill,
+                  ...mergedHist,
                   {
                     type: "SYSTEM_MESSAGE",
                     text: `已切换到会话: ${base}`,
