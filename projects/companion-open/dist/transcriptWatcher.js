@@ -201,9 +201,13 @@ class TranscriptWatcher {
     suppressFallbackAgent = false;
     /** 已从 transcript/gap 发出的助手正文指纹（前 160 字），防 chatSessions 重复补全 */
     emittedAgentTextKeys = new Set(); // 0.5.31 键改为 text|rid|requestIndex|streamId，避免同一回复文字误吞
-    /** text::ut= 键 → 发出时间：chatSessions 写盘滞后数十秒，迟到的重复投影在 120s 内压住；
-     *  超出时限视为用户真的重问了同一问题（同文同答）放行。 */
+    /** text::ut= 键 → 记录时的提问序号：迟到重投影（chatSessions 滞后可达数分钟，
+     *  固定时间窗不可靠）只有同题在记录之后真的重问才放行；不同问题同文回复不拦。 */
     emittedAgentUtKeys = new Map();
+    /** 规范化用户文 → 最近一次该问题发出的用户消息序号 */
+    userSeqByUt = new Map();
+    /** 已发出 USER_MESSAGE / 注入提问的单调序号（判断「记录之后是否有新提问」） */
+    userEmitSeq = 0;
     /** 已成功 gap-fill（发出助手正文）的 chatSessions requestId */
     gapFilledRequestIds = new Set();
     /** 已经从 transcript 得到完整助手回复的用户文，避免 chatSessions 再 gap */
@@ -377,14 +381,21 @@ class TranscriptWatcher {
         if (!ut)
             return;
         this.activeUserText = ut;
-        this.pushPendingGap(ut);
+        this.pushPendingGap(ut, true);
         this.capCollections();
         this.startTurnGapTimer();
     }
-    pushPendingGap(userText) {
+    pushPendingGap(userText, fresh = false) {
         const ut = this.normUserText(userText);
         if (!ut)
             return;
+        // fresh（手机注入的新问题）才算一次「提问」推进序号；
+        // markCurrentTurnGap 在轮末登记 pending 是同问的事后簿记，不推进——
+        // 否则同一问题答案发出后再登记 pending 会被误判成「重问」放行幻影。
+        if (fresh) {
+            this.userEmitSeq += 1;
+            this.userSeqByUt.set(ut, this.userEmitSeq);
+        }
         this.pendingGapQueue.push({
             userText: ut,
             timestamp: Date.now(),
@@ -1159,10 +1170,13 @@ class TranscriptWatcher {
         return keys;
     }
     hasEmittedAgentText(text, ctx) {
+        if (this.isStalePendingReplay(text))
+            return true;
         for (const k of this.dedupeKeys(text, ctx)) {
             if (k.includes('::ut=')) {
-                const ts = this.emittedAgentUtKeys.get(k);
-                if (ts != null && Date.now() - ts < 120_000)
+                // 永久 ut 键：该问题已发过同文回复且此后没重问同题 → 迟到重复，压制
+                const s = this.emittedAgentUtKeys.get(k);
+                if (s != null && (this.userSeqByUt.get(ctx?.userText ? this.normUserText(ctx.userText) : '') ?? 0) <= s)
                     return true;
                 continue;
             }
@@ -1177,19 +1191,17 @@ class TranscriptWatcher {
             return;
         for (const k of keys) {
             if (k.includes('::ut='))
-                this.emittedAgentUtKeys.set(k, Date.now());
+                this.emittedAgentUtKeys.set(k, this.userEmitSeq);
             else
                 this.emittedAgentTextKeys.add(k);
+        }
+        if (this.emittedAgentUtKeys.size > 400) {
+            const arr = [...this.emittedAgentUtKeys];
+            this.emittedAgentUtKeys = new Map(arr.slice(-200));
         }
         if (this.emittedAgentTextKeys.size > 800) {
             const arr = [...this.emittedAgentTextKeys];
             this.emittedAgentTextKeys = new Set(arr.slice(-400));
-        }
-        if (this.emittedAgentUtKeys.size > 400) {
-            const cutoff = Date.now() - 300_000;
-            for (const [k, ts] of this.emittedAgentUtKeys)
-                if (ts < cutoff)
-                    this.emittedAgentUtKeys.delete(k);
         }
     }
     capSet(set, limit) {
@@ -1661,6 +1673,10 @@ class TranscriptWatcher {
      * - 情况 c：无 messageId（罕见）→ SET 整段覆盖（旧行为）
      */
     emitAssistantContent(content, messageId) {
+        // 迟到重投影：上一轮 assistant.message 延迟落盘到达时，内容已是发过的答案 → 不开流
+        // （ut 归属可能已被新问覆盖，故同时查 stale pending）
+        if (this.isReplayedFor(content, this.activeUserText) || this.isStalePendingReplay(content))
+            return;
         // 用户可见正文（非 monologue 路径才会进这里）
         this.turnEmittedVisibleAgent = true;
         // 0.5.18：工具后的新正文用独立 streamId，避免与上一截正文/tool 合并成「堆积」
@@ -1989,6 +2005,8 @@ class TranscriptWatcher {
         if (!preserveDedupe) {
             this.emittedAgentTextKeys.clear();
             this.emittedAgentUtKeys.clear();
+            this.userSeqByUt.clear();
+            this.userEmitSeq = 0;
             this.recentAgentEmits.clear();
             this.fallbackSeenRequestIds.clear();
             this.gapFilledRequestIds.clear();
@@ -2006,6 +2024,13 @@ class TranscriptWatcher {
     emit(ev) {
         if (this.disposed)
             return;
+        if (ev && ev.type === 'USER_MESSAGE') {
+            // 记录提问序号：迟到重复投影只有「之后真的重问了同题」才放行
+            this.userEmitSeq += 1;
+            const ut = this.normUserText(String(ev.text || ''));
+            if (ut)
+                this.userSeqByUt.set(ut, this.userEmitSeq);
+        }
         if (ev && (ev.type === 'AGENT_MESSAGE' || ev.type === 'AGENT_STREAM_SET')) {
             const text = String(ev.text || '');
             if (text.trim() && !(0, jsonl_1.isInternalMonologue)(text)) {
@@ -2032,6 +2057,27 @@ class TranscriptWatcher {
             }
         }
         this.opts.onEvent(ev);
+    }
+    /** (用户文,正文) 键是否已发过且此后没同题重问（迟到重投影判定） */
+    isReplayedFor(text, userText) {
+        const ut = this.normUserText(userText || '');
+        if (!ut)
+            return false;
+        const s = this.emittedAgentUtKeys.get(`${this.agentTextKey(text)}::ut=${ut}`);
+        return s != null && (this.userSeqByUt.get(ut) ?? 0) <= s;
+    }
+    /** 该正文是否已是某个「仍挂起」问题的答案：上一轮答案发出后其 pending 未消耗（stale），
+     *  迟到的 assistant.message/chatSessions 副本会在新轮次里把它整体重投 → 压制。 */
+    isStalePendingReplay(text) {
+        const k = this.agentTextKey(text);
+        if (!k)
+            return false;
+        for (const q of this.pendingGapQueue) {
+            const s = this.emittedAgentUtKeys.get(`${k}::ut=${q.userText}`);
+            if (s != null && (this.userSeqByUt.get(q.userText) ?? 0) <= s)
+                return true;
+        }
+        return false;
     }
 }
 exports.TranscriptWatcher = TranscriptWatcher;
