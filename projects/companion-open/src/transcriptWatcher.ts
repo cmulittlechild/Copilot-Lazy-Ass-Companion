@@ -193,6 +193,8 @@ export class TranscriptWatcher {
   /** text::ut= 键 → 记录时的提问序号：迟到重投影（chatSessions 滞后可达数分钟，
    *  固定时间窗不可靠）只有同题在记录之后真的重问才放行；不同问题同文回复不拦。 */
   private emittedAgentUtKeys = new Map<string, number>();
+  /** 已答轮次的迟到 requests/N 流：START 判定后被整流丢弃的 streamId 集合 */
+  private suppressedFallbackStreams = new Set<string>();
   /** 规范化用户文 → 最近一次该问题发出的用户消息序号 */
   private userSeqByUt = new Map<string, number>();
   /** 已发出 USER_MESSAGE / 注入提问的单调序号（判断「记录之后是否有新提问」） */
@@ -846,6 +848,17 @@ export class TranscriptWatcher {
       if (typeof r.id === 'number' && r.id > this.sessionDbLastRow) {
         this.sessionDbLastRow = r.id;
       }
+      // turns 行含 user_message：提前发 USER_MESSAGE（比 chatSessions 落盘快数十秒），
+      // 稍后 chatSessions 通道的同一 USER 由 bridge 60s 文本去重压住。
+      const uText = String(r.user_message || '').trim();
+      if (uText && !isInternalUserMessage(uText)) {
+        const utT = this.normUserText(uText);
+        if (utT) {
+          this.userTsByUt.set(utT, Date.now());
+          this.activeUserText = utT;
+        }
+        this.emit({ type: 'USER_MESSAGE', text: uText, timestamp: Date.now() } as PhoneEvent);
+      }
       const text = String(r.assistant_response || '').trim();
       if (!text) continue;
       // 用户文挂上供 ut 键/轮次匹配；streamId 用 sessiondb 前缀区别于其他通道
@@ -1072,6 +1085,25 @@ export class TranscriptWatcher {
     );
     if (!this.suppressFallbackAgent || forceLive) {
       for (const ev of evs) {
+        // 已答轮次的迟到 requests/N 死流：该问题答案已发过（sessiondb 快通道等），
+        // START 则整流丢弃（含后续 CHUNK/SET/END），否则留「…」占位+停止态误吞发送。
+        const evSid = (ev as { streamId?: string }).streamId;
+        if (evSid && this.suppressedFallbackStreams.has(evSid)) {
+          if (ev.type === 'AGENT_STREAM_END') this.suppressedFallbackStreams.delete(evSid);
+          continue;
+        }
+        if (ev.type === 'AGENT_STREAM_START' && evSid) {
+          const m = evSid.match(/^requests\/(\d+)\//);
+          const rid = m
+            ? this.fallbackRequestIndex.get(parseInt(m[1], 10)) ||
+              [...this.fallbackSeenRequestIds][parseInt(m[1], 10)]
+            : undefined;
+          const ut = rid ? this.fallbackRequestUserText.get(rid) : undefined;
+          if (ut && this.isUtAnswered(ut)) {
+            this.suppressedFallbackStreams.add(evSid);
+            continue;
+          }
+        }
         if (ev.type === 'USER_MESSAGE' || ev.type === 'COPILOT_TYPING') {
           // 用户消息本身不投，但记 rid→问题文本：后续该请求的助手投影拿得到
           // ut 键，迟到重投影才能被 ut 去重命中
@@ -2169,6 +2201,18 @@ export class TranscriptWatcher {
       if (i < 0) continue;
       const keyUt = k.slice(i + prefix.length);
       if ((this.userSeqByUt.get(keyUt) ?? 0) <= v) return true;
+    }
+    return false;
+  }
+
+  /** 该问题的答案是否已发过（任一通道）：seq 语义同 isReplayedFor——
+   *  答案记录在最新提问之后才算「已答」，同题重问会抬 seq 放行。 */
+  private isUtAnswered(userText: string): boolean {
+    const normUt = this.normUserText(userText);
+    if (!normUt) return false;
+    const suffix = `::ut=${normUt}`;
+    for (const [k, v] of this.emittedAgentUtKeys) {
+      if (k.endsWith(suffix) && (this.userSeqByUt.get(normUt) ?? 0) <= v) return true;
     }
     return false;
   }

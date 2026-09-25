@@ -49,3 +49,6 @@ PWA ↔ VS Code bridge。仓库 `~/repos/sidecar_remote/projects/companion-open`
 - 桌面 Try Again/重试点击会以 USER_MESSAGE 泄漏到镜像端，勿当真实发送。
 - 验证跟随修复须等 newest 稳定后观察 ≥1 个 poll 周期——SESSION_FOLLOW 重发风暴只在持续 newest 下显现。
 - F5 在 DevTools 聚焦时不刷新页面，须用浏览器刷新按钮；吞包存证查控制台 sidecar.pendingSend。
+- sessiondb 快通道把"答案到达"(~2s)与"轮次收尾"解耦；死流压制判据=监控全文 grep STREAM_START=0。
+- 吞包两种成因区分：死流残留"停止"态误吞 vs socket 间隔 ~3min 退化静默吞（按钮正常仍丢）。
+- 延迟测量须用带墙钟的监控列对齐发送时刻（发送 exec date 同步记录）。
