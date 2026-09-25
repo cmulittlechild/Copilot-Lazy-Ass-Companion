@@ -306,7 +306,7 @@ async function activate(context) {
                     bridge?.broadcast({ type: "MODEL_LIST", models, timestamp: Date.now() });
                 });
             }
-        }, 4000);
+        }, 2000);
         context.subscriptions.push(new vscode.Disposable(() => clearInterval(panelModelPoll)));
         bridge.onRequest(async (msg, reply) => {
             switch (msg?.type) {

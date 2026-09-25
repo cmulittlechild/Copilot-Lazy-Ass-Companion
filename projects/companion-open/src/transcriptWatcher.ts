@@ -42,7 +42,7 @@ export interface TranscriptWatcherOptions {
 }
 
 /** 重新扫描目录找最新文件的周期 ms */
-const RESCAN_MS = 2000;
+const RESCAN_MS = 800;
 /** fs.watch 触发 → tail 的防抖 ms（追加频率高时合并读取） */
 const WATCH_DEBOUNCE_MS = 25;
 /** 超过该大小视为历史大文件，只 tail 尾部 1MB */
@@ -253,7 +253,7 @@ export class TranscriptWatcher {
   constructor(private opts: TranscriptWatcherOptions) {
     this.pollMs = Math.max(10, opts.pollMs ?? 100);
     // 0.5.24：默认从 2000ms 降到 1000ms，让 chatSessions gap-fill 更快补全
-    this.fallbackPollMs = Math.max(100, opts.fallbackPollMs ?? 1000);
+    this.fallbackPollMs = Math.max(100, opts.fallbackPollMs ?? 600);
   }
 
   /**
@@ -351,6 +351,7 @@ export class TranscriptWatcher {
     this.unbindFallback();
     this.fallbackProjector.dispose();
     this.closeWatchers();
+    this.closeSessionDbWatcher();
   }
 
   /**
@@ -729,6 +730,41 @@ export class TranscriptWatcher {
       this.pollFallback();
       this.pollSessionStoreDb();
     }, this.fallbackPollMs);
+    this.bindSessionDbWatcher();
+  }
+
+  /** session-store.db 目录级 fs.watch：SQLite 落库（-wal/-shm/主文件任一变化）立即 poll，不等周期轮询 */
+  private sessionDbWatcher: fs.FSWatcher | undefined;
+  private sessionDbWatchDir: string | undefined;
+  private bindSessionDbWatcher() {
+    const dbPath = this.opts.sessionStoreDb;
+    const dir = dbPath ? path.dirname(dbPath) : undefined;
+    if (!dbPath || !dir || !fs.existsSync(dir)) return;
+    if (this.sessionDbWatcher && this.sessionDbWatchDir === dir) return;
+    this.closeSessionDbWatcher();
+    this.sessionDbWatchDir = dir;
+    try {
+      this.sessionDbWatcher = fs.watch(dir, { persistent: false }, (_t, filename) => {
+        if (!filename) return;
+        const name = String(filename);
+        // WAL 模式下写入落在 session-store.db-wal/-shm，journal_mode=delete 则落主文件
+        if (name === 'session-store.db' || name.startsWith('session-store.db-')) {
+          this.pollSessionStoreDb();
+        }
+      });
+      this.sessionDbWatcher.on('error', () => this.closeSessionDbWatcher());
+    } catch {
+      this.sessionDbWatcher = undefined;
+    }
+  }
+  private closeSessionDbWatcher() {
+    try {
+      this.sessionDbWatcher?.close();
+    } catch {
+      /* ignore */
+    }
+    this.sessionDbWatcher = undefined;
+    this.sessionDbWatchDir = undefined;
   }
 
   /** 解绑兜底：清文件、清半行缓冲、清轮询定时器 */

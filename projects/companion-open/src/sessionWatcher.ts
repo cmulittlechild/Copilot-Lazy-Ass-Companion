@@ -30,7 +30,7 @@ const HISTORY_TAIL_MIN_LINES = 24;
  */
 const HISTORY_MAX_MUTATIONS = 400;
 /** 桌面消息兜底扫描周期（ms）：轮询新增 USER_MESSAGE 增量。 */
-const USER_MSG_SCAN_MS = 2500;
+const USER_MSG_SCAN_MS = 1500;
 /** 桌面消息扫描过滤阈值：仅扫描最近 10 分钟内修改过的文件 (10 * 60 * 1000 ms) */
 const USER_MSG_SCAN_MAX_AGE_MS = 10 * 60 * 1000;
 /** USER_MESSAGE 新鲜度阈值：请求时间戳超过 5 分钟视为历史，不广播 */
