@@ -279,6 +279,21 @@ export async function activate(context: vscode.ExtensionContext) {
       /* onDidChangeChatModels 不可用时忽略 */
     }
 
+    // 桌面端切模型 → 手机同步：onDidChangeChatModels 只管模型集变更，不管选中项。
+    // 轮询面板实际选中（chat.currentLanguageModel.panel，sqlite 读开销小），
+    // 变化时推 MODEL_LIST（isCurrent 已按面板真实选中标记）。
+    let lastPanelModelId = chatControl.peekPanelModelId();
+    const panelModelPoll = setInterval(() => {
+      const cur = chatControl?.peekPanelModelId();
+      if (cur && cur !== lastPanelModelId) {
+        lastPanelModelId = cur;
+        void chatControl?.listModels().then((models) => {
+          bridge?.broadcast({ type: "MODEL_LIST", models, timestamp: Date.now() });
+        });
+      }
+    }, 4000);
+    context.subscriptions.push(new vscode.Disposable(() => clearInterval(panelModelPoll)));
+
     bridge.onRequest(async (msg, reply) => {
       switch (msg?.type) {
         case "PHONE_SESSION_LIST": {
@@ -476,6 +491,8 @@ export async function activate(context: vscode.ExtensionContext) {
         // 直接从 Copilot 插件发消息，而 transcripts 源只 tail 当前选中的单个文件，
         // 若 gate 住 chatSessions 的 USER_MESSAGE，桌面→手机的消息就全丢了。
         // （assistant 侧仍被 gate 拦，避免双渲染；手机注入回声由 isInjectedEcho 拦。）
+        // USER_MESSAGE 双源重复由 bridge.sendToPhone 的时间窗去重处理
+        // （gate 会矫枉过正：transcripts 静默时唯一来源被吞 → 零气泡）。
         if (transcriptActive && ev.type !== "USER_MESSAGE") return;
         if (bridge?.sendToPhone) bridge.sendToPhone(ev);
         else bridge?.broadcast(ev);

@@ -96,6 +96,7 @@ const OFFLINE_QUEUE_MAX = 80;
 const HEARTBEAT_MS = 8000;
 // 落盘回声可能很慢（chatSessions 最长 ~60s+ 才写），30s 窗口漏掉迟到回声 → 手机端重复气泡。
 const PHONE_ECHO_WINDOW_MS = 120_000;
+const USER_EMIT_DEDUPE_MS = 60_000;
 const PHONE_ECHO_MAX = 20;
 /** 同一条手机文本最多吞掉的镜像条数（transcript 源 + chatSessions 源各可能来一条） */
 const PHONE_ECHO_SUPPRESS_PER_TEXT = 4;
@@ -166,6 +167,8 @@ class BridgeServer {
     activeStreamAccum = '';
     /** Recent PHONE_MESSAGE texts — suppress JSONL USER_MESSAGE echo back to phone. */
     recentPhoneTexts = [];
+    /** 非手机来源 USER_MESSAGE 的最近广播（双源去重）：text → 上次广播时刻 */
+    recentUserEmits = new Map();
     host;
     preferredPort;
     portRange;
@@ -609,6 +612,23 @@ class BridgeServer {
             typeof ev.text === 'string' &&
             this.isPhoneEcho(ev)) {
             return;
+        }
+        // 双源去重：同一桌面发出的 USER_MESSAGE 会经 transcripts + chatSessions
+        // 两个通道各投一次（间隔数秒到 ~45s 落盘延迟）。按文本在窗口内去重，
+        // 保证单气泡；超时同文（真的重发同问题）照常放行。
+        if (ev.type === 'USER_MESSAGE' && typeof ev.text === 'string' && !ev.fromPhone) {
+            const t = ev.text.trim();
+            const now = Date.now();
+            for (const [k, ts] of this.recentUserEmits) {
+                if (now - ts > USER_EMIT_DEDUPE_MS)
+                    this.recentUserEmits.delete(k);
+            }
+            if (t) {
+                const last = this.recentUserEmits.get(t);
+                if (last != null && now - last <= USER_EMIT_DEDUPE_MS)
+                    return;
+                this.recentUserEmits.set(t, now);
+            }
         }
         const stamped = {
             ...ev,

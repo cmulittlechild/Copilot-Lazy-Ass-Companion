@@ -38,3 +38,9 @@ PWA ↔ VS Code bridge。仓库 `~/repos/sidecar_remote/projects/companion-open`
 
 ## Devin Secrets Needed
 无（本机 bridge 无 token；Copilot 需用户事先登录 VS Code）
+
+## 实测经验（第七轮后补充）
+- 发送按钮呈"停止"态 = 死流残留：先点一次发 phone_stop 清桥端流态，再重新发送。
+- 幻影验证必须两连发以上——单发可能因写盘时机碰巧干净，漏判回归。
+- USER 消息延迟基准要含 Copilot chatSessions 落盘延迟（~30-55s 属正常数据源延迟，非扩展慢）。
+- 外会话切换 dump：kind0 快照整段重放，无 timestamp 请求只有数组尾部一条才可能新发。

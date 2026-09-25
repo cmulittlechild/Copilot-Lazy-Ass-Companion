@@ -135,6 +135,50 @@
   const recentPhoneUserAt = new Map();
   const USER_TEXT_DEDUP_MS = 15000;
   const REQUEST_DONE_GRACE_MS = 600;
+  /**
+   * 死流容忍窗口：最后一次 STREAM_* / COPILOT_TYPING 活动距现在超过该值，
+   * 视为僵尸流——requests/N 开流后 END 被服务器端抑制时按钮会永远卡在「停止」。
+   */
+  const STREAM_STALE_MS = 75 * 1000;
+  /** 最后一次流活动（STREAM_* / COPILOT_TYPING / AGENT_MESSAGE）时间戳 */
+  let lastStreamActivityAt = 0;
+  /**
+   * 发送后置核验：半死 socket 上 ws.send() 不抛异常但从未送达——
+   * 送出后在 N 秒内等服务器 USER_MESSAGE 回声，超时判丢失并回填文本。
+   */
+  const SEND_VERIFY_MS = 9000;
+  let pendingSendCheck = null;
+  /** 待发核验持久化 key：页面被半死 socket 刷新杀死内存计时器时，刷新后从这里回填 */
+  const PENDING_SEND_KEY = 'sidecar.pendingSend';
+  function persistPendingSend(text) {
+    try { sessionStorage.setItem(PENDING_SEND_KEY, JSON.stringify({ text, at: Date.now() })); } catch {}
+  }
+  function clearPendingSend() {
+    try { sessionStorage.removeItem(PENDING_SEND_KEY); } catch {}
+    if (pendingSendCheck) { clearTimeout(pendingSendCheck.timer); pendingSendCheck = null; }
+  }
+  /**
+   * 启动时检查：刷新前有未确认送达的消息 → 回填输入框。
+   * 不消费 key——重连风暴可能连续多次 reload，读到即删会让二次刷新丢回填；
+   * key 只在 USER 回声确认或下次发送覆写时清除。
+   */
+  function restorePendingSend() {
+    try {
+      const raw = sessionStorage.getItem(PENDING_SEND_KEY);
+      if (!raw) return;
+      const p = JSON.parse(raw);
+      if (!p || typeof p.text !== 'string' || !p.text.trim()) {
+        sessionStorage.removeItem(PENDING_SEND_KEY);
+        return;
+      }
+      if (Date.now() - (p.at || 0) > 5 * 60 * 1000) {
+        sessionStorage.removeItem(PENDING_SEND_KEY);
+        return;
+      }
+      if (!(input.value || '').trim()) input.value = p.text;
+      addSys('发送可能未送达（连接中断），文本已回填，请重新发送');
+    } catch {}
+  }
   const MAX_OUTBOUND_QUEUE = 20;
   const outboundQueue = [];
 
@@ -1488,6 +1532,13 @@
     }
   }
 
+  // 死流看门狗：每 10s 检查一次流活性，静默超阈值自动收尸
+  setInterval(() => {
+    if (requestRunning && lastStreamActivityAt && Date.now() - lastStreamActivityAt > STREAM_STALE_MS) {
+      forceFinishDeadStream();
+    }
+  }, 10 * 1000);
+
   function handle(msg) {
     if (!msg || !msg.type) return;
     switch (msg.type) {
@@ -1508,6 +1559,21 @@
         break;
       }
       case 'USER_MESSAGE': {
+        // 发送核验：自己的消息被服务器回声了 = 真送达，撤銷核验计时
+        if (pendingSendCheck && userTextDedupeKey(msg.text || '') === pendingSendCheck.textKey) {
+          clearTimeout(pendingSendCheck.timer);
+          pendingSendCheck = null;
+        }
+        // 收到 USER 回声 = 送达确认：若与持久化的待发文本同文，清掉防误回填
+        try {
+          const raw = sessionStorage.getItem(PENDING_SEND_KEY);
+          if (raw) {
+            const p = JSON.parse(raw);
+            if (p && userTextDedupeKey(msg.text || '') === userTextDedupeKey(p.text || '')) {
+              sessionStorage.removeItem(PENDING_SEND_KEY);
+            }
+          }
+        } catch {}
         // requestId 优先；否则文案 key。addUser 短窗去重吞掉 doSend 乐观与 bridge 回声。
         const key = msg.requestId
           ? `user:${msg.requestId}`
@@ -1527,6 +1593,7 @@
         flushOutboundQueue();
         break;
       case 'AGENT_STREAM_START':
+        lastStreamActivityAt = Date.now();
         // 不立刻 startAssistantTurn：否则 tool-only / 空 turn 会留下「Copilot •••」空壳。
         // 真正正文在 CHUNK/SET/MESSAGE 时再创建行；这里只进入 running + 顶部 typing。
         if (msg.requestIndex != null) reqToStream.set(msg.requestIndex, msg.streamId || 'default');
@@ -1537,16 +1604,19 @@
         }
         break;
       case 'AGENT_STREAM_SET':
+        lastStreamActivityAt = Date.now();
         setEntryMarkdown(msg.streamId || 'default', msg.text || '', msg.timestamp);
         if (msg.requestIndex != null) reqToStream.set(msg.requestIndex, msg.streamId || 'default');
         if (!replaying) setRequestRunning(true);
         break;
       case 'AGENT_STREAM_CHUNK':
+        lastStreamActivityAt = Date.now();
         appendAssistantChunk(msg.streamId || 'default', msg.text || '', msg.timestamp);
         if (msg.requestIndex != null) reqToStream.set(msg.requestIndex, msg.streamId || 'default');
         if (!replaying) setRequestRunning(true);
         break;
       case 'AGENT_STREAM_END':
+        lastStreamActivityAt = Date.now();
         completeAssistantTurn(msg.streamId || 'default');
         clearTyping();
         // 若已无 streaming 行，立即藏掉残余 ••• 并恢复发送键（不等 COPILOT_DONE）
@@ -1603,6 +1673,7 @@
         addSys(`确认已解决: ${msg.button || ''}`);
         break;
       case 'COPILOT_TYPING':
+        lastStreamActivityAt = Date.now();
         if (!replaying) {
           showTyping();
           setRequestRunning(true, 'Copilot 正在输入…');
@@ -2548,7 +2619,10 @@
   }
 
   function doSend() {
-    // 请求进行中：发送键已变成停止
+    // 请求进行中：发送键已变成停止；但流已静默超阈值的僵尸态直接当作空闲
+    if (requestRunning && lastStreamActivityAt && Date.now() - lastStreamActivityAt > STREAM_STALE_MS) {
+      forceFinishDeadStream();
+    }
     if (requestRunning) {
       doStop();
       return;
@@ -2577,11 +2651,55 @@
       addSys('未连接，消息未发送');
       return;
     }
+    if (!sent) {
+      // 离线入队≠送达：保留输入框文本供重发（入队副本仍在，送达前用户可编辑）
+      addSys('当前离线，消息已加入发送队列');
+      input.focus();
+      return;
+    }
     setRequestRunning(true, 'Copilot 正在输入…');
     showTyping();
-    if (!sent) addSys('当前离线，消息已加入发送队列');
     input.value = '';
     input.style.height = 'auto';
+    // 半死 socket 防御：N 秒内服务器没回声这条消息就判丢，回填文本让用户重发。
+    // 同时写 sessionStorage——半死 socket 报错可能刷新页面杀死计时器，刷新后启动时回填。
+    if (pendingSendCheck) clearTimeout(pendingSendCheck.timer);
+    persistPendingSend(text);
+    const sentTextKey = userTextDedupeKey(text);
+    pendingSendCheck = {
+      textKey: sentTextKey,
+      text,
+      timer: setTimeout(() => {
+        if (!pendingSendCheck) return;
+        const lost = pendingSendCheck.text;
+        pendingSendCheck = null;
+        clearPendingSend();
+        if (!(input.value || '').trim()) input.value = lost;
+        if (requestRunning) {
+          requestRunning = false;
+          paintSendButton();
+        }
+        addSys('发送可能未送达（连接异常），文本已回填，请重新发送');
+      }, SEND_VERIFY_MS),
+    };
+  }
+
+  /** 僵尸流收尸：清 streaming 视觉态 + 释放发送键（不发 phone_stop——流本就死了） */
+  function forceFinishDeadStream() {
+    for (const entry of streamingTurns.values()) {
+      if (entry.element) entry.element.classList.remove('streaming');
+      if (entry.bubble) entry.bubble.classList.remove('streaming');
+    }
+    streamingTurns.clear();
+    markAllToolsDone();
+    clearTyping();
+    if (requestDoneTimer) {
+      clearTimeout(requestDoneTimer);
+      requestDoneTimer = null;
+    }
+    requestRunning = false;
+    paintSendButton();
+    if (statusText) statusText.textContent = connectedLabel();
   }
 
   function doStop() {
@@ -2764,5 +2882,6 @@
   // 初始化 marked（CDN 不可用时静默降级到 <pre>）
   configureMarkdown();
 
+  restorePendingSend();
   connect();
 })();

@@ -246,6 +246,9 @@ export class TranscriptWatcher {
   private lastEmittedTextByStream = new Map<string, string>();
   /** 最近一条保留的 user.message 时间戳（ms），用于 ±3s 派生消息去重 */
   private lastUserTsMs: number | null = null;
+  /** 每道用户题的最近一次提问时刻（transcript timestamp）：迟到 assistant.message
+   *  的记录时间早于新提问，用它归属到正确的问题键 */
+  private userTsByUt = new Map<string, number>();
 
   constructor(private opts: TranscriptWatcherOptions) {
     this.pollMs = Math.max(10, opts.pollMs ?? 100);
@@ -381,6 +384,7 @@ export class TranscriptWatcher {
     if (fresh) {
       this.userEmitSeq += 1;
       this.userSeqByUt.set(ut, this.userEmitSeq);
+      this.userTsByUt.set(ut, Date.now());
     }
     this.pendingGapQueue.push({
       userText: ut,
@@ -618,15 +622,13 @@ export class TranscriptWatcher {
             const tfile = path.join(this.opts.dir, newestName);
             if (fs.existsSync(tfile) && tfile !== this.current) {
               this.pinnedFile = null; // 解除 pin
-              // 手机刚发起过切会话 → live-only@EOF，不得把旧轮次当实时重放
-              const recentPhoneSel = Date.now() - this.lastPhoneSelectMs < PHONE_SELECT_WINDOW_MS;
-              if (recentPhoneSel) {
-                this.bindFile(tfile, { liveOnly: true });
-              } else {
-                // replay: true → 回放新会话的近期历史（不从 EOF 跳过已有事件）
-                // 同时 suppressFallbackAgent=false，chatSessions 直接补全
-                this.bindFile(tfile, { replay: true });
-              }
+              // 无论谁触发的跟随都 live-only@EOF：重绑定 ≠ 加载历史，
+              // replay:true 会把外会话整段历史灌进当前 feed（录屏实证洪水）。
+              this.bindFile(tfile, { liveOnly: true });
+              this.emit({
+                type: 'SYSTEM_MESSAGE',
+                text: `已切换到会话: ${newestName}`,
+              });
             }
           }
         }
@@ -649,9 +651,17 @@ export class TranscriptWatcher {
     const tfile = path.join(this.opts.dir, base);
     if (tfile === this.current) return;
     if (!fs.existsSync(tfile)) return; // chatSessions 最新但 transcripts 无同名文件：保持现状
-    // 手机刚发起过切会话 → live-only@EOF，防止 pin 丢失后的全量 catch-up 洪水
-    const recentPhoneSel = Date.now() - this.lastPhoneSelectMs < PHONE_SELECT_WINDOW_MS;
-    this.bindFile(tfile, recentPhoneSel ? { liveOnly: true } : undefined);
+    // 手机刚发起过切会话 → live-only@EOF，防止 pin 丢失后的全量 catch-up 洪水；
+    // 桌面侧切换的重绑定同样 live-only（否则外会话历史整段灌进 feed）。
+    // 仅首次绑定（current 为空）走默认 tail/catchUp，让首载有上下文。
+    const isRebind = this.current !== undefined;
+    this.bindFile(tfile, isRebind ? { liveOnly: true } : undefined);
+    if (isRebind) {
+      this.emit({
+        type: 'SYSTEM_MESSAGE',
+        text: `已切换到会话: ${base}`,
+      });
+    }
   }
 
   // ---------------------------------------------------------------- chatSessions 兜底源
@@ -993,7 +1003,20 @@ export class TranscriptWatcher {
     );
     if (!this.suppressFallbackAgent || forceLive) {
       for (const ev of evs) {
-        if (ev.type === 'USER_MESSAGE' || ev.type === 'COPILOT_TYPING') continue;
+        if (ev.type === 'USER_MESSAGE' || ev.type === 'COPILOT_TYPING') {
+          // 用户消息本身不投，但记 rid→问题文本：后续该请求的助手投影拿得到
+          // ut 键，迟到重投影才能被 ut 去重命中
+          if (ev.type === 'USER_MESSAGE') {
+            const rid = (ev as any).requestId;
+            const ut = this.normUserText(String((ev as any).text || ''));
+            if (rid && ut) {
+              this.fallbackRequestUserText.set(rid, ut);
+              const ri = (ev as any).requestIndex;
+              if (typeof ri === 'number') this.fallbackRequestIndex.set(ri, rid);
+            }
+          }
+          continue;
+        }
         // chatSessions 写盘滞后数十秒：正文已在 transcript 通道发出时，迟到的
         // 同用户轮次重复投影（含 markdown 变体）按用户文键去重，避免双气泡。
         if (ev.type === 'AGENT_MESSAGE' || ev.type === 'AGENT_STREAM_SET') {
@@ -1016,16 +1039,40 @@ export class TranscriptWatcher {
       }
       return;
     }
-    // 无待补用户轮 → 不发任何 fallback 助手
-    if (!this.hasPendingGap()) return;
+    // 无待补用户轮 → 不发任何 fallback 助手；
+    // 但流收尾事件仍放行——否则已开流的「…」占位泡/停止按钮会卡死
+    if (!this.hasPendingGap()) {
+      for (const ev of evs) {
+        if (ev.type === 'AGENT_STREAM_END' || ev.type === 'COPILOT_DONE') this.emit(ev);
+      }
+      return;
+    }
 
     for (const ev of evs) {
       if (!ev || typeof ev !== 'object') continue;
-      if (ev.type === 'USER_MESSAGE' || ev.type === 'COPILOT_TYPING') continue;
+      if (ev.type === 'USER_MESSAGE' || ev.type === 'COPILOT_TYPING') {
+        if (ev.type === 'USER_MESSAGE') {
+          const rid = (ev as any).requestId;
+          const ut = this.normUserText(String((ev as any).text || ''));
+          if (rid && ut) {
+            this.fallbackRequestUserText.set(rid, ut);
+            const ri = (ev as any).requestIndex;
+            if (typeof ri === 'number') this.fallbackRequestIndex.set(ri, rid);
+          }
+        }
+        continue;
+      }
       if (ev.type === 'AGENT_STREAM_START' || ev.type === 'AGENT_STREAM_CHUNK') continue;
-      if (ev.type === 'COPILOT_DONE') continue;
+      if (ev.type === 'COPILOT_DONE') {
+        this.emit(ev);
+        continue;
+      }
       // 0.5.26：不 gap-fill TOOL——避免旧工具卡洪水；只补最终正文
-      if (ev.type === 'TOOL_CALL' || ev.type === 'AGENT_STREAM_END') continue;
+      if (ev.type === 'TOOL_CALL') continue;
+      if (ev.type === 'AGENT_STREAM_END') {
+        this.emit(ev);
+        continue;
+      }
 
       if (ev.type === 'AGENT_MESSAGE' || ev.type === 'AGENT_STREAM_SET') {
         const text = String((ev as { text?: string }).text || '').trim();
@@ -1116,18 +1163,25 @@ export class TranscriptWatcher {
     return text.trim().replace(/[*_`~]/g, '').replace(/\s+/g, ' ').slice(0, 160);
   }
 
+  /** 会话域前缀：dedupe 键按会话隔离，重绑回来仍能命中本会话指纹 */
+  private sessPrefix(): string {
+    return this.boundSessionBase ? this.boundSessionBase.replace(/\.jsonl$/, '') + '::' : '';
+  }
+
   private dedupeKeys(text: string, ctx?: { requestIndex?: number; streamId?: string; rid?: string; userText?: string }): string[] {
+    const sess = this.sessPrefix();
     const base = this.agentTextKey(text);
     if (!base) return [];
+    const b = sess + base;
     const keys: string[] = [];
-    if (ctx?.rid) keys.push(`${base}::rid=${ctx.rid}`);
-    if (ctx?.requestIndex != null) keys.push(`${base}::idx=${ctx.requestIndex}`);
-    if (ctx?.streamId) keys.push(`${base}::sid=${ctx.streamId}`);
+    if (ctx?.rid) keys.push(`${b}::rid=${ctx.rid}`);
+    if (ctx?.requestIndex != null) keys.push(`${b}::idx=${ctx.requestIndex}`);
+    if (ctx?.streamId) keys.push(`${b}::sid=${ctx.streamId}`);
     // 用户文键：同一用户轮次的回复在 transcript 与 chatSessions 双通道下发时互斥，
     // 不同轮次得到同文字回复仍可各显一次（test_gapfill_pending F 段语义）。
     const ut = ctx?.userText ? this.normUserText(ctx.userText) : '';
-    if (ut) keys.push(`${base}::ut=${ut}`);
-    if (!keys.length) keys.push(base);
+    if (ut) keys.push(`${b}::ut=${ut}`);
+    if (!keys.length) keys.push(b);
     return keys;
   }
 
@@ -1440,7 +1494,7 @@ export class TranscriptWatcher {
       }
       case 'assistant.message': {
         if (!data) return;
-        this.handleAssistantMessage(data);
+        this.handleAssistantMessage(data, tsMs);
         return;
       }
       case 'tool.execution_start': {
@@ -1483,7 +1537,11 @@ export class TranscriptWatcher {
     if (!Number.isNaN(tsMs) && this.lastUserTsMs !== null && tsMs - this.lastUserTsMs < DUP_USER_MS) {
       return;
     }
-    if (!Number.isNaN(tsMs)) this.lastUserTsMs = tsMs;
+    if (!Number.isNaN(tsMs)) {
+      this.lastUserTsMs = tsMs;
+      const utT = this.normUserText(content);
+      if (utT) this.userTsByUt.set(utT, tsMs);
+    }
 
     this.endActiveStream(); // 新用户输入：结束上一轮未结束的流
     this.clearTurnGapTimer();
@@ -1506,7 +1564,22 @@ export class TranscriptWatcher {
    * - seenMessageIds 语义：标记"该 messageId 的辅助事件（reasoning/tools）已初始化"；
    *   content 增长不依赖它（靠 lastContentByMessageId 前缀比较），流式增量不会被去重吞掉
    */
-  private handleAssistantMessage(data: Record<string, unknown>) {
+  /** 按记录时间戳归属正文到正确的问题：迟到写入的上一轮 assistant.message
+   *  的记录 ts 早于当前新问题 → 映射回它所属的问题键，命中幻影压制。 */
+  private resolveUtForTs(tsMs: number): string {
+    if (Number.isNaN(tsMs)) return this.activeUserText;
+    let best: string | undefined;
+    let bestTs = -1;
+    for (const [ut, ts] of this.userTsByUt) {
+      if (ts <= tsMs + 2000 && ts > bestTs) {
+        best = ut;
+        bestTs = ts;
+      }
+    }
+    return best ?? this.activeUserText;
+  }
+
+  private handleAssistantMessage(data: Record<string, unknown>, tsMs = NaN) {
     const messageId = asString(data.messageId);
     const reasoning = asString(data.reasoningText);
     const content = asString(data.content);
@@ -1563,7 +1636,7 @@ export class TranscriptWatcher {
           this.streamAccum = '';
           this.turnEmittedVisibleAgent = false;
           this.startTurnHardTimer();
-          this.emitAssistantContent(content, messageId);
+          this.emitAssistantContent(content, messageId, tsMs);
         }
       } else if (isInternalMonologue(content)) {
         this.markCurrentTurnGap();
@@ -1577,7 +1650,7 @@ export class TranscriptWatcher {
           });
         }
       } else {
-        this.emitAssistantContent(content, messageId);
+        this.emitAssistantContent(content, messageId, tsMs);
       }
     }
 
@@ -1621,10 +1694,12 @@ export class TranscriptWatcher {
    *   否则 → SET 整段覆盖
    * - 情况 c：无 messageId（罕见）→ SET 整段覆盖（旧行为）
    */
-  private emitAssistantContent(content: string, messageId: string | null) {
-    // 迟到重投影：上一轮 assistant.message 延迟落盘到达时，内容已是发过的答案 → 不开流
-    // （ut 归属可能已被新问覆盖，故同时查 stale pending）
-    if (this.isReplayedFor(content, this.activeUserText) || this.isStalePendingReplay(content)) return;
+  private emitAssistantContent(content: string, messageId: string | null, tsMs = NaN) {
+    // 迟到重投影：上一轮 assistant.message 延迟落盘到达时，内容已是发过的答案 → 不开流。
+    // ut 归属：按记录时间戳找回它所属的问题（activeUserText 可能已被新问覆盖）；
+    // 同时查 stale pending 兜底。
+    const resolvedUt = this.resolveUtForTs(tsMs);
+    if (this.isReplayedFor(content, resolvedUt) || this.isStalePendingReplay(content)) return;
     // 用户可见正文（非 monologue 路径才会进这里）
     this.turnEmittedVisibleAgent = true;
     // 0.5.18：工具后的新正文用独立 streamId，避免与上一截正文/tool 合并成「堆积」
@@ -1959,14 +2034,10 @@ export class TranscriptWatcher {
     this.lastContentByMessageId.clear();
     this.lastEmittedTextByStream.clear();
     this.lastUserTsMs = null;
-    // bindFile 会 reset；切会话清空指纹，避免新会话同句「你好」被误判已发。
-    // 同会话重绑（auto-follow / catchUp 重投影）保留指纹，阻断刚发出的正文再发一遍。
+    // bindFile 会 reset：ut/正文去重键已按会话基名域化（见 dedupeKeys 的 sess 前缀），
+    // 跨会话重绑保留指纹也无串扰——保留它们可以在「重绑回来」后仍压制迟到重投影。
+    // 其余 live 状态（pending/gap/active 轮次）仍清空。
     if (!preserveDedupe) {
-      this.emittedAgentTextKeys.clear();
-      this.emittedAgentUtKeys.clear();
-      this.userSeqByUt.clear();
-      this.userEmitSeq = 0;
-      this.recentAgentEmits.clear();
       this.fallbackSeenRequestIds.clear();
       this.gapFilledRequestIds.clear();
       this.pendingGapQueue = [];
@@ -2019,7 +2090,7 @@ export class TranscriptWatcher {
   private isReplayedFor(text: string, userText?: string): boolean {
     const ut = this.normUserText(userText || '');
     if (!ut) return false;
-    const s = this.emittedAgentUtKeys.get(`${this.agentTextKey(text)}::ut=${ut}`);
+    const s = this.emittedAgentUtKeys.get(`${this.sessPrefix()}${this.agentTextKey(text)}::ut=${ut}`);
     return s != null && (this.userSeqByUt.get(ut) ?? 0) <= s;
   }
 
@@ -2028,8 +2099,9 @@ export class TranscriptWatcher {
   private isStalePendingReplay(text: string): boolean {
     const k = this.agentTextKey(text);
     if (!k) return false;
+    const sess = this.sessPrefix();
     for (const q of this.pendingGapQueue) {
-      const s = this.emittedAgentUtKeys.get(`${k}::ut=${q.userText}`);
+      const s = this.emittedAgentUtKeys.get(`${sess}${k}::ut=${q.userText}`);
       if (s != null && (this.userSeqByUt.get(q.userText) ?? 0) <= s) return true;
     }
     return false;

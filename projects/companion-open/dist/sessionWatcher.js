@@ -68,6 +68,8 @@ const HISTORY_MAX_MUTATIONS = 400;
 const USER_MSG_SCAN_MS = 2500;
 /** 桌面消息扫描过滤阈值：仅扫描最近 10 分钟内修改过的文件 (10 * 60 * 1000 ms) */
 const USER_MSG_SCAN_MAX_AGE_MS = 10 * 60 * 1000;
+/** USER_MESSAGE 新鲜度阈值：请求时间戳超过 5 分钟视为历史，不广播 */
+const USER_FRESH_MS = 5 * 60 * 1000;
 /** 活跃 fs.watch 时的备份轮询间隔 (ms) */
 const ADAPTIVE_POLL_ACTIVE_MS = 1500;
 class SessionWatcher {
@@ -666,19 +668,36 @@ class SessionWatcher {
                                 const reqs = this.extractRequestsFromObj(obj);
                                 if (!reqs || !reqs.length)
                                     continue;
-                                for (const r of reqs) {
+                                // kind0 快照含整段历史：只投「数组尾部真正新追加」的请求，
+                                // 否则重绑后外会话会把全部历史用户轮 dump 成气泡
+                                for (let ri = 0; ri < reqs.length; ri++) {
+                                    const r = reqs[ri];
                                     const rid = r?.requestId ?? '';
                                     if (!rid || this.seenForeignReqIds.has(rid))
                                         continue;
+                                    this.seenForeignReqIds.add(rid);
                                     const text = (0, jsonl_1.textOfUserReq)(r);
                                     if (!text)
                                         continue;
-                                    this.seenForeignReqIds.add(rid);
                                     // 手机端已 pin 某会话时，禁止把「其他会话」的桌面消息灌进当前 feed
                                     if (this.pinnedFile)
                                         continue;
+                                    // kind0 快照含整段历史：只投时间戳足够新的用户消息（dump 防御）。
+                                    // lastReqCount 兜底：无 timestamp 的老版本数据退化为按追加位置过滤
+                                    const rts = typeof r?.timestamp === 'number' ? r.timestamp : undefined;
+                                    if (rts != null) {
+                                        if (now - rts > USER_FRESH_MS)
+                                            continue;
+                                    }
+                                    else if (ri < cursor.lastReqCount || ri < reqs.length - 1) {
+                                        // 无时间戳：kind0 快照整段重放时只有数组尾部那条才可能是新追加的，
+                                        // 位置在前的历史轮一律丢弃（lastReqCount 兜底跨行追踪）
+                                        continue;
+                                    }
                                     this.opts.onEvent({ type: 'USER_MESSAGE', text, requestId: rid, foreign: true });
                                 }
+                                if (reqs.length > cursor.lastReqCount)
+                                    cursor.lastReqCount = reqs.length;
                             }
                             catch {
                                 /* 单行损坏忽略 */
@@ -922,8 +941,10 @@ class SessionWatcher {
                     // renumber is not needed — projector uses array indices as requestIndex
                 }
                 const evs = this.projector.projectLine({ ...kind0, v });
+                // bootstrap 是历史补全：不投 USER_MESSAGE（最新一轮用户气泡由 live 增量/foreign 扫描负责）
                 for (const ev of evs)
-                    this.opts.onEvent(ev);
+                    if (ev.type !== 'USER_MESSAGE')
+                        this.opts.onEvent(ev);
             }
             catch {
                 /* ignore */
@@ -935,8 +956,21 @@ class SessionWatcher {
         for (const obj of tailMut) {
             try {
                 const evs = this.projector.projectLine(obj);
-                for (const ev of evs)
-                    this.opts.onEvent(ev);
+                // 同上：追赶段不投历史 USER；时间戳过期或缺失都丢，只留新鲜新轮
+                let lastUser = -1;
+                evs.forEach((e, i) => {
+                    if (e.type === 'USER_MESSAGE')
+                        lastUser = i;
+                });
+                evs.forEach((e, i) => {
+                    if (e.type !== 'USER_MESSAGE') {
+                        this.opts.onEvent(e);
+                        return;
+                    }
+                    const ets = typeof e.timestamp === 'number' ? e.timestamp : undefined;
+                    if (i === lastUser && ets != null && Date.now() - ets <= USER_FRESH_MS)
+                        this.opts.onEvent(e);
+                });
             }
             catch {
                 /* ignore */
@@ -1028,8 +1062,22 @@ class SessionWatcher {
                     const obj = JSON.parse(s);
                     // Full kind0 snapshot mid-session: project (projector dedupes requests/text)
                     const evs = this.projector.projectLine(obj);
-                    for (const ev of evs)
-                        this.opts.onEvent(ev);
+                    // kind0 快照会重投整段历史的 USER_MESSAGE（桌面发送后 chatSessions
+                    // 落盘的同一条）。只保留时间戳新鲜的最后一条 USER，旧轮不广播。
+                    let lastUser = -1;
+                    evs.forEach((e, i) => {
+                        if (e.type === 'USER_MESSAGE')
+                            lastUser = i;
+                    });
+                    evs.forEach((e, i) => {
+                        if (e.type !== 'USER_MESSAGE') {
+                            this.opts.onEvent(e);
+                            return;
+                        }
+                        const ets = typeof e.timestamp === 'number' ? e.timestamp : undefined;
+                        if (i === lastUser && ets != null && Date.now() - ets <= USER_FRESH_MS)
+                            this.opts.onEvent(e);
+                    });
                 }
                 catch {
                     // ignore bad line

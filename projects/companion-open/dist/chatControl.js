@@ -144,8 +144,9 @@ class ChatControl {
         }
         try {
             // 0.5.18 当前模型权威源（按优先级）：
-            // 1) 本模块最近成功 selectModel
-            // 2) globalStorage state.vscdb: chat.currentLanguageModel.panel（= 面板实际选中）
+            // 1) globalStorage state.vscdb: chat.currentLanguageModel.panel（= 面板实际选中，
+            //    桌面端切换也写这里 —— 双向同步必须以它为先）
+            // 2) 本模块最近成功 selectModel（面板尚未落盘时的短窗口）
             // 3) settings chat.defaultModel（常滞后，仅兜底）
             let configured;
             try {
@@ -157,7 +158,7 @@ class ChatControl {
                 /* ignore */
             }
             const fromPanel = this.readCurrentPanelModelId();
-            const preferred = (this.currentModelId || fromPanel || configured || '').trim();
+            const preferred = (fromPanel || this.currentModelId || configured || '').trim();
             if (!this.currentModelId && (fromPanel || configured)) {
                 this.currentModelId = fromPanel || configured;
             }
@@ -211,6 +212,12 @@ class ChatControl {
             this.log(`[chatControl] listModels 失败: ${errText(err)}`);
             return [];
         }
+    }
+    /**
+     * 面板当前模型 identifier（公开包装，供轮询桌面侧切换）
+     */
+    peekPanelModelId() {
+        return this.readCurrentPanelModelId();
     }
     /**
      * 从 globalStorage/state.vscdb 读面板当前模型 identifier（vendor/id 形式）。
