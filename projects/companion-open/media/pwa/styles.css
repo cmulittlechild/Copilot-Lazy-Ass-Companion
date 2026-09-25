@@ -564,40 +564,48 @@ body {
   margin-bottom: 8px;
 }
 .assistant-thinking-block {
-  border: 1px solid var(--thinking-border);
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--vscode-input-background) 60%, transparent);
+  border: 1px solid color-mix(in srgb, var(--thinking-border) 55%, transparent);
+  border-left: 3px solid var(--thinking-border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--thinking-border) 8%, transparent);
   font-size: 12px;
   overflow: hidden;
+  margin: 2px 0 6px;
 }
 .assistant-thinking-summary {
   cursor: pointer;
-  padding: 5px 10px;
+  padding: 7px 12px;
   font-size: 10px;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.8px;
   font-weight: 700;
-  color: var(--vscode-descriptionForeground);
+  color: color-mix(in srgb, var(--vscode-descriptionForeground) 85%, var(--thinking-border));
   user-select: none;
   list-style: none;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
+  transition: background 0.15s ease;
+}
+.assistant-thinking-summary:hover {
+  background: color-mix(in srgb, var(--thinking-border) 10%, transparent);
 }
 .assistant-thinking-summary::-webkit-details-marker { display: none; }
+.assistant-thinking-block[open] .assistant-thinking-summary {
+  border-bottom: 1px dashed color-mix(in srgb, var(--thinking-border) 35%, transparent);
+}
 /* 官方 codicon 图标：流式时 circle-filled 旋转，结束后 check（由 app.js 切换） */
-.thinking-icon { font-size: 12px; color: var(--thinking-border); flex-shrink: 0; }
+.thinking-icon { font-size: 13px; color: var(--thinking-border); flex-shrink: 0; }
 .msg.agent.streaming .thinking-icon { animation: spin 1.2s linear infinite; }
 .assistant-thinking-content {
   margin: 0;
-  padding: 6px 10px 8px;
+  padding: 8px 12px 10px;
   font-family: var(--code-font-family);
   font-size: 11px;
-  line-height: 1.5;
+  line-height: 1.55;
   color: var(--vscode-descriptionForeground);
   white-space: pre-wrap;
   word-break: break-word;
-  border-top: 1px solid color-mix(in srgb, var(--thinking-border) 30%, transparent);
   max-height: 260px;
   overflow-y: auto;
 }
@@ -679,29 +687,33 @@ body {
 
 .msg.tool-card { align-self: flex-start; width: 100%; }
 .tool-details {
-  background: rgba(60, 60, 60, 0.45);
-  background: color-mix(in srgb, var(--vscode-input-background) 45%, transparent);
-  border: 1px solid var(--vscode-sideBar-border);
-  border-left: 2px solid var(--vscode-chat-requestBorder);
-  border-radius: 4px;
+  background: color-mix(in srgb, var(--vscode-input-background) 40%, transparent);
+  border: 1px solid color-mix(in srgb, var(--vscode-sideBar-border) 70%, transparent);
+  border-left: 3px solid var(--vscode-chat-requestBorder);
+  border-radius: 8px;
   overflow: hidden;
   font-size: 12px;
+  margin: 2px 0 6px;
 }
 .tool-summary {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 10px;
+  padding: 7px 12px;
   cursor: pointer;
   list-style: none;
   user-select: none;
+  transition: background 0.15s ease;
 }
 .tool-summary::-webkit-details-marker { display: none; }
 .tool-summary:hover { background: var(--vscode-list-hoverBackground); }
 .tool-gear {
   font-size: 13px;
-  color: var(--vscode-descriptionForeground);
+  color: var(--vscode-symbolIcon-methodForeground, var(--vscode-descriptionForeground));
   flex-shrink: 0;
+}
+.tool-details[open] .tool-summary {
+  border-bottom: 1px dashed color-mix(in srgb, var(--vscode-sideBar-border) 60%, transparent);
 }
 .tool-title {
   flex: 1;
@@ -718,26 +730,24 @@ body {
   align-items: center;
   gap: 4px;
   font-size: 10px;
-  padding: 1px 8px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  padding: 2px 9px;
   border-radius: 10px;
   font-family: var(--font-family);
   flex-shrink: 0;
 }
 .tool-badge .codicon { font-size: 10px; }
 .tool-badge.running {
-  background: rgba(255, 215, 0, 0.15);
-  background: color-mix(in srgb, #ffd700 15%, transparent);
-  color: #ffd700;
+  background: color-mix(in srgb, #e8b339 18%, transparent);
+  color: #e8b339;
 }
 .tool-badge.running .codicon { animation: spin 1s linear infinite; }
 .tool-badge.done {
-  background: rgba(115, 201, 145, 0.15);
-  background: color-mix(in srgb, #73c991 15%, transparent);
+  background: color-mix(in srgb, #73c991 18%, transparent);
   color: #73c991;
 }
 .tool-badge.confirmed {
-  background: rgba(115, 201, 145, 0.2);
-  border: 1px solid rgba(115, 201, 145, 0.45);
   background: color-mix(in srgb, #73c991 20%, transparent);
   color: #73c991;
   border: 1px solid color-mix(in srgb, #73c991 45%, transparent);

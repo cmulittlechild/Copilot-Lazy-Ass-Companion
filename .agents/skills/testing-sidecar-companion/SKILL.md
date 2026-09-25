@@ -52,3 +52,6 @@ PWA ↔ VS Code bridge。仓库 `~/repos/sidecar_remote/projects/companion-open`
 - sessiondb 快通道把"答案到达"(~2s)与"轮次收尾"解耦；死流压制判据=监控全文 grep STREAM_START=0。
 - 吞包两种成因区分：死流残留"停止"态误吞 vs socket 间隔 ~3min 退化静默吞（按钮正常仍丢）。
 - 延迟测量须用带墙钟的监控列对齐发送时刻（发送 exec date 同步记录）。
+- 验证"已投去重"类修复双测：目标 stray 不再冒 + 回放/跟随不受影响；点选后看 feed 空不空是最快判据（注意：手机点选 n=1 仅提示是设计行为，勿误判回归）。
+- 工具轮验证用"建文件+验证"提示可一次覆盖 THINKING/TOOL_CALL/步骤组/文件实证。
+- 边界重投影有 sessiondb 变体：回放过的答案可能在下轮发信后经 db 行再投。

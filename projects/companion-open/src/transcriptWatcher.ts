@@ -275,6 +275,8 @@ export class TranscriptWatcher {
 
   /** 待应用的种子：seedFromHistory 记录，bindFile 清空集合后重放 */
   private pendingSeed: PhoneEvent[] | null = null;
+  /** 已通过回放/backfill 投过的 sessiondb turns 行 id：迟到的轮询重投影跳过 */
+  private sessionDbEmittedIds = new Set<number>();
   /** 最近一次手机侧会话绑定时间：窗口期内自动跟随不得 replay/catch-up 洪水 */
   private lastPhoneSelectMs = 0;
   /** 最近一次已发射 SESSION_FOLLOW 的目标路径：防止 csdir-only 会话占 newest 时每 tick 重发 */
@@ -303,6 +305,10 @@ export class TranscriptWatcher {
         (ev.type === 'AGENT_MESSAGE' || ev.type === 'AGENT_STREAM_SET') &&
         typeof (ev as any).text === 'string'
       ) {
+        // sessiondb 行回放事件带 sessiondb/<sid>/<rowId> streamId：记行 id 防轮询重投
+        const sidStr = String((ev as any).streamId || '');
+        const sm = sidStr.match(/^sessiondb\/[^/]+\/(\d+)$/);
+        if (sm) this.sessionDbEmittedIds.add(parseInt(sm[1], 10));
         const text = String((ev as any).text || '').trim();
         // monologue 不进正文指纹（否则会挡住真实最终回复的前缀匹配）
         if (text && !isInternalMonologue(text)) this.noteEmittedAgentText(text, { requestIndex: (ev as any).requestIndex, streamId: (ev as any).streamId, rid: rid || undefined });
@@ -769,6 +775,33 @@ export class TranscriptWatcher {
     this.sessionDbWatchDir = undefined;
   }
 
+  /** 最近 n 条 turns 行（按 id 升序）：跟随回放时补 chatSessions 尚未落盘的最后一轮答案 */
+  sessionDbRecentTurns(
+    n: number,
+    sid?: string,
+  ): Array<{ id: number; user_message: string | null; assistant_response: string | null }> {
+    const sessId = sid ?? this.sessionDbSessionId;
+    if (!this.opts.sessionStoreDb || !sessId) return [];
+    const db = this.openSessionDb();
+    if (!db) return [];
+    try {
+      return db
+        .prepare(
+          'SELECT id, user_message, assistant_response FROM turns WHERE session_id = ? ORDER BY id DESC LIMIT ?',
+        )
+        .all(sessId, n)
+        .reverse() as Array<{
+        id: number;
+        user_message: string | null;
+        assistant_response: string | null;
+      }>;
+    } catch {
+      return [];
+    } finally {
+      db.close();
+    }
+  }
+
   /** 解绑兜底：清文件、清半行缓冲、清轮询定时器 */
   private unbindFallback() {
     this.fallbackFile = undefined;
@@ -848,6 +881,7 @@ export class TranscriptWatcher {
       if (typeof r.id === 'number' && r.id > this.sessionDbLastRow) {
         this.sessionDbLastRow = r.id;
       }
+      if (typeof r.id === 'number' && this.sessionDbEmittedIds.has(r.id)) continue;
       // turns 行含 user_message：提前发 USER_MESSAGE（比 chatSessions 落盘快数十秒），
       // 稍后 chatSessions 通道的同一 USER 由 bridge 60s 文本去重压住。
       const uText = String(r.user_message || '').trim();
@@ -861,6 +895,7 @@ export class TranscriptWatcher {
       }
       const text = String(r.assistant_response || '').trim();
       if (!text) continue;
+      if (typeof r.id === 'number') this.sessionDbEmittedIds.add(r.id);
       // 用户文挂上供 ut 键/轮次匹配；streamId 用 sessiondb 前缀区别于其他通道
       this.emitAgentSide([
         {
@@ -872,6 +907,9 @@ export class TranscriptWatcher {
           _ut: r.user_message || undefined,
         } as PhoneEvent,
       ]);
+      // turns 行落库=该轮已完成：补一个 DONE 收尾，否则 typing/••• 占位要等到
+      // chatSessions 迟到的收尾事件（可达分钟级）才消，表现为答案后的「…」波动。
+      this.emit({ type: 'COPILOT_DONE', requestIndex: -1, timestamp: Date.now() } as PhoneEvent);
     }
   }
 

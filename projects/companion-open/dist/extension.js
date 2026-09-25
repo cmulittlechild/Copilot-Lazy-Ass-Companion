@@ -556,8 +556,43 @@ async function activate(context) {
                                 title,
                                 timestamp: Date.now(),
                             });
+                            // 补最后一轮：答案可能已在 session-store.db 落库但 chatSessions 还没写盘
+                            // （跟随游标 rebind 跳到行尾，迟发也补不上）——把缺失的回答并进回放尾部。
+                            const seen = new Set(hist
+                                .filter((e) => e?.type === "AGENT_MESSAGE")
+                                .map((e) => String(e.text || "")
+                                .replace(/[*_`~]/g, "")
+                                .replace(/\s+/g, " ")
+                                .trim()
+                                .slice(0, 160)));
+                            const sidForDb = base ? base.replace(/\.jsonl$/, "") : "";
+                            const dbTurns = sidForDb
+                                ? (transcriptWatcher?.sessionDbRecentTurns(5, sidForDb) ?? [])
+                                : [];
+                            const backfill = dbTurns
+                                .filter((r) => {
+                                const t = String(r.assistant_response || "").trim();
+                                if (!t)
+                                    return false;
+                                const k = t
+                                    .replace(/[*_`~]/g, "")
+                                    .replace(/\s+/g, " ")
+                                    .trim()
+                                    .slice(0, 160);
+                                return !seen.has(k);
+                            })
+                                .map((r) => ({
+                                type: "AGENT_MESSAGE",
+                                text: String(r.assistant_response),
+                                streamId: `sessiondb/${sidForDb}/${r.id}`,
+                                requestIndex: -1,
+                                timestamp: Date.now(),
+                                _ut: r.user_message || undefined,
+                            }));
+                            transcriptWatcher?.seedFromHistory(backfill);
                             bridge?.replaySession([
                                 ...hist,
+                                ...backfill,
                                 {
                                     type: "SYSTEM_MESSAGE",
                                     text: `已切换到会话: ${base}`,
