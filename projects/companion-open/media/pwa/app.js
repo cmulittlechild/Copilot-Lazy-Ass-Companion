@@ -636,6 +636,9 @@
         thinkingIcon.classList.remove('codicon-circle-filled');
         thinkingIcon.classList.add('codicon-check');
       }
+      // 收尾补 markdown 渲染：流式期 bodyEl 是纯 textContent（**加粗**等原样裸露），
+      // 无 STREAM_END 的流（回放 SET、DONE 收尾）到这一步仍是生文，补 marked 解析。
+      if (entry.markdown && entry.bodyEl) renderEntryBody(entry);
     }
     feed.querySelectorAll('.msg.agent .typing-label').forEach((n) => {
       n.style.display = 'none';
@@ -1756,9 +1759,15 @@
         if (!replaying) setRequestRunning(false, undefined, { force: true });
         setStatus(true, connectedLabel());
         if (!replaying) Haptics.success();
-        // 回复结束→待答清单清空（回答已至，后续重放不再补画）。
-        // 回放内的历史 DONE 不算——同会话重选的交错态要靠清单补画已发未答泡。
-        if (!replaying && !replayingInstant) sentAwaitingReply.length = 0;
+        // 回复结束→按 _ut 逐条释放待答条目：服务端 DONE 现带归属轮次，
+        // 只清已答的；任意 DONE 整表清会把别轮在途条目误杀 → 用户泡丢、答案裸奔。
+        // 无 _ut 的 DONE（解析不到归属）不清：条目留着，重放靠它补画已发未答泡。
+        if (!replaying && !replayingInstant && msg._ut) {
+          const daut = userTextDedupeKey(String(msg._ut));
+          for (let i = sentAwaitingReply.length - 1; i >= 0; i--) {
+            if (userTextDedupeKey(sentAwaitingReply[i].text) === daut) sentAwaitingReply.splice(i, 1);
+          }
+        }
         // 回复结束→排队消息出队（防抖宽限后判 requestRunning）
         setTimeout(flushPendingSendQueue, 800);
         break;
@@ -1772,6 +1781,16 @@
           outboundQueue.length = 0;
           clearFeed();
           replayingInstant = true;
+          // 待答清单按会话分：sess 与即将切到的会话不符就丢——旧会话在途条目
+          // 会补画进新 feed（残泡/答案裸奔归因错乱）。无 sess（旧写入）保留。
+          {
+            const selBase = (String(msg.file || '').split('/').pop() || '').replace(/\.jsonl$/i, '');
+            for (let i = sentAwaitingReply.length - 1; i >= 0; i--) {
+              const s = sentAwaitingReply[i].sess;
+              const sBase = (String(s || '').split('/').pop() || '').replace(/\.jsonl$/i, '');
+              if (sBase && selBase && sBase !== selBase) sentAwaitingReply.splice(i, 1);
+            }
+          }
           if (sessionSwitchFallbackTimer) {
             clearTimeout(sessionSwitchFallbackTimer);
             sessionSwitchFallbackTimer = null;
@@ -1972,7 +1991,9 @@
       const k = String(s.file || s.id || s.title || i);
       if (!sessionRowFreeze.has(k)) sessionRowFreeze.set(k, i);
     });
-    // 每次打开都向 bridge 请求最新会话列表
+    // 每次打开都向 bridge 请求最新会话列表；开抽屉后只渲染第一批应答，
+    // 打开期间收到的后续推送不再重建（防点击瞬间行被换走——见 renderSessionList）
+    drawerRenderedOnce = true;
     send({ type: 'PHONE_SESSION_LIST' });
   }
 
@@ -1982,9 +2003,19 @@
     sessionRowFreeze = null;
   }
 
-  /** SESSION_LIST 入口：缓存原始数据后按当前搜索词渲染 */
+  /** SESSION_LIST 入口：缓存原始数据后按当前搜索词渲染。
+   *  抽屉打开中跳过整树重建：会话活动持续推 SESSION_LIST，innerHTML 重建会在
+   *  点击下落瞬间换掉目标行（实测误点 3 次）。数据照常更新，打开时渲染一次、
+   *  搜索输入仍实时渲染（renderSessionGroups 由 input 监听直接调）。 */
+  let drawerRenderedOnce = false;
   function renderSessionList(sessions) {
     lastSessions = Array.isArray(sessions) ? sessions : [];
+    const drawerOpen = sessionDrawer && sessionDrawer.classList.contains('open');
+    const searching = sessionSearch && String(sessionSearch.value || '').trim();
+    if (drawerOpen && !searching) {
+      if (!drawerRenderedOnce) return;
+      drawerRenderedOnce = false;
+    }
     renderSessionGroups();
   }
 
@@ -2810,7 +2841,8 @@
     if (pendingSendCheck) clearTimeout(pendingSendCheck.timer);
     persistPendingSend(text, localKey);
     if (sentAwaitingReply.length >= 8) sentAwaitingReply.shift();
-    sentAwaitingReply.push({ text, key: localKey });
+    // sess 标发送时的会话文件：SESSION_SELECTED 切换后丢别会话残留，防跨会话误重画
+    sentAwaitingReply.push({ text, key: localKey, sess: currentSessionMeta.file });
     const sentTextKey = userTextDedupeKey(text);
     pendingSendCheck = {
       textKey: sentTextKey,

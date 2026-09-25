@@ -55,6 +55,10 @@ const workspaceIndex_1 = require("./workspaceIndex");
 let bridge;
 let watcher;
 let transcriptWatcher;
+// 手机显式点选的会话 + 优先窗截止时间：窗内压制指向别会话的自动跟随，
+// 防止在途会话写盘 newest 把绑定/页面拽回活动会话。被压制时顺延窗口。
+const EXPLICIT_SELECT_GUARD_MS = 20000;
+let lastExplicitSelect;
 /** 正文规范化（dedupe 用）：剥 markdown 强调+压空白+截断，与 transcriptWatcher.agentTextKey 同形 */
 function replayTextKey(text) {
     return String(text || "")
@@ -382,6 +386,9 @@ async function activate(context) {
                 case "PHONE_SESSION_SELECT": {
                     const file = typeof msg.file === "string" ? msg.file : "";
                     const ok = watcher?.selectSession(file) ?? false;
+                    // 显式点选开窗：窗口内压制指向别会话的自动跟随（见 SESSION_FOLLOW 处）。
+                    if (ok && file)
+                        lastExplicitSelect = { file, until: Date.now() + EXPLICIT_SELECT_GUARD_MS };
                     // 记录选中会话：后续 PHONE_MESSAGE 注入必须先切到该会话，
                     // 否则 workbench.action.chat.open 只会打到 VS Code 当前活跃会话。
                     if (ok && file)
@@ -610,6 +617,20 @@ async function activate(context) {
                             const cand = path.join(csdir, base);
                             if (fs.existsSync(cand))
                                 csFile = cand;
+                        }
+                        // 显式点选优先窗：手机刚选了别的会话时，在途会话的写盘 newest 会
+                        // 立刻触发跟随把绑定/页面拽回活动会话（实测 +0.7-0.8s 抢回 2 次）。
+                        // 压制窗口内的异向跟随并顺延窗口（活动会话持续写盘不反复抢）；
+                        // 指向所选会话本身的跟随放行并解除窗口。
+                        const sel = lastExplicitSelect;
+                        if (sel && Date.now() < sel.until) {
+                            const selBase = (sel.file.split("/").pop() || "").replace(/\.jsonl$/i, "");
+                            const followBase = base.replace(/\.jsonl$/i, "");
+                            if (selBase && followBase && selBase !== followBase) {
+                                lastExplicitSelect = { file: sel.file, until: Date.now() + EXPLICIT_SELECT_GUARD_MS };
+                                return;
+                            }
+                            lastExplicitSelect = undefined;
                         }
                         if (csFile && fs.existsSync(csFile)) {
                             (0, inject_1.setActiveSessionFile)(csFile);

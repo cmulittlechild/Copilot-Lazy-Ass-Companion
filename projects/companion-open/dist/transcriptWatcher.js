@@ -939,7 +939,13 @@ class TranscriptWatcher {
             ]);
             // turns 行落库=该轮已完成：补一个 DONE 收尾，否则 typing/••• 占位要等到
             // chatSessions 迟到的收尾事件（可达分钟级）才消，表现为答案后的「…」波动。
-            this.emit({ type: 'COPILOT_DONE', requestIndex: -1, timestamp: Date.now() });
+            // _ut 标归属轮次：客户端按 ut 释放「已发未答」条目，不误清别轮在途条目。
+            this.emit({
+                type: 'COPILOT_DONE',
+                requestIndex: -1,
+                timestamp: Date.now(),
+                _ut: r.user_message || undefined,
+            });
         }
     }
     /** catch-up：读取 chatSessions 文件逐行投影（补历史缺失回复）；大文件只读尾部 8MB */
@@ -1146,6 +1152,31 @@ class TranscriptWatcher {
         this.emitAgentSide(this.fallbackProjector.projectLine(rec));
         this.capCollections();
     }
+    /** 解析投影事件真正所属的用户问题：_ut 已有直接用；否则按 requestId /
+     *  streamId 的 requests/N 索引 / requestIndex 反查 fallbackRequestUserText。
+     *  全查不到时返回 undefined——调用方宁缺毋滥，禁止拿 activeUserText 兜底归错。 */
+    resolveUtForFallbackEv(ev) {
+        const own = ev._ut;
+        if (typeof own === 'string' && own.trim())
+            return own;
+        let rid = typeof ev.requestId === 'string' ? ev.requestId : undefined;
+        const streamId = String(ev.streamId || '');
+        const m = streamId.match(/^requests\/(\d+)\//);
+        let idx;
+        if (m)
+            idx = parseInt(m[1], 10);
+        else if (typeof ev.requestIndex === 'number' && ev.requestIndex >= 0)
+            idx = ev.requestIndex;
+        if (!rid && typeof idx === 'number') {
+            rid = this.fallbackRequestIndex.get(idx) || [...this.fallbackSeenRequestIds][idx];
+        }
+        if (rid) {
+            const ut = this.fallbackRequestUserText.get(rid);
+            if (ut)
+                return ut;
+        }
+        return undefined;
+    }
     /**
      * 兜底源只补助手侧内容：跳过 USER_MESSAGE / COPILOT_TYPING
      * （transcripts 已实时覆盖用户消息，避免手机端重复）。
@@ -1167,12 +1198,9 @@ class TranscriptWatcher {
                     continue;
                 }
                 if (ev.type === 'AGENT_STREAM_START' && evSid) {
-                    const m = evSid.match(/^requests\/(\d+)\//);
-                    const rid = m
-                        ? this.fallbackRequestIndex.get(parseInt(m[1], 10)) ||
-                            [...this.fallbackSeenRequestIds][parseInt(m[1], 10)]
-                        : undefined;
-                    const ut = rid ? this.fallbackRequestUserText.get(rid) : undefined;
+                    // 归属解析走全通道（_ut/streamId/requestIndex/rid）——requests/N 在 rid
+                    // 索引查不到时不再漏网开空流（实测死流挂「•••」占位 ~2min）。
+                    const ut = this.resolveUtForFallbackEv(ev);
                     if (ut && this.isUtAnswered(ut)) {
                         this.suppressedFallbackStreams.add(evSid);
                         continue;
@@ -1193,6 +1221,12 @@ class TranscriptWatcher {
                     }
                     continue;
                 }
+                // 归属先行：投影事件本就缺 _ut 时 emit() 会拿 activeUserText 兜底——
+                // 迟到事件会被错误归到当前新问题（幻影/双发根因）。先按 rid/streamId/
+                // requestIndex 解析它真正的问题写进 _ut；解析不到宁可不带，也别归错。
+                const evUt = this.resolveUtForFallbackEv(ev);
+                if (evUt && !ev._ut)
+                    ev._ut = evUt;
                 // chatSessions 写盘滞后数十秒：正文已在 transcript 通道发出时，迟到的
                 // 同用户轮次重复投影（含 markdown 变体）按用户文键去重，避免双气泡。
                 if (ev.type === 'AGENT_MESSAGE' || ev.type === 'AGENT_STREAM_SET') {
@@ -1209,19 +1243,40 @@ class TranscriptWatcher {
                             rid = this.fallbackRequestIndex.get(idx) || [...this.fallbackSeenRequestIds][idx];
                         }
                         const ut = ev._ut ?? (rid ? this.fallbackRequestUserText.get(rid) : undefined);
-                        if (this.hasEmittedAgentText(text, { requestIndex: reqIdx, streamId, rid, userText: ut }))
+                        // 内容被压的流若已开过 START：补 END 收尸——否则手机端「•••」占位
+                        // 挂到下一条 DONE 才清（实测 ~2min）。同时标 suppressed 吞掉后续帧。
+                        const suppressLiveStream = () => {
+                            if (streamId && !this.suppressedFallbackStreams.has(streamId)) {
+                                this.suppressedFallbackStreams.add(streamId);
+                                this.emit({
+                                    type: 'AGENT_STREAM_END',
+                                    streamId,
+                                    requestIndex: reqIdx,
+                                    _ut: ut || undefined,
+                                });
+                            }
+                        };
+                        if (this.hasEmittedAgentText(text, { requestIndex: reqIdx, streamId, rid, userText: ut })) {
+                            suppressLiveStream();
                             continue;
+                        }
                         // 自轮重投影：同一答案文本经另一流形态再投（requests/N 重放）→ 双气泡
-                        if (this.isReplayedFor(text, ut))
+                        if (this.isReplayedFor(text, ut)) {
+                            suppressLiveStream();
                             continue;
+                        }
                         // 文本变体压制：sessiondb/fallback 通道投影与已投版本形态不同时，
-                        // 按该问题已投答案的前 40 字前缀比对（同题重问由 seq 放行）。
+                        // 按该问题已投答案的前/后 40 字比对（前缀因工具引用缺失异、尾部常一致——
+                        // 残缺重投影 +37s 变体实测即尾部同文）。同题重问由 seq 放行。
                         const utN = ut ? this.normUserText(ut) : '';
                         if (utN && this.isUtAnswered(utN)) {
                             const prev = this.emittedTextByUt.get(utN) || '';
                             const cur = this.agentTextKey(text);
-                            if (cur.slice(0, 40).length >= 12 && cur.slice(0, 40) === prev.slice(0, 40))
+                            if ((cur.slice(0, 40).length >= 12 && cur.slice(0, 40) === prev.slice(0, 40)) ||
+                                (cur.slice(-40).length >= 12 && cur.slice(-40) === prev.slice(-40))) {
+                                suppressLiveStream();
                                 continue;
+                            }
                         }
                     }
                 }
@@ -1233,8 +1288,12 @@ class TranscriptWatcher {
         // 但流收尾事件仍放行——否则已开流的「…」占位泡/停止按钮会卡死
         if (!this.hasPendingGap()) {
             for (const ev of evs) {
-                if (ev.type === 'AGENT_STREAM_END' || ev.type === 'COPILOT_DONE')
+                if (ev.type === 'AGENT_STREAM_END' || ev.type === 'COPILOT_DONE') {
+                    const doneUt = this.resolveUtForFallbackEv(ev);
+                    if (doneUt && !ev._ut)
+                        ev._ut = doneUt;
                     this.emit(ev);
+                }
             }
             return;
         }
@@ -1257,6 +1316,9 @@ class TranscriptWatcher {
             if (ev.type === 'AGENT_STREAM_START' || ev.type === 'AGENT_STREAM_CHUNK')
                 continue;
             if (ev.type === 'COPILOT_DONE') {
+                const doneUt = this.resolveUtForFallbackEv(ev);
+                if (doneUt && !ev._ut)
+                    ev._ut = doneUt;
                 this.emit(ev);
                 continue;
             }
@@ -1917,13 +1979,16 @@ class TranscriptWatcher {
         if (this.isReplayedFor(content, resolvedUt) || this.isStalePendingReplay(content))
             return;
         // 同问题答案文本变体压制：迟到记录的正文与已投版本形态不同（markdown/db 差异）
-        // 键未命中时按「该问题已投答案」的前 40 字前缀比对——同题重问由 seq 放行。
+        // 键未命中时按「该问题已投答案」的前/后 40 字比对——前缀因工具引用缺失异、
+        // 尾部常一致（残缺重投影 +37s 变体实测即尾部同文）。同题重问由 seq 放行。
         if (resolvedUt && this.isUtAnswered(resolvedUt)) {
             const prev = this.emittedTextByUt.get(resolvedUt) || '';
             const cur = this.agentTextKey(content);
             const a = cur.slice(0, 40);
             const b = prev.slice(0, 40);
-            if (a.length >= 12 && a === b)
+            const at = cur.slice(-40);
+            const bt = prev.slice(-40);
+            if ((a.length >= 12 && a === b) || (at.length >= 12 && at === bt))
                 return;
         }
         // 用户可见正文（非 monologue 路径才会进这里）
@@ -1941,6 +2006,7 @@ class TranscriptWatcher {
                 type: 'AGENT_STREAM_START',
                 streamId,
                 requestIndex: this.turnSeq,
+                _ut: resolvedUt || undefined,
             });
         }
         this.streamAccum = content; // 完整快照，始终保留最新（turn_end 发 AGENT_MESSAGE 用）
@@ -1959,6 +2025,7 @@ class TranscriptWatcher {
                             streamId,
                             text: delta,
                             requestIndex: this.turnSeq,
+                            _ut: resolvedUt || undefined,
                         });
                     }
                     return;
@@ -1971,6 +2038,7 @@ class TranscriptWatcher {
                     streamId,
                     text: content,
                     requestIndex: this.turnSeq,
+                    _ut: resolvedUt || undefined,
                 });
                 return;
             }
@@ -1988,6 +2056,7 @@ class TranscriptWatcher {
                     streamId,
                     text: content,
                     requestIndex: this.turnSeq,
+                    _ut: resolvedUt || undefined,
                 });
                 return;
             }
@@ -2001,6 +2070,7 @@ class TranscriptWatcher {
                         streamId,
                         text: delta,
                         requestIndex: this.turnSeq,
+                        _ut: resolvedUt || undefined,
                     });
                     return;
                 }
@@ -2013,6 +2083,7 @@ class TranscriptWatcher {
             streamId,
             text: content,
             requestIndex: this.turnSeq,
+            _ut: resolvedUt || undefined,
         });
     }
     /**
@@ -2116,6 +2187,9 @@ class TranscriptWatcher {
         if (!this.turnEmittedVisibleAgent) {
             this.markCurrentTurnGap();
         }
+        // 收尾事件必须先取本轮 ut 再清：AGENT_MESSAGE/DONE 按 _ut 归属到本题，
+        // 客户端按 ut 释放「已发未答」条目与去重键（兜底 activeUserText 已清会归空键）。
+        const doneUt = this.activeUserText || undefined;
         this.activeUserText = '';
         if (this.streamAccum && !(0, jsonl_1.isInternalMonologue)(this.streamAccum)) {
             this.emit({
@@ -2123,12 +2197,13 @@ class TranscriptWatcher {
                 streamId,
                 text: this.streamAccum,
                 requestIndex: this.turnSeq,
+                _ut: doneUt,
             });
         }
         if (this.activeStreamId || this.streamAccum || this.lastEmittedTextByStream.has(streamId)) {
-            this.emit({ type: 'AGENT_STREAM_END', streamId, requestIndex: this.turnSeq });
+            this.emit({ type: 'AGENT_STREAM_END', streamId, requestIndex: this.turnSeq, _ut: doneUt });
         }
-        this.emit({ type: 'COPILOT_DONE', requestIndex: this.turnSeq });
+        this.emit({ type: 'COPILOT_DONE', requestIndex: this.turnSeq, _ut: doneUt });
         this.activeStreamId = null;
         this.activeTurnId = null;
         this.streamAccum = '';
@@ -2215,14 +2290,26 @@ class TranscriptWatcher {
                     streamId,
                     text: this.streamAccum,
                     requestIndex: this.turnSeq,
+                    _ut: this.activeUserText || undefined,
                 });
             }
             if (this.activeStreamId || this.streamAccum || this.lastEmittedTextByStream.has(streamId)) {
-                this.emit({ type: 'AGENT_STREAM_END', streamId, requestIndex: this.turnSeq });
+                this.emit({
+                    type: 'AGENT_STREAM_END',
+                    streamId,
+                    requestIndex: this.turnSeq,
+                    _ut: this.activeUserText || undefined,
+                });
             }
             this.lastEmittedTextByStream.delete(streamId);
         }
-        this.emit({ type: 'COPILOT_DONE', requestIndex: this.turnSeq });
+        // DONE 带本轮 _ut：客户端按 ut 释放「已发未答」条目（任意 DONE 整表清
+        // 会把别轮在途条目误杀 → 用户泡丢、答案裸奔）。
+        this.emit({
+            type: 'COPILOT_DONE',
+            requestIndex: this.turnSeq,
+            _ut: this.activeUserText || undefined,
+        });
         this.activeTurnId = null;
         this.activeStreamId = null;
         this.streamAccum = '';
@@ -2285,13 +2372,28 @@ class TranscriptWatcher {
             if (text.trim() && !(0, jsonl_1.isInternalMonologue)(text)) {
                 // 同轮次去重：同一回答被 requests/N 重编号或双通道投影成不同 streamId 时
                 // 只发一次。键含用户文——不同用户轮次得到同文字回复时各显一次（不误吞）。
-                const ut = this.normUserText(String(ev._ut ?? this.activeUserText ?? ''));
+                // ut 归属优先事件自带 _ut；否则按事件时间戳找回所属问题（activeUserText
+                // 会把迟到投影归到新问题——幻影/双发根因）。都无 → 空键也绝不归错。
+                const evTs = typeof ev.timestamp === 'number' ? ev.timestamp : NaN;
+                const resolvedEvUt = ev._ut ??
+                    (Number.isNaN(evTs) ? this.activeUserText : this.resolveUtForTs(evTs));
+                const ut = this.normUserText(String(resolvedEvUt ?? ''));
                 // 跨通道去重：t 流/sessiondb 同文同题答案间隔可达 ~6s 超过旧窗才双发；
                 // 键不含 ev.type、窗 15s，同题重问的新答由 userSeq 语义在别的检查放行。
                 const wkey = `${ut}|${this.agentTextKey(text)}`;
                 const last = this.recentAgentEmits.get(wkey) ?? 0;
                 if (Date.now() - last < 15000)
                     return;
+                // 集中兜底：同 ut 已答且本条与已投版本前/后 40 字同形 → 跨通道迟到
+                // 残缺重投影（前缀异/超时窗躲过上两层压制）。同轮 text→tool→text 的
+                // 第二段正文内容不同、前后 40 字都不同 → 不误伤。
+                if (ut && this.isUtAnswered(ut)) {
+                    const prev = this.emittedTextByUt.get(ut) || '';
+                    const cur = this.agentTextKey(text);
+                    if ((cur.slice(0, 40).length >= 12 && cur.slice(0, 40) === prev.slice(0, 40)) ||
+                        (cur.slice(-40).length >= 12 && cur.slice(-40) === prev.slice(-40)))
+                        return;
+                }
                 this.recentAgentEmits.set(wkey, Date.now());
                 if (this.recentAgentEmits.size > 300) {
                     const cutoff = Date.now() - 60_000;
@@ -2303,7 +2405,7 @@ class TranscriptWatcher {
                     requestIndex: ev.requestIndex,
                     streamId: ev.streamId,
                     rid: ev.requestId,
-                    userText: ev._ut ?? this.activeUserText,
+                    userText: resolvedEvUt,
                 });
             }
         }
