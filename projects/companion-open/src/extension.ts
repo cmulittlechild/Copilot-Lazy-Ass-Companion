@@ -523,6 +523,53 @@ export async function activate(context: vscode.ExtensionContext) {
           ) {
             return;
           }
+          // 桌面切会话跟随：页面完整同步——feed 换目标会话历史 + 标题切换。
+          // 先 SESSION_SELECTED（PWA 清 feed + 标题 + 切换态），再 HISTORY_REPLAY。
+          if (ev.type === "SESSION_FOLLOW") {
+            const tfile = String((ev as any).file || (ev as any).csFile || "");
+            const base = tfile.split("/").pop() || "";
+            // csFile 优先（transcripts 无同名文件时唯一可用源），否则按基名解析
+            let csFile: string | undefined =
+              typeof (ev as any).csFile === "string" && fs.existsSync((ev as any).csFile)
+                ? (ev as any).csFile
+                : undefined;
+            if (!csFile && csdir && base) {
+              const cand = path.join(csdir, base);
+              if (fs.existsSync(cand)) csFile = cand;
+            }
+            if (csFile && fs.existsSync(csFile)) {
+              setActiveSessionFile(csFile);
+              watcher?.selectSession(csFile);
+              const hist = watcher?.projectHistory(csFile, 20) ?? [];
+              transcriptWatcher?.seedFromHistory(hist);
+              const title =
+                watcher
+                  ?.listSessions(40)
+                  .find((s) => s.file === csFile || (base && String(s.file || "").endsWith("/" + base)))
+                  ?.title || undefined;
+              bridge?.broadcast({
+                type: "SESSION_SELECTED",
+                file: csFile,
+                ok: true,
+                title,
+                timestamp: Date.now(),
+              });
+              bridge?.replaySession(
+                [
+                  ...hist,
+                  {
+                    type: "SYSTEM_MESSAGE",
+                    text: `已切换到会话: ${base}`,
+                  },
+                ],
+                csFile,
+              );
+            } else if (bridge?.sendToPhone) {
+              // 找不到 chatSessions 对应文件：退化为提示（不替换 feed）
+              bridge.sendToPhone({ type: "SYSTEM_MESSAGE", text: String((ev as any).text || "") });
+            }
+            return;
+          }
           // 桌面在其他会话直接发消息时，transcripts 单文件 tail 可能没跟过去；
           // 用 chatSessions 的 USER_MESSAGE 兜底（bridge sendToPhone 的 isPhoneEcho
           // 会拦手机回声，不会双出现）。

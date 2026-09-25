@@ -275,6 +275,8 @@ export class TranscriptWatcher {
   private pendingSeed: PhoneEvent[] | null = null;
   /** 最近一次手机侧会话绑定时间：窗口期内自动跟随不得 replay/catch-up 洪水 */
   private lastPhoneSelectMs = 0;
+  /** 最近一次已发射 SESSION_FOLLOW 的目标路径：防止 csdir-only 会话占 newest 时每 tick 重发 */
+  private lastFollowedPath: string | undefined;
 
   private applySeedEvents(events: PhoneEvent[]) {
     if (!events || !Array.isArray(events)) return;
@@ -620,15 +622,25 @@ export class TranscriptWatcher {
           // 新文件的 mtime 比 pinned 文件新且在最近 PIN_STALE_MS 内有写入 → 切换
           if (newestName && newestMtime > pinnedMtime && (now - newestMtime) < PIN_STALE_MS) {
             const tfile = path.join(this.opts.dir, newestName);
-            if (fs.existsSync(tfile) && tfile !== this.current) {
+            const csPath = this.opts.chatSessionsDir
+              ? path.join(this.opts.chatSessionsDir, newestName)
+              : undefined;
+            const tExists = fs.existsSync(tfile);
+            const csExists = !!(csPath && fs.existsSync(csPath));
+            if ((tExists || csExists) && (tExists ? tfile : csPath) !== this.current) {
               this.pinnedFile = null; // 解除 pin
-              // 无论谁触发的跟随都 live-only@EOF：重绑定 ≠ 加载历史，
-              // replay:true 会把外会话整段历史灌进当前 feed（录屏实证洪水）。
-              this.bindFile(tfile, { liveOnly: true });
+              if (tExists) {
+                // 无论谁触发的跟随都 live-only@EOF：重绑定 ≠ 加载历史，
+                // replay:true 会把外会话整段历史灌进当前 feed（录屏实证洪水）。
+                this.bindFile(tfile, { liveOnly: true });
+              }
+              // 桌面发起跟随：通知扩展做完整同步（feed 换目标会话历史+标题）
               this.emit({
-                type: 'SYSTEM_MESSAGE',
+                type: 'SESSION_FOLLOW',
+                file: tExists ? tfile : undefined,
+                csFile: csExists ? csPath : undefined,
                 text: `已切换到会话: ${newestName}`,
-              });
+              } as PhoneEvent);
             }
           }
         }
@@ -650,17 +662,38 @@ export class TranscriptWatcher {
     if (!base) return;
     const tfile = path.join(this.opts.dir, base);
     if (tfile === this.current) return;
-    if (!fs.existsSync(tfile)) return; // chatSessions 最新但 transcripts 无同名文件：保持现状
+    const csPath = this.opts.chatSessionsDir ? path.join(this.opts.chatSessionsDir, base) : undefined;
+    if (!fs.existsSync(tfile)) {
+      // transcripts 无同名文件但 chatSessions 有新会话 → 仍发跟随（扩展用 csFile 回放）。
+      // lastFollowedPath 去重：否则该会话持续占 newest，每个 tick 都重发（跟随风暴）。
+      if (
+        this.current !== undefined &&
+        csPath &&
+        fs.existsSync(csPath) &&
+        csPath !== this.lastFollowedPath
+      ) {
+        this.lastFollowedPath = csPath;
+        this.emit({
+          type: 'SESSION_FOLLOW',
+          csFile: csPath,
+          text: `已切换到会话: ${base}`,
+        } as PhoneEvent);
+      }
+      return;
+    }
     // 手机刚发起过切会话 → live-only@EOF，防止 pin 丢失后的全量 catch-up 洪水；
     // 桌面侧切换的重绑定同样 live-only（否则外会话历史整段灌进 feed）。
     // 仅首次绑定（current 为空）走默认 tail/catchUp，让首载有上下文。
     const isRebind = this.current !== undefined;
     this.bindFile(tfile, isRebind ? { liveOnly: true } : undefined);
     if (isRebind) {
+      this.lastFollowedPath = tfile;
       this.emit({
-        type: 'SYSTEM_MESSAGE',
+        type: 'SESSION_FOLLOW',
+        file: tfile,
+        csFile: csPath && fs.existsSync(csPath) ? csPath : undefined,
         text: `已切换到会话: ${base}`,
-      });
+      } as PhoneEvent);
     }
   }
 
@@ -1033,6 +1066,8 @@ export class TranscriptWatcher {
             }
             const ut = (ev as any)._ut ?? (rid ? this.fallbackRequestUserText.get(rid) : undefined);
             if (this.hasEmittedAgentText(text, { requestIndex: reqIdx, streamId, rid, userText: ut })) continue;
+            // 自轮重投影：同一答案文本经另一流形态再投（requests/N 重放）→ 双气泡
+            if (this.isReplayedFor(text, ut)) continue;
           }
         }
         this.emit(ev);
@@ -2088,10 +2123,18 @@ export class TranscriptWatcher {
 
   /** (用户文,正文) 键是否已发过且此后没同题重问（迟到重投影判定） */
   private isReplayedFor(text: string, userText?: string): boolean {
-    const ut = this.normUserText(userText || '');
-    if (!ut) return false;
-    const s = this.emittedAgentUtKeys.get(`${this.sessPrefix()}${this.agentTextKey(text)}::ut=${ut}`);
-    return s != null && (this.userSeqByUt.get(ut) ?? 0) <= s;
+    // 按「答案文本」查所有已投键：正文同一问题发出的答案只许出现一次。
+    // 对每条匹配键用它自己的 ut 比较 seq——同题重问会抬 userSeqByUt[ut]，放行真重答；
+    // 迟到重投影（无论归属到哪个 ut/哪个 sess）统一压制。
+    const prefix = `${this.agentTextKey(text)}::ut=`;
+    if (!prefix || prefix === '::ut=') return false;
+    for (const [k, v] of this.emittedAgentUtKeys) {
+      const i = k.indexOf(prefix);
+      if (i < 0) continue;
+      const keyUt = k.slice(i + prefix.length);
+      if ((this.userSeqByUt.get(keyUt) ?? 0) <= v) return true;
+    }
+    return false;
   }
 
   /** 该正文是否已是某个「仍挂起」问题的答案：上一轮答案发出后其 pending 未消耗（stale），

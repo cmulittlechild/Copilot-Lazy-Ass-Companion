@@ -44,3 +44,8 @@ PWA ↔ VS Code bridge。仓库 `~/repos/sidecar_remote/projects/companion-open`
 - 幻影验证必须两连发以上——单发可能因写盘时机碰巧干净，漏判回归。
 - USER 消息延迟基准要含 Copilot chatSessions 落盘延迟（~30-55s 属正常数据源延迟，非扩展慢）。
 - 外会话切换 dump：kind0 快照整段重放，无 timestamp 请求只有数组尾部一条才可能新发。
+- 扩展更新后 PWA 需 Cmd+Shift+R 硬刷加载新 app.js，否则客户端修复全部假阴性。
+- 验证幻影区分"在途轮"（跟随期间正在生成的轮次，易漏）与"落地轮"；单发不足覆盖，必须连发。
+- 桌面 Try Again/重试点击会以 USER_MESSAGE 泄漏到镜像端，勿当真实发送。
+- 验证跟随修复须等 newest 稳定后观察 ≥1 个 poll 周期——SESSION_FOLLOW 重发风暴只在持续 newest 下显现。
+- F5 在 DevTools 聚焦时不刷新页面，须用浏览器刷新按钮；吞包存证查控制台 sidecar.pendingSend。

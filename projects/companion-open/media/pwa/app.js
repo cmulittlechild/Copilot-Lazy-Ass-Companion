@@ -1723,7 +1723,8 @@
           } catch (_) {}
           setStatus(true, '切换会话…');
           const f = msg.file || currentSessionMeta.file || '';
-          const t = (msg.title && String(msg.title).trim()) || titleFromSessionFile(f) || currentSessionMeta.title;
+          // 已有标题优先于文件名回退：后续不带 title 的广播不得盖掉真会话名
+          const t = (msg.title && String(msg.title).trim()) || currentSessionMeta.title || titleFromSessionFile(f);
           if (f || t) setSessionTitle(t, f);
         } else {
           replayingInstant = false;
@@ -1791,7 +1792,8 @@
         // 回放携带 file 时同步会话元数据（滚动记忆 / 后续 PHONE_MESSAGE.file）
         if (typeof msg.file === 'string' && msg.file) {
           try {
-            setSessionTitle(titleFromSessionFile(msg.file) || currentSessionMeta.title, msg.file);
+            // 已有标题（SESSION_SELECTED.title）优先——文件名回退会盖掉真实会话名
+            setSessionTitle(currentSessionMeta.title || titleFromSessionFile(msg.file), msg.file);
           } catch (_) {}
         }
         try {
@@ -1815,6 +1817,16 @@
             requestDoneTimer = null;
           }
           requestRunning = false;
+          // 回放会清空 feed：把未确认送达的本地待发消息补画回去（发后遭遇 REPLAY 丢泡）
+          try {
+            const raw = sessionStorage.getItem(PENDING_SEND_KEY);
+            if (raw) {
+              const p = JSON.parse(raw);
+              if (p && typeof p.text === 'string' && p.text.trim()) {
+                addUser(p.text, `user:pending:${Date.now()}:${userTextDedupeKey(p.text)}`, { force: true, ts: p.at || Date.now() });
+              }
+            }
+          } catch (_) {}
           jumpFeedToBottom();
           // 回放完成后恢复顶部状态文案（SESSION_SELECTED 可能写成「切换会话…」）
           setStatus(true, connectedLabel());
