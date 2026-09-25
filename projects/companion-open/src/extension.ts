@@ -166,7 +166,7 @@ export async function activate(context: vscode.ExtensionContext) {
             /* ignore */
           }
           // soft-unverified：已 submit 且无串台证据，落盘可能延迟 — 不吓用户去粘贴双发
-          if (result.injectPath === "bind+chat.open+soft-unverified") {
+          if (String(result.injectPath || "").includes("soft-unverified")) {
             bridge?.broadcast({
               type: "SYSTEM_MESSAGE",
               text: "已提交到目标会话（落盘确认稍慢，若桌面未出现再重试）",
@@ -194,7 +194,11 @@ export async function activate(context: vscode.ExtensionContext) {
             });
             // 结束手机端 typing，避免一直转圈
             bridge?.broadcast({ type: "COPILOT_DONE", reason: "inject_clipboard" });
-          } else if ((result as any).verified === false) {
+          } else if (
+            (result as any).verified === false &&
+            !/soft-unverified|leak-warning/.test(String(result.injectPath || ""))
+          ) {
+            // soft-unverified/leak-warning 已在上方链给过提示；避免同一次注入既「已提交」又「警告」。
             bridge?.broadcast({
               type: "SYSTEM_MESSAGE",
               text: "警告：注入未通过目标会话校验，请核对桌面 Chat 是否为手机所选会话",
@@ -300,14 +304,13 @@ export async function activate(context: vscode.ExtensionContext) {
           }
           reply({ type: "SESSION_SELECTED", file, ok, timestamp: Date.now() });
           if (ok) {
+            // 只取 projectHistory 用于 seed（防 chatSessions gap-fill 把已显示的旧内容再投一遍），
+            // 不再向手机重放历史——用户要求切会话直接进入实时态，避免从头滑到尾的洪水。
             const hist = watcher?.projectHistory(file, 20) ?? [];
-            // 0.5.22b：预填 transcriptWatcher 的 emittedAgentTextKeys 和 fallbackSeenRequestIds，
-            // 防止 chatSessions gap-fill 把 HISTORY_REPLAY 已显示的旧回复再发一遍
             transcriptWatcher?.seedFromHistory(hist);
-            // 系统提示并入回放末尾，避免回放后再 push 把底部顶开
+            // replaySession 仍会清空手机端 feed 并绑定到该会话；回放内容只有切换提示。
             bridge?.replaySession(
               [
-                ...hist,
                 {
                   type: "SYSTEM_MESSAGE",
                   text: `已切换到会话: ${file.split("/").pop()}`,

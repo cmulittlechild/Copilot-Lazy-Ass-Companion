@@ -94,8 +94,11 @@ const HISTORY_MAX = 200;
 const HISTORY_TEXT_MAX = 8000;
 const OFFLINE_QUEUE_MAX = 80;
 const HEARTBEAT_MS = 8000;
-const PHONE_ECHO_WINDOW_MS = 30_000;
+// 落盘回声可能很慢（chatSessions 最长 ~60s+ 才写），30s 窗口漏掉迟到回声 → 手机端重复气泡。
+const PHONE_ECHO_WINDOW_MS = 120_000;
 const PHONE_ECHO_MAX = 20;
+/** 同一条手机文本最多吞掉的镜像条数（transcript 源 + chatSessions 源各可能来一条） */
+const PHONE_ECHO_SUPPRESS_PER_TEXT = 4;
 const WS_MAX_PAYLOAD_BYTES = 2 * 1024 * 1024;
 const MAX_PHONE_TEXT_LENGTH = 256 * 1024;
 const MAX_REQUEST_TYPE_LENGTH = 64;
@@ -876,7 +879,7 @@ class BridgeServer {
         const t = (text || '').trim();
         if (!t)
             return;
-        this.recentPhoneTexts.push({ text: t, at: Date.now() });
+        this.recentPhoneTexts.push({ text: t, at: Date.now(), used: 0 });
         while (this.recentPhoneTexts.length > PHONE_ECHO_MAX)
             this.recentPhoneTexts.shift();
     }
@@ -911,7 +914,13 @@ class BridgeServer {
         while (this.recentPhoneTexts.length && now - this.recentPhoneTexts[0].at > PHONE_ECHO_WINDOW_MS) {
             this.recentPhoneTexts.shift();
         }
-        return this.recentPhoneTexts.some((x) => x.text === t);
+        // 同一条手机文本可能产生多个镜像源（transcript + chatSessions + 兜底），
+        // 每条最多吞 PHONE_ECHO_SUPPRESS_PER_TEXT 次，之后视为真实新消息放行。
+        const hit = this.recentPhoneTexts.find((x) => x.text === t && x.used < PHONE_ECHO_SUPPRESS_PER_TEXT);
+        if (!hit)
+            return false;
+        hit.used += 1;
+        return true;
     }
     startHeartbeat() {
         if (this.heartbeatTimer)

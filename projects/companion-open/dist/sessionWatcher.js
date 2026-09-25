@@ -1247,20 +1247,30 @@ function resolveSessionTitle(file) {
             const read = fs.readSync(fd, buf, 0, buf.length, 0);
             const head = buf.subarray(0, read).toString('utf8');
             // 1) 正则直接抽 customTitle / initialTitle（不依赖换行或完整 JSON）
-            for (const key of ['customTitle', 'initialTitle', 'title']) {
-                const re = new RegExp(`"${key}"\\s*:\\s*"((?:\\\\.|[^"\\\\])*)"`);
-                const m = head.match(re);
-                if (m?.[1]) {
-                    const t = m[1]
-                        .replace(/\\n/g, ' ')
-                        .replace(/\\"/g, '"')
-                        .replace(/\\\\/g, '\\')
-                        .trim();
-                    if (t && t !== 'New Chat' && t !== '新建聊天') {
-                        customTitle = t;
-                        break;
+            // 覆盖两种落盘形式：快照内 "customTitle": "x" 与 delta 行 "k":["customTitle"],"v":"x"。
+            // 注意：不抓裸 "title"——selectedModel.configurationSchema 等嵌套字段里也有
+            // "title"（如 "Optimize for"），会污染标题；kind=0 顶层 title 由下方 JSON 解析处理。
+            for (const key of ['customTitle', 'initialTitle']) {
+                const res = [
+                    new RegExp(`"${key}"\\s*:\\s*"((?:\\\\.|[^"\\\\])*)"`),
+                    new RegExp(`"k"\\s*:\\s*\\[\\s*"${key}"\\s*\\]\\s*,\\s*"v"\\s*:\\s*"((?:\\\\.|[^"\\\\])*)"`),
+                ];
+                for (const re of res) {
+                    const m = head.match(re);
+                    if (m?.[1]) {
+                        const t = m[1]
+                            .replace(/\\n/g, ' ')
+                            .replace(/\\"/g, '"')
+                            .replace(/\\\\/g, '\\')
+                            .trim();
+                        if (t && t !== 'New Chat' && t !== '新建聊天') {
+                            customTitle = t;
+                            break;
+                        }
                     }
                 }
+                if (customTitle)
+                    break;
             }
             if (customTitle)
                 return customTitle;

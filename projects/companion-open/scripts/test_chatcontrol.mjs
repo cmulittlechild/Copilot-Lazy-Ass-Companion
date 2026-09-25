@@ -6,6 +6,48 @@ const require = createRequire(import.meta.url);
 const { fileURLToPath } = await import('url');
 const Module = require('module');
 const path = require('path');
+const fs = require('fs');
+const os = require('os');
+
+// ---- 隔离环境：假 HOME + 受控 state.vscdb（chatControl 直接读真实 vscdb，
+// 本机若装了 VS Code 会让模型过滤/当前模型读数变成环境依赖，全部 seed 死）----
+const FAKE_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-test-home-'));
+process.env.HOME = FAKE_HOME;
+process.env.USERPROFILE = FAKE_HOME;
+process.env.APPDATA = '';
+
+const VSCDB_DIR = path.join(FAKE_HOME, 'Library/Application Support/Code/User/globalStorage');
+fs.mkdirSync(VSCDB_DIR, { recursive: true });
+const VSCDB = path.join(VSCDB_DIR, 'state.vscdb');
+
+// node:sqlite 建一个真实 ItemTable；机器太老不支持时测试仍能跑（读不到 = 不过滤）
+let dbWritable = null;
+try {
+  const { DatabaseSync } = require('node:sqlite');
+  dbWritable = new DatabaseSync(VSCDB);
+  dbWritable.exec('CREATE TABLE IF NOT EXISTS ItemTable (key TEXT PRIMARY KEY, value TEXT)');
+} catch {
+  dbWritable = null;
+}
+
+function vscdbSet(key, value) {
+  if (!dbWritable) return;
+  dbWritable.prepare('INSERT OR REPLACE INTO ItemTable (key, value) VALUES (?, ?)').run(key, String(value));
+}
+
+// 桌面 picker 同款可选集（含 1 个不可选 + 1 个非面板目标，验证过滤规则本身）
+vscdbSet('chat.cachedLanguageModels.v2', JSON.stringify([
+  { identifier: 'copilot/auto', metadata: { isUserSelectable: true } },
+  { identifier: 'copilot/claude-opus-45', metadata: { isUserSelectable: true } },
+  { identifier: 'copilot/gpt-5', metadata: { isUserSelectable: true } },
+  { identifier: 'oaicopilot/grok-4.5-high', metadata: { isUserSelectable: true } },
+  { identifier: 'oaicopilot/deepseek-v4-flash', metadata: { isUserSelectable: true } },
+  { identifier: 'v/x', metadata: { isUserSelectable: true } },
+  { identifier: 'copilot/copilot-utility', metadata: { isUserSelectable: false } },
+  { identifier: 'copilotcli/auto', metadata: { isUserSelectable: true, targetChatSessionType: 'copilotcli' } },
+]));
+// 面板当前模型 = grok（新版 1.139+ 的 chat.modelConfiguration.panel）
+vscdbSet('chat.modelConfiguration.panel', JSON.stringify({ 'oaicopilot/grok-4.5-high': {} }));
 
 // ---- 可配置的 vscode stub ----
 const calls = [];         // 记录所有 executeCommand
@@ -15,6 +57,8 @@ let lmAvailable = true;
 let cfgValues = {};       // getConfiguration().get 的返回
 let cfgInspect = {};      // inspect() 的返回（用于 policyValue）
 let commandShouldFail = null;
+// 模拟 workbench 是否真正落地模型切换（不写 modelConfiguration.panel = 切换未生效）
+let simulateModelApplied = true;
 
 const vscodeStub = {
   lm: {
@@ -34,6 +78,11 @@ const vscodeStub = {
     executeCommand: async (cmd, ...args) => {
       calls.push({ cmd, args });
       if (commandShouldFail && cmd === commandShouldFail) throw new Error(`命令失败: ${cmd}`);
+      // 真实 workbench：changeModel 生效后写 chat.modelConfiguration.panel = {"vendor/id": {}}
+      if (cmd === 'workbench.action.chat.changeModel' && simulateModelApplied) {
+        const a = args[0] || {};
+        if (a.vendor && a.id) vscdbSet('chat.modelConfiguration.panel', JSON.stringify({ [`${a.vendor}/${a.id}`]: {} }));
+      }
       return undefined;
     },
   },
@@ -83,6 +132,9 @@ function reset() {
   cfgValues = {};
   cfgInspect = {};
   commandShouldFail = null;
+  simulateModelApplied = true;
+  // 恢复面板当前模型为 grok（selectModel 的 stub 会改写它）
+  vscdbSet('chat.modelConfiguration.panel', JSON.stringify({ 'oaicopilot/grok-4.5-high': {} }));
 }
 
 const logs = [];
@@ -107,10 +159,13 @@ async function main() {
     { id: 'gpt-5', name: 'GPT-5', vendor: 'copilot', family: 'gpt-5', version: '1.0', maxInputTokens: 128000 },
     { id: 'grok-4.5-high', name: 'grok-4.5-high', vendor: 'oaicopilot', family: 'grok-4.5-high', version: '1.0', maxInputTokens: 128000 },
     { id: 'oaicopilot/deepseek-v4-flash', name: 'deepseek-v4-flash', vendor: 'oaicopilot', family: 'deepseek-v4-flash', version: '1.0', maxInputTokens: 128000 },
+    // 不可选项：应被 vscdb 的 isUserSelectable=false 过滤掉
+    { id: 'copilot-utility', name: 'Copilot Utility', vendor: 'copilot', family: 'copilot-utility', version: '1.0', maxInputTokens: 128000 },
   ];
   let cc = mk();
   let models = await cc.listModels();
-  check('返回全部模型', models.length === 6, `got ${models.length}`);
+  check('返回全部用户可选模型（过滤内部不可选项）', models.length === 6, `got ${models.length}`);
+  check('内部不可选模型被过滤', !models.some((m) => m.id === 'copilot-utility'));
   check('字段映射正确', models.some((m) => m.id === 'claude-opus-45' && m.vendor === 'copilot' && m.maxInputTokens === 200000),
     JSON.stringify(models.find((m) => m.id === 'claude-opus-45')));
   // 本机 vscdb 有 grok 时必须标 grok，且绝不能标 Auto
@@ -149,6 +204,14 @@ async function main() {
       typeof a.id === 'string' && typeof a.vendor === 'string' && typeof a.family === 'string',
       JSON.stringify(a));
   }
+
+  // 假成功防护：changeModel 不抛错但面板模型未落地 → 必须 ok:false
+  reset(); simulateModelApplied = false;
+  lmModels = [{ id: 'gpt-5', name: 'GPT-5', vendor: 'copilot', family: 'gpt-5', version: '1', maxInputTokens: 1000 }];
+  cc = mk();
+  await cc.listModels();
+  r = await cc.selectModel({ id: 'gpt-5' });
+  check('切换未生效返回 ok:false（不假成功）', r.ok === false && /未生效/.test(r.error || ''), JSON.stringify(r));
 
   reset(); lmModels = []; cc = mk();
   r = await cc.selectModel({ id: 'not-exist' });
