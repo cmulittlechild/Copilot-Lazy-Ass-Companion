@@ -54,6 +54,8 @@ const DUP_USER_MS = 3000;
 const REPLAY_USER_TURNS = 10;
 /** pinned 文件超过该时间无新写入视为「沉默」，允许自动切换到更新的会话 */
 const PIN_STALE_MS = 60_000;
+/** 手机侧会话绑定后的窗口期：期内自动跟随一律 live-only@EOF，防旧轮次洪水 */
+const PHONE_SELECT_WINDOW_MS = 60_000;
 
 /** unknown → Record 收窄 */
 function asRecord(v: unknown): Record<string, unknown> | null {
@@ -185,6 +187,9 @@ export class TranscriptWatcher {
   private suppressFallbackAgent = false;
   /** 已从 transcript/gap 发出的助手正文指纹（前 160 字），防 chatSessions 重复补全 */
   private emittedAgentTextKeys = new Set<string>();  // 0.5.31 键改为 text|rid|requestIndex|streamId，避免同一回复文字误吞
+  /** text::ut= 键 → 发出时间：chatSessions 写盘滞后数十秒，迟到的重复投影在 120s 内压住；
+   *  超出时限视为用户真的重问了同一问题（同文同答）放行。 */
+  private emittedAgentUtKeys = new Map<string, number>();
   /** 已成功 gap-fill（发出助手正文）的 chatSessions requestId */
   private gapFilledRequestIds = new Set<string>();
   /** 已经从 transcript 得到完整助手回复的用户文，避免 chatSessions 再 gap */
@@ -249,6 +254,19 @@ export class TranscriptWatcher {
    * 避免 chatSessions 全量 rewrite 时把旧轮次再 gap 一遍。
    */
   seedFromHistory(events: PhoneEvent[]) {
+    if (!events || !Array.isArray(events)) return;
+    // 记下本次种子：随后 bindFile/resetState/bindFallback 会清空这些去重集合，
+    // bindFile 收尾时重新应用，避免种子被重置冲掉（切会话旧轮次洪水）。
+    this.pendingSeed = events.slice();
+    this.applySeedEvents(events);
+  }
+
+  /** 待应用的种子：seedFromHistory 记录，bindFile 清空集合后重放 */
+  private pendingSeed: PhoneEvent[] | null = null;
+  /** 最近一次手机侧会话绑定时间：窗口期内自动跟随不得 replay/catch-up 洪水 */
+  private lastPhoneSelectMs = 0;
+
+  private applySeedEvents(events: PhoneEvent[]) {
     if (!events || !Array.isArray(events)) return;
     // requestIndex → requestId（USER_MESSAGE 带 rid；AGENT 通常只有 requestIndex）
     const ridByIndex = new Map<number, string>();
@@ -385,8 +403,10 @@ export class TranscriptWatcher {
     this.current = file;
     // 再次 bindFile（如用户重新选择）即解除 pin，允许后续自动跟随
     this.pinnedFile = null;
+    // 同会话重绑（auto-follow / catchUp 重投影）保留去重指纹，避免刚发出的正文被重投
+    const sameSessionBind = path.basename(file) === this.boundSessionBase;
     this.pending = '';
-    this.resetState();
+    this.resetState(sameSessionBind);
     this.lastLineFp = '';
     this.skipFirstLine = false;
 
@@ -405,6 +425,7 @@ export class TranscriptWatcher {
 
     let startOffset = size; // live-only：EOF
     let mode = 'live';
+    if (phoneSelectLive) this.lastPhoneSelectMs = Date.now();
     if (opts?.replay === true) {
       startOffset = this.findReplayOffset(file, size);
       // findReplayOffset 返回精确行首偏移，无需 skip；只有非 0 且非行首才 skip
@@ -447,6 +468,12 @@ export class TranscriptWatcher {
       visibility: 'internal',
       internal: true,
     });
+
+    // 手机切会话场景：seedFromHistory 记下的种子在 resetState/bindFallback 清空后重放，
+    // 保证旧 requestId/回复文本指纹继续生效，阻断全量 rewrite / catch-up 的旧轮次洪水。
+    const seed = this.pendingSeed;
+    this.pendingSeed = null;
+    if (seed) this.applySeedEvents(seed);
 
     this.bindWatchers(file);
     this.tail(); // 立即读一次（replay / 尾部 1MB 场景立刻出内容；EOF 场景无增量）
@@ -571,9 +598,15 @@ export class TranscriptWatcher {
             const tfile = path.join(this.opts.dir, newestName);
             if (fs.existsSync(tfile) && tfile !== this.current) {
               this.pinnedFile = null; // 解除 pin
-              // replay: true → 回放新会话的近期历史（不从 EOF 跳过已有事件）
-              // 同时 suppressFallbackAgent=false，chatSessions 直接补全
-              this.bindFile(tfile, { replay: true });
+              // 手机刚发起过切会话 → live-only@EOF，不得把旧轮次当实时重放
+              const recentPhoneSel = Date.now() - this.lastPhoneSelectMs < PHONE_SELECT_WINDOW_MS;
+              if (recentPhoneSel) {
+                this.bindFile(tfile, { liveOnly: true });
+              } else {
+                // replay: true → 回放新会话的近期历史（不从 EOF 跳过已有事件）
+                // 同时 suppressFallbackAgent=false，chatSessions 直接补全
+                this.bindFile(tfile, { replay: true });
+              }
             }
           }
         }
@@ -596,7 +629,9 @@ export class TranscriptWatcher {
     const tfile = path.join(this.opts.dir, base);
     if (tfile === this.current) return;
     if (!fs.existsSync(tfile)) return; // chatSessions 最新但 transcripts 无同名文件：保持现状
-    this.bindFile(tfile);
+    // 手机刚发起过切会话 → live-only@EOF，防止 pin 丢失后的全量 catch-up 洪水
+    const recentPhoneSel = Date.now() - this.lastPhoneSelectMs < PHONE_SELECT_WINDOW_MS;
+    this.bindFile(tfile, recentPhoneSel ? { liveOnly: true } : undefined);
   }
 
   // ---------------------------------------------------------------- chatSessions 兜底源
@@ -845,6 +880,24 @@ export class TranscriptWatcher {
     if (!this.suppressFallbackAgent) {
       for (const ev of evs) {
         if (ev.type === 'USER_MESSAGE' || ev.type === 'COPILOT_TYPING') continue;
+        // chatSessions 写盘滞后数十秒：正文已在 transcript 通道发出时，迟到的
+        // 同用户轮次重复投影（含 markdown 变体）按用户文键去重，避免双气泡。
+        if (ev.type === 'AGENT_MESSAGE' || ev.type === 'AGENT_STREAM_SET') {
+          const text = String((ev as { text?: string }).text || '').trim();
+          if (text) {
+            const streamId = (ev as { streamId?: string }).streamId || '';
+            const m = streamId.match(/^requests\/(\d+)\//);
+            let rid: string | undefined;
+            let reqIdx = (ev as any).requestIndex;
+            if (m) {
+              const idx = parseInt(m[1], 10);
+              if (reqIdx == null) reqIdx = idx;
+              rid = this.fallbackRequestIndex.get(idx) || [...this.fallbackSeenRequestIds][idx];
+            }
+            const ut = rid ? this.fallbackRequestUserText.get(rid) : undefined;
+            if (this.hasEmittedAgentText(text, { requestIndex: reqIdx, streamId, rid, userText: ut })) continue;
+          }
+        }
         this.emit(ev);
       }
       return;
@@ -919,6 +972,7 @@ export class TranscriptWatcher {
           streamId: streamId || `gap-${Date.now().toString(36)}`,
           gapFill: true,
           timestamp: ts,
+          _ut: matchedUser,
         } as PhoneEvent);
         continue;
       }
@@ -942,7 +996,8 @@ export class TranscriptWatcher {
   }
 
   private agentTextKey(text: string): string {
-    return text.trim().replace(/\s+/g, ' ').slice(0, 160);
+    // markdown 强调差异视为同文（"Fe" == "**Fe**"），用于跨通道重复判定
+    return text.trim().replace(/[*_`~]/g, '').replace(/\s+/g, ' ').slice(0, 160);
   }
 
   private dedupeKeys(text: string, ctx?: { requestIndex?: number; streamId?: string; rid?: string; userText?: string }): string[] {
@@ -952,21 +1007,40 @@ export class TranscriptWatcher {
     if (ctx?.rid) keys.push(`${base}::rid=${ctx.rid}`);
     if (ctx?.requestIndex != null) keys.push(`${base}::idx=${ctx.requestIndex}`);
     if (ctx?.streamId) keys.push(`${base}::sid=${ctx.streamId}`);
+    // 用户文键：同一用户轮次的回复在 transcript 与 chatSessions 双通道下发时互斥，
+    // 不同轮次得到同文字回复仍可各显一次（test_gapfill_pending F 段语义）。
+    const ut = ctx?.userText ? this.normUserText(ctx.userText) : '';
+    if (ut) keys.push(`${base}::ut=${ut}`);
     if (!keys.length) keys.push(base);
     return keys;
   }
 
   private hasEmittedAgentText(text: string, ctx?: { requestIndex?: number; streamId?: string; rid?: string; userText?: string }): boolean {
-    return this.dedupeKeys(text, ctx).some((k) => this.emittedAgentTextKeys.has(k));
+    for (const k of this.dedupeKeys(text, ctx)) {
+      if (k.includes('::ut=')) {
+        const ts = this.emittedAgentUtKeys.get(k);
+        if (ts != null && Date.now() - ts < 120_000) return true;
+        continue;
+      }
+      if (this.emittedAgentTextKeys.has(k)) return true;
+    }
+    return false;
   }
 
   private noteEmittedAgentText(text: string, ctx?: { requestIndex?: number; streamId?: string; rid?: string; userText?: string }) {
     const keys = this.dedupeKeys(text, ctx);
     if (!keys.length) return;
-    for (const k of keys) this.emittedAgentTextKeys.add(k);
+    for (const k of keys) {
+      if (k.includes('::ut=')) this.emittedAgentUtKeys.set(k, Date.now());
+      else this.emittedAgentTextKeys.add(k);
+    }
     if (this.emittedAgentTextKeys.size > 800) {
       const arr = [...this.emittedAgentTextKeys];
       this.emittedAgentTextKeys = new Set(arr.slice(-400));
+    }
+    if (this.emittedAgentUtKeys.size > 400) {
+      const cutoff = Date.now() - 300_000;
+      for (const [k, ts] of this.emittedAgentUtKeys) if (ts < cutoff) this.emittedAgentUtKeys.delete(k);
     }
   }
 
@@ -1747,8 +1821,8 @@ export class TranscriptWatcher {
 
 
 
-  /** 重置全部投影状态（session.start / bindFile 时调用） */
-  private resetState() {
+  /** 重置全部投影状态（session.start / bindFile 时调用）。preserveDedupe=true（同会话重绑）保留去重指纹 */
+  private resetState(preserveDedupe = false) {
     this.activeTurnId = null;
     this.turnSeq = 0;
     this.activeStreamId = null;
@@ -1764,17 +1838,25 @@ export class TranscriptWatcher {
     this.lastContentByMessageId.clear();
     this.lastEmittedTextByStream.clear();
     this.lastUserTsMs = null;
-    // bindFile 会 reset；切会话清空指纹，避免新会话同句「你好」被误判已发
-    this.emittedAgentTextKeys.clear();
-    this.fallbackSeenRequestIds.clear();
-    this.gapFilledRequestIds.clear();
-    this.pendingGapQueue = [];
-    this.completedGapUserTexts.clear();
-    this.activeUserText = '';
-    this.fallbackRequestUserText.clear();
-    this.fallbackRequestTs.clear();
+    // bindFile 会 reset；切会话清空指纹，避免新会话同句「你好」被误判已发。
+    // 同会话重绑（auto-follow / catchUp 重投影）保留指纹，阻断刚发出的正文再发一遍。
+    if (!preserveDedupe) {
+      this.emittedAgentTextKeys.clear();
+      this.emittedAgentUtKeys.clear();
+      this.recentAgentEmits.clear();
+      this.fallbackSeenRequestIds.clear();
+      this.gapFilledRequestIds.clear();
+      this.pendingGapQueue = [];
+      this.completedGapUserTexts.clear();
+      this.activeUserText = '';
+      this.fallbackRequestUserText.clear();
+      this.fallbackRequestTs.clear();
+    }
     // suppressFallbackAgent 由 bindFile 设置，不在此清
   }
+
+  /** 归一化用户文+回复文 → 最近发出时间：阻断同轮次响应经不同 streamId/通道的重复投影 */
+  private recentAgentEmits = new Map<string, number>();
 
   /** 事件出口：dispose 后不再发出；记录助手正文供 chatSessions gap-fill 去重 */
   private emit(ev: PhoneEvent) {
@@ -1782,6 +1864,17 @@ export class TranscriptWatcher {
     if (ev && (ev.type === 'AGENT_MESSAGE' || ev.type === 'AGENT_STREAM_SET')) {
       const text = String((ev as { text?: string }).text || '');
       if (text.trim() && !isInternalMonologue(text)) {
+        // 同轮次去重：同一回答被 requests/N 重编号或双通道投影成不同 streamId 时
+        // 只发一次。键含用户文——不同用户轮次得到同文字回复时各显一次（不误吞）。
+        const ut = this.normUserText(String((ev as any)._ut ?? this.activeUserText ?? ''));
+        const wkey = `${ev.type}:${ut}|${this.agentTextKey(text)}`;
+        const last = this.recentAgentEmits.get(wkey) ?? 0;
+        if (Date.now() - last < 5000) return;
+        this.recentAgentEmits.set(wkey, Date.now());
+        if (this.recentAgentEmits.size > 300) {
+          const cutoff = Date.now() - 60_000;
+          for (const [k, ts] of this.recentAgentEmits) if (ts < cutoff) this.recentAgentEmits.delete(k);
+        }
         this.noteEmittedAgentText(text, {
           requestIndex: (ev as any).requestIndex,
           streamId: (ev as any).streamId,

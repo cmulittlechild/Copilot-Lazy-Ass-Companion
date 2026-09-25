@@ -46,7 +46,9 @@ vscdbSet('chat.cachedLanguageModels.v2', JSON.stringify([
   { identifier: 'copilot/copilot-utility', metadata: { isUserSelectable: false } },
   { identifier: 'copilotcli/auto', metadata: { isUserSelectable: true, targetChatSessionType: 'copilotcli' } },
 ]));
-// 面板当前模型 = grok（新版 1.139+ 的 chat.modelConfiguration.panel）
+// 面板当前模型 = grok：权威源是 chat.currentLanguageModel.panel（内置+provider 均更新），
+// chat.modelConfiguration.panel 只是配置映射兜底（provider 模型选中后不变）。
+vscdbSet('chat.currentLanguageModel.panel', 'oaicopilot/grok-4.5-high');
 vscdbSet('chat.modelConfiguration.panel', JSON.stringify({ 'oaicopilot/grok-4.5-high': {} }));
 
 // ---- 可配置的 vscode stub ----
@@ -57,7 +59,7 @@ let lmAvailable = true;
 let cfgValues = {};       // getConfiguration().get 的返回
 let cfgInspect = {};      // inspect() 的返回（用于 policyValue）
 let commandShouldFail = null;
-// 模拟 workbench 是否真正落地模型切换（不写 modelConfiguration.panel = 切换未生效）
+// 模拟 workbench 是否真正落地模型切换（不写 currentLanguageModel.panel = 切换未生效）
 let simulateModelApplied = true;
 
 const vscodeStub = {
@@ -78,10 +80,10 @@ const vscodeStub = {
     executeCommand: async (cmd, ...args) => {
       calls.push({ cmd, args });
       if (commandShouldFail && cmd === commandShouldFail) throw new Error(`命令失败: ${cmd}`);
-      // 真实 workbench：changeModel 生效后写 chat.modelConfiguration.panel = {"vendor/id": {}}
+      // 真实 workbench：changeModel 生效后写 chat.currentLanguageModel.panel = "vendor/id"
       if (cmd === 'workbench.action.chat.changeModel' && simulateModelApplied) {
         const a = args[0] || {};
-        if (a.vendor && a.id) vscdbSet('chat.modelConfiguration.panel', JSON.stringify({ [`${a.vendor}/${a.id}`]: {} }));
+        if (a.vendor && a.id) vscdbSet('chat.currentLanguageModel.panel', `${a.vendor}/${a.id}`);
       }
       return undefined;
     },
@@ -134,6 +136,7 @@ function reset() {
   commandShouldFail = null;
   simulateModelApplied = true;
   // 恢复面板当前模型为 grok（selectModel 的 stub 会改写它）
+  vscdbSet('chat.currentLanguageModel.panel', 'oaicopilot/grok-4.5-high');
   vscdbSet('chat.modelConfiguration.panel', JSON.stringify({ 'oaicopilot/grok-4.5-high': {} }));
 }
 

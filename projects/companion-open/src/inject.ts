@@ -558,11 +558,11 @@ export async function injectMessage(
   if (sid && !preferBind) {
     await tryModeCommands(mode);
     if (await submitFocusedQuery(text)) {
-      // 仍尽量 verify；5s 对慢落盘太短会误报「未通过校验」，放宽到 15s；
+      // 仍尽量 verify；会话激活/首次写盘较慢时 15s 也会误报，放宽到 30s；
       // 未确认归入 soft-unverified 轻提示，不吓用户。
       let verified: boolean | undefined;
       if (targetFile) {
-        verified = await waitForInjectInSessionFile(targetFile, text, 15000, 200);
+        verified = await waitForInjectInSessionFile(targetFile, text, 30000, 200);
       }
       return {
         ok: true,

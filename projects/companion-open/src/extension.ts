@@ -300,14 +300,16 @@ export async function activate(context: vscode.ExtensionContext) {
           // 这里 bindFile **禁止 replay**——否则 transcripts 再投一轮最近 user turns，
           // 与 HISTORY_REPLAY 叠加，手机端会从头滑到尾（双重洪水）。
           if (ok && file) {
+            // 先播种再 rebind：seedFromHistory 会把种子记入 pendingSeed，
+            // bindFile 内部 resetState/bindFallback 清空去重集合后在收尾处重放，
+            // 否则清集合发生在播种之后、种子被冲掉，旧轮次会被当实时消息洪水重放。
+            const hist = watcher?.projectHistory(file, 20) ?? [];
+            transcriptWatcher?.seedFromHistory(hist);
             rebindTranscriptForSession(file);
           }
           reply({ type: "SESSION_SELECTED", file, ok, timestamp: Date.now() });
           if (ok) {
-            // 只取 projectHistory 用于 seed（防 chatSessions gap-fill 把已显示的旧内容再投一遍），
             // 不再向手机重放历史——用户要求切会话直接进入实时态，避免从头滑到尾的洪水。
-            const hist = watcher?.projectHistory(file, 20) ?? [];
-            transcriptWatcher?.seedFromHistory(hist);
             // replaySession 仍会清空手机端 feed 并绑定到该会话；回放内容只有切换提示。
             bridge?.replaySession(
               [

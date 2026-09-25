@@ -68,10 +68,12 @@ const CFG = {
 };
 /**
  * workbench 面板当前模型的存储位置（globalStorage state.vscdb）：
- * - 新版（1.139+）：chat.modelConfiguration.panel = {"<vendor>/<id>": {…config}}
- *   首 key 即面板当前选中模型的 identifier。
- * - 旧版：chat.currentLanguageModel.panel 等直接存 identifier 字符串。
- * settings.json 的 chat.defaultModel 常滞后，仅作兜底。
+ * - chat.currentLanguageModel.panel 直接存选中模型的 identifier 字符串，
+ *   对内置与第三方 provider 模型（如 oaicopilot/xxx）都会更新，是权威源。
+ * - chat.modelConfiguration.panel = {"<vendor>/<id>": {…config}} 是各模型的
+ *   配置映射，首 key 仅在内置模型场景与当前选中重合；provider 模型选中后
+ *   该 key 不会变化，只能作兜底。
+ * settings.json 的 chat.defaultModel 常滞后，仅作最后兜底。
  */
 const MODEL_CONFIG_PANEL_KEY = 'chat.modelConfiguration.panel';
 const CURRENT_MODEL_KEYS = [
@@ -216,7 +218,13 @@ class ChatControl {
      */
     readCurrentPanelModelId() {
         try {
-            // 新版（1.139+）：chat.modelConfiguration.panel = {"<identifier>": {…}}，首 key 即当前模型
+            // 权威：chat.currentLanguageModel.panel 直接存选中 identifier（内置+provider 均更新）
+            for (const key of CURRENT_MODEL_KEYS) {
+                const val = this.readVscdbValue(key);
+                if (val && val !== 'true' && val !== 'false')
+                    return val;
+            }
+            // 兜底：chat.modelConfiguration.panel = {"<identifier>": {…}}，首 key
             const cfg = this.readVscdbValue(MODEL_CONFIG_PANEL_KEY);
             if (cfg) {
                 try {
@@ -226,14 +234,8 @@ class ChatControl {
                         return first;
                 }
                 catch {
-                    /* 非 JSON，继续旧版 key */
+                    /* 非 JSON */
                 }
-            }
-            // 旧版：直接存 identifier 字符串的 key
-            for (const key of CURRENT_MODEL_KEYS) {
-                const val = this.readVscdbValue(key);
-                if (val && val !== 'true' && val !== 'false')
-                    return val;
             }
         }
         catch (err) {
@@ -403,23 +405,15 @@ class ChatControl {
     }
     /**
      * 等「模型切换已生效」的落盘证据（最长 timeoutMs）：
-     *   a) state.vscdb chat.modelConfiguration.panel 首 key 变为目标 identifier
+     *   a) 面板当前模型（chat.currentLanguageModel.panel，provider 模型也更新）= 目标
      *   b) 最近 chatSessions 文件最后一条 inputState.selectedModel = 目标 identifier
      */
     async waitSwitchEvidence(identifier, sinceMs, timeoutMs = 6000) {
         const t0 = Date.now();
         while (Date.now() - t0 < timeoutMs) {
-            const cfg = this.readVscdbValue(MODEL_CONFIG_PANEL_KEY);
-            if (cfg) {
-                try {
-                    const first = Object.keys(JSON.parse(cfg))[0];
-                    if (first && identifierEq(first, identifier))
-                        return true;
-                }
-                catch {
-                    /* ignore */
-                }
-            }
+            const panel = this.readCurrentPanelModelId();
+            if (panel && identifierEq(panel, identifier))
+                return true;
             const fileId = this.readNewestSessionSelectedModelId(sinceMs);
             if (fileId && identifierEq(fileId, identifier))
                 return true;
@@ -477,8 +471,9 @@ class ChatControl {
             this.log(`[chatControl] changeModel 失败: ${msg}`);
             return { ok: false, error: `切换模型失败: ${msg}` };
         }
-        // 校验切换是否真的生效：等 modelConfiguration.panel / 会话 inputState.selectedModel
-        // 落盘为目标模型。命令不抛错 ≠ 生效（免费账号选付费模型、内部模型都不报错但不切换）。
+        // 校验切换是否真的生效：等面板模型（currentLanguageModel.panel）或会话
+        // inputState.selectedModel 落盘为目标模型。命令不抛错 ≠ 生效
+        //（免费账号选付费模型、内部模型都不报错但不切换）。
         const identifier = `${vendor}/${id}`;
         const applied = await this.waitSwitchEvidence(identifier, switchStart);
         if (!applied) {
