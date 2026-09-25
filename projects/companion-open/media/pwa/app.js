@@ -93,6 +93,8 @@
   let lastSessions = [];
   /** 手动折叠/展开覆盖：workspaceId -> bool（true=展开）；未记录则按默认规则 */
   const wsGroupOpen = new Map();
+  /** 抽屉打开期间冻结的会话排序（file→index）：新广播更新行数据但不再挤掉行位，防误点 */
+  let sessionRowFreeze = null;
   /** 最近一次 MODEL_LIST；null = 尚未加载 */
   let modelsCache = null;
   /** 当前选中模型 id */
@@ -150,9 +152,11 @@
   let pendingSendCheck = null;
   /** 待发核验持久化 key：页面被半死 socket 刷新杀死内存计时器时，刷新后从这里回填 */
   const PENDING_SEND_KEY = 'sidecar.pendingSend';
-  function persistPendingSend(text) {
-    try { sessionStorage.setItem(PENDING_SEND_KEY, JSON.stringify({ text, at: Date.now() })); } catch {}
+  function persistPendingSend(text, key) {
+    try { sessionStorage.setItem(PENDING_SEND_KEY, JSON.stringify({ text, key: key || '', at: Date.now() })); } catch {}
   }
+  /** 已发出但未收到回答的用户消息（清屏/重放后重画用）；回声到达或回答完成即移除 */
+  const sentAwaitingReply = [];
   function clearPendingSend() {
     try { sessionStorage.removeItem(PENDING_SEND_KEY); } catch {}
     if (pendingSendCheck) { clearTimeout(pendingSendCheck.timer); pendingSendCheck = null; }
@@ -181,6 +185,10 @@
   }
   const MAX_OUTBOUND_QUEUE = 20;
   const outboundQueue = [];
+  /** 离线入队消息允许的最大滞留毫秒数——超过即丢弃，防止半死 socket 恢复后数分钟前的消息幽灵补发撞车 */
+  const OUTBOUND_QUEUE_TTL_MS = 90000;
+  /** 请求进行中用户再次输入的消息队列：排队而非停轮（发送键=有文本就排队，空文本才停止） */
+  const pendingSendQueue = [];
 
   /**
    * 鉴权 token：URL ?token= 优先，其次 localStorage（tunnel 开了 auth 时必须带）。
@@ -718,6 +726,9 @@
       for (let i = nodes.length - 1; i >= Math.max(0, nodes.length - 4); i--) {
         const body = nodes[i].querySelector('.user-bubble');
         if (body && body.textContent === t) {
+          // 吞掉回声后即消耗该记录：用户同文重问（>回声到达）不该被二次吞掉变裸文本
+          recentPhoneUserAt.delete(textKey);
+          seenKeys.delete(textKey);
           if (key) seenKeys.add(key);
           return null;
         }
@@ -1539,8 +1550,45 @@
     }
   }, 10 * 1000);
 
+  /** 待发消息的用户泡缺失（排队发送/回放清空/回声被吞）时补画，防「答案裸奔」。
+   *  用发送时存的 localKey：与 doSend 乐观画泡同键，已画过则由 seenKeys 去重不双泡 */
+  function ensurePendingUserBubble() {
+    try {
+      const raw = sessionStorage.getItem(PENDING_SEND_KEY);
+      if (!raw) return;
+      const p = JSON.parse(raw);
+      if (!p || typeof p.text !== 'string' || !p.text.trim()) return;
+      let found = false;
+      const nodes = feed.querySelectorAll('.msg.user');
+      for (let i = nodes.length - 1; i >= Math.max(0, nodes.length - 4); i--) {
+        const body = nodes[i].querySelector('.user-bubble');
+        if (body && body.textContent === p.text) { found = true; break; }
+      }
+      if (!found) addUser(p.text, p.key || `user:pending:${Date.now()}:${userTextDedupeKey(p.text)}`, { force: true });
+    } catch (_) {}
+    repaintAwaitingUserBubbles();
+  }
+  /** 重放/清屏后补画「已发未答」的用户泡（待发路径只覆盖 pendingSend 一条） */
+  function repaintAwaitingUserBubbles() {
+    for (const m of sentAwaitingReply) {
+      let found = false;
+      const nodes = feed.querySelectorAll('.msg.user');
+      for (let i = nodes.length - 1; i >= Math.max(0, nodes.length - 4); i--) {
+        const body = nodes[i].querySelector('.user-bubble');
+        if (body && body.textContent === m.text) { found = true; break; }
+      }
+      if (!found) addUser(m.text, m.key, { force: true });
+    }
+  }
+
   function handle(msg) {
     if (!msg || !msg.type) return;
+    // 跨会话事件过滤：服务端给 live 事件打 _sess（绑定会话 id）；与当前绑定不符的
+    // 直接丢弃，防别会话 USER/AGENT 泡漏进当前 feed（回放类消息不带 _sess 不拦）。
+    if (msg._sess && currentSessionMeta.file) {
+      const bound = String(currentSessionMeta.file).split('/').pop().replace(/\.jsonl$/, '');
+      if (bound && String(msg._sess) !== bound) return;
+    }
     switch (msg.type) {
       case 'AUTH_FAILED':
         outboundQueue.length = 0;
@@ -1579,6 +1627,8 @@
           ? `user:${msg.requestId}`
           : userTextDedupeKey(msg.text || '');
         addUser(msg.text || '', key, { ts: msg.timestamp });
+        // 回声只证明消息入列，不证明泡仍在 feed（clearFeed 随时可能抹掉）。
+        // 待答清单刻意保留到答案落地（AGENT_MESSAGE._ut 匹配或真 DONE）才释放。
         break;
       }
       case 'CONNECTED_ACK':
@@ -1594,6 +1644,7 @@
         break;
       case 'AGENT_STREAM_START':
         lastStreamActivityAt = Date.now();
+        ensurePendingUserBubble();
         // 不立刻 startAssistantTurn：否则 tool-only / 空 turn 会留下「Copilot •••」空壳。
         // 真正正文在 CHUNK/SET/MESSAGE 时再创建行；这里只进入 running + 顶部 typing。
         if (msg.requestIndex != null) reqToStream.set(msg.requestIndex, msg.streamId || 'default');
@@ -1639,6 +1690,24 @@
         }
         break;
       case 'AGENT_MESSAGE': {
+        // sessiondb 快路径答案无 STREAM_START 前置——同样先补画待发用户泡
+        ensurePendingUserBubble();
+        // 答案带 _ut 且与待发同题 = 消息已送达并作答，清核验计时防回填误报
+        try {
+          if (pendingSendCheck && msg._ut &&
+              userTextDedupeKey(String(msg._ut)) === pendingSendCheck.textKey) {
+            clearTimeout(pendingSendCheck.timer);
+            pendingSendCheck = null;
+            sessionStorage.removeItem(PENDING_SEND_KEY);
+          }
+          // 答案落地→同题待答条目释放（多条在途只清已答的）
+          if (msg._ut) {
+            const aut = userTextDedupeKey(String(msg._ut));
+            for (let i = sentAwaitingReply.length - 1; i >= 0; i--) {
+              if (userTextDedupeKey(sentAwaitingReply[i].text) === aut) sentAwaitingReply.splice(i, 1);
+            }
+          }
+        } catch (_) {}
         if (msg.streamId) {
           completeAssistantTurn(msg.streamId, msg.text || '', msg);
         } else {
@@ -1687,6 +1756,11 @@
         if (!replaying) setRequestRunning(false, undefined, { force: true });
         setStatus(true, connectedLabel());
         if (!replaying) Haptics.success();
+        // 回复结束→待答清单清空（回答已至，后续重放不再补画）。
+        // 回放内的历史 DONE 不算——同会话重选的交错态要靠清单补画已发未答泡。
+        if (!replaying && !replayingInstant) sentAwaitingReply.length = 0;
+        // 回复结束→排队消息出队（防抖宽限后判 requestRunning）
+        setTimeout(flushPendingSendQueue, 800);
         break;
       case 'SESSION_LIST':
         renderSessionList(msg.sessions);
@@ -1721,6 +1795,11 @@
             requestRunning = false;
             paintSendButton();
           } catch (_) {}
+          // 换会话后排队消息的目标已变化，丢弃并提示（防注入到新会话）
+          if (pendingSendQueue.length) {
+            pendingSendQueue.length = 0;
+            addSys('已切换会话，排队消息已丢弃');
+          }
           setStatus(true, '切换会话…');
           const f = msg.file || currentSessionMeta.file || '';
           // 已有标题优先于文件名回退：后续不带 title 的广播不得盖掉真会话名
@@ -1823,10 +1902,12 @@
             if (raw) {
               const p = JSON.parse(raw);
               if (p && typeof p.text === 'string' && p.text.trim()) {
-                addUser(p.text, `user:pending:${Date.now()}:${userTextDedupeKey(p.text)}`, { force: true, ts: p.at || Date.now() });
+                addUser(p.text, p.key || `user:pending:${Date.now()}:${userTextDedupeKey(p.text)}`, { force: true, ts: p.at || Date.now() });
               }
             }
           } catch (_) {}
+          // 「已发未答」的泡也补回（发完即切/跟随重选的交错态不丢泡）
+          repaintAwaitingUserBubbles();
           jumpFeedToBottom();
           // 回放完成后恢复顶部状态文案（SESSION_SELECTED 可能写成「切换会话…」）
           setStatus(true, connectedLabel());
@@ -1885,6 +1966,12 @@
   function openDrawer() {
     drawerOverlay.classList.remove('hidden');
     sessionDrawer.classList.add('open');
+    // 打开瞬间拍下当前排序，之后刷新不再位移行
+    sessionRowFreeze = new Map();
+    lastSessions.forEach((s, i) => {
+      const k = String(s.file || s.id || s.title || i);
+      if (!sessionRowFreeze.has(k)) sessionRowFreeze.set(k, i);
+    });
     // 每次打开都向 bridge 请求最新会话列表
     send({ type: 'PHONE_SESSION_LIST' });
   }
@@ -1892,6 +1979,7 @@
   function closeDrawer() {
     drawerOverlay.classList.add('hidden');
     sessionDrawer.classList.remove('open');
+    sessionRowFreeze = null;
   }
 
   /** SESSION_LIST 入口：缓存原始数据后按当前搜索词渲染 */
@@ -1965,11 +2053,23 @@
 
     const list = Array.from(groups.values()).sort((a, b) => {
       if (a.isCurrent !== b.isCurrent) return a.isCurrent ? -1 : 1;
+      if (sessionRowFreeze) {
+        const ia = sessionRowFreeze.get(String((a.items[0] || {}).file || a.id)) ?? 1e9;
+        const ib = sessionRowFreeze.get(String((b.items[0] || {}).file || b.id)) ?? 1e9;
+        if (ia !== ib) return ia - ib;
+      }
       return b.latest - a.latest;
     });
 
     for (const g of list) {
-      g.items.sort((a, b) => mtimeMs(b.mtime) - mtimeMs(a.mtime));
+      g.items.sort((a, b) => {
+        if (sessionRowFreeze) {
+          const ia = sessionRowFreeze.get(String(a.file || a.id || a.title || '')) ?? 1e9;
+          const ib = sessionRowFreeze.get(String(b.file || b.id || b.title || '')) ?? 1e9;
+          if (ia !== ib) return ia - ib;
+        }
+        return mtimeMs(b.mtime) - mtimeMs(a.mtime);
+      });
       // 默认：当前组展开、其余折叠；搜索中全部展开便于查看命中项
       const defaultOpen = q ? true : g.isCurrent;
       const open = wsGroupOpen.has(g.id) ? !!wsGroupOpen.get(g.id) : defaultOpen;
@@ -2536,6 +2636,7 @@
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       if (opts && opts.queueIfOffline && obj.type === 'PHONE_MESSAGE') {
         if (outboundQueue.length >= MAX_OUTBOUND_QUEUE) outboundQueue.shift();
+        obj.at = Date.now();
         outboundQueue.push(obj);
       }
       return false;
@@ -2546,6 +2647,7 @@
     } catch (_) {
       if (opts && opts.queueIfOffline && obj.type === 'PHONE_MESSAGE') {
         if (outboundQueue.length >= MAX_OUTBOUND_QUEUE) outboundQueue.shift();
+        obj.at = Date.now();
         outboundQueue.push(obj);
       }
       return false;
@@ -2554,7 +2656,17 @@
 
   function flushOutboundQueue() {
     if (!ws || ws.readyState !== WebSocket.OPEN || !outboundQueue.length) return;
-    const pending = outboundQueue.splice(0, outboundQueue.length);
+    const now = Date.now();
+    let pending = outboundQueue.splice(0, outboundQueue.length);
+    // 丢弃过期消息（半死 socket 恢复后，几分钟前的待发不该再幽灵补发撞车）
+    const fresh = [];
+    let expired = 0;
+    for (const m of pending) {
+      if (m.type === 'PHONE_MESSAGE' && m.at && now - m.at > OUTBOUND_QUEUE_TTL_MS) { expired++; continue; }
+      fresh.push(m);
+    }
+    pending = fresh;
+    if (expired) addSys(`有 ${expired} 条离线消息已过期，未送达`);
     for (let i = 0; i < pending.length; i++) {
       if (sendMessage(pending[i])) continue;
       outboundQueue.unshift(...pending.slice(i));
@@ -2636,13 +2748,33 @@
       forceFinishDeadStream();
     }
     if (requestRunning) {
+      // 有文本 = 排队发送（杀在途轮太狠）；空文本 = 停止
+      const queuedText = (input.value || '').trim();
+      if (queuedText) {
+        pendingSendQueue.push({ text: queuedText, mode: modeEl.value || 'agent' });
+        input.value = '';
+        input.style.height = 'auto';
+        addSys('已排队：当前回复结束后自动发送');
+        return;
+      }
       doStop();
       return;
     }
-    Haptics.tap();
     const text = (input.value || '').trim();
     if (!text) return;
-    const mode = modeEl.value || 'agent';
+    sendTextNow(text, modeEl.value || 'agent');
+  }
+
+  /** 队列出队发送（仅在未运行且有连接时）；供回复结束/停止/收尸后触发 */
+  function flushPendingSendQueue() {
+    if (!pendingSendQueue.length || requestRunning) return;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    const n = pendingSendQueue.shift();
+    if (n) sendTextNow(n.text, n.mode);
+  }
+
+  function sendTextNow(text, mode) {
+    Haptics.tap();
     // 0.5.19+：手机发送 force 上屏，避免短文案「1」被历史同文去重吞掉
     const localKey = `user:local:${Date.now()}:${userTextDedupeKey(text)}`;
     const painted = addUser(text, localKey, { force: true, ts: Date.now() });
@@ -2676,7 +2808,9 @@
     // 半死 socket 防御：N 秒内服务器没回声这条消息就判丢，回填文本让用户重发。
     // 同时写 sessionStorage——半死 socket 报错可能刷新页面杀死计时器，刷新后启动时回填。
     if (pendingSendCheck) clearTimeout(pendingSendCheck.timer);
-    persistPendingSend(text);
+    persistPendingSend(text, localKey);
+    if (sentAwaitingReply.length >= 8) sentAwaitingReply.shift();
+    sentAwaitingReply.push({ text, key: localKey });
     const sentTextKey = userTextDedupeKey(text);
     pendingSendCheck = {
       textKey: sentTextKey,
@@ -2712,6 +2846,7 @@
     requestRunning = false;
     paintSendButton();
     if (statusText) statusText.textContent = connectedLabel();
+    setTimeout(flushPendingSendQueue, 800);
   }
 
   function doStop() {
@@ -2727,9 +2862,14 @@
       requestDoneTimer = null;
     }
     requestRunning = false;
+    // stop 后死流引用全清，防止后续广播挂进已终态的 turn 元素造成 feed 尾部腐坏
+    streamingTurns.clear();
+    reqToStream.clear();
+    lastActiveStreamId = null;
     paintSendButton();
     if (statusText) statusText.textContent = connectedLabel();
     addSys('已请求停止');
+    setTimeout(flushPendingSendQueue, 800);
   }
 
   sendBtn.addEventListener('click', doSend);

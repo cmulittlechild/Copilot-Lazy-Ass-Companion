@@ -57,3 +57,6 @@ PWA ↔ VS Code bridge。仓库 `~/repos/sidecar_remote/projects/companion-open`
 - 边界重投影有 sessiondb 变体：回放过的答案可能在下轮发信后经 db 行再投。
 - 前缀比对类压制的对抗验证必含同题重问——确认 seq 放行（重问抬 userSeq 后 isUtAnswered=false）。
 - 重投影压制须分通道验证：sessiondb 行去重≠t 流投影；stray 判据=发信后 +2s 内冒上轮答案泡+监控 STREAM_START id=t1m*。
+- 清单生命周期修复须穷尽所有移除路径逐一验证（本例三杀手：DONE 清/USER 回声 splice/SESSION_SELECTED 清，分三轮补齐）；「回声≠状态存活」是通用判据。
+- 验证"补画/压制"修复须双通道对照：sessiondb 快路径无 STREAM_START；回放态与 live-emit 态是两套"已投"记忆。
+- 马拉松式找 bug 要测"用户真会做的误操作"：连发/边切边发/边打草稿边收推送。

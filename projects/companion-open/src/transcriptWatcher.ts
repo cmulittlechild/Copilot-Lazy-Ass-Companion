@@ -288,12 +288,22 @@ export class TranscriptWatcher {
     if (!events || !Array.isArray(events)) return;
     // requestIndex → requestId（USER_MESSAGE 带 rid；AGENT 通常只有 requestIndex）
     const ridByIndex = new Map<number, string>();
+    let lastUt = '';
     for (const ev of events) {
       if (!ev) continue;
       const rid = (ev as any).requestId;
       const ri = (ev as any).requestIndex;
       if (ev.type === 'USER_MESSAGE' && typeof (ev as any).text === 'string') {
         const ut = this.normUserText(String((ev as any).text || ''));
+        if (ut) {
+          lastUt = ut;
+          // 回放轮次同步记提问序号：回放态答案算「该题已答」，后续迟到重投影
+          // isUtAnswered/前缀40 才能拦住（只记 sessiondb 通道会漏整段回放史）。
+          this.userEmitSeq += 1;
+          this.userSeqByUt.set(ut, this.userEmitSeq);
+          const ts = (ev as any).timestamp;
+          if (typeof ts === 'number' && ts) this.userTsByUt.set(ut, ts);
+        }
         if (ut && typeof rid === 'string' && rid) {
           this.fallbackRequestUserText.set(rid, ut);
           if (typeof ri === 'number') this.fallbackRequestIndex.set(ri, rid);
@@ -313,7 +323,7 @@ export class TranscriptWatcher {
         if (sm) this.sessionDbEmittedIds.add(parseInt(sm[1], 10));
         const text = String((ev as any).text || '').trim();
         // monologue 不进正文指纹（否则会挡住真实最终回复的前缀匹配）
-        if (text && !isInternalMonologue(text)) this.noteEmittedAgentText(text, { requestIndex: (ev as any).requestIndex, streamId: (ev as any).streamId, rid: rid || undefined });
+        if (text && !isInternalMonologue(text)) this.noteEmittedAgentText(text, { requestIndex: (ev as any).requestIndex, streamId: (ev as any).streamId, rid: rid || undefined, userText: (ev as any)._ut ?? lastUt });
         // 仅当历史已有助手正文时标记 gapFilled，避免「只有 USER、最终回复未落盘」被挡住补全
         if (typeof rid === 'string' && rid) this.gapFilledRequestIds.add(rid);
         else if (typeof ri === 'number' && ridByIndex.has(ri)) {
@@ -1176,6 +1186,14 @@ export class TranscriptWatcher {
             if (this.hasEmittedAgentText(text, { requestIndex: reqIdx, streamId, rid, userText: ut })) continue;
             // 自轮重投影：同一答案文本经另一流形态再投（requests/N 重放）→ 双气泡
             if (this.isReplayedFor(text, ut)) continue;
+            // 文本变体压制：sessiondb/fallback 通道投影与已投版本形态不同时，
+            // 按该问题已投答案的前 40 字前缀比对（同题重问由 seq 放行）。
+            const utN = ut ? this.normUserText(ut) : '';
+            if (utN && this.isUtAnswered(utN)) {
+              const prev = this.emittedTextByUt.get(utN) || '';
+              const cur = this.agentTextKey(text);
+              if (cur.slice(0, 40).length >= 12 && cur.slice(0, 40) === prev.slice(0, 40)) continue;
+            }
           }
         }
         this.emit(ev);
@@ -2210,6 +2228,10 @@ export class TranscriptWatcher {
   /** 事件出口：dispose 后不再发出；记录助手正文供 chatSessions gap-fill 去重 */
   private emit(ev: PhoneEvent) {
     if (this.disposed) return;
+    // 会话标签：客户端按绑定会话过滤，任何通道的跨会话事件不得投影到当前 feed
+    if (ev && this.boundSessionBase) {
+      (ev as any)._sess = this.boundSessionBase.replace(/\.jsonl$/, '');
+    }
     if (ev && ev.type === 'USER_MESSAGE') {
       // 记录提问序号：迟到重复投影只有「之后真的重问了同题」才放行
       this.userEmitSeq += 1;
@@ -2222,9 +2244,11 @@ export class TranscriptWatcher {
         // 同轮次去重：同一回答被 requests/N 重编号或双通道投影成不同 streamId 时
         // 只发一次。键含用户文——不同用户轮次得到同文字回复时各显一次（不误吞）。
         const ut = this.normUserText(String((ev as any)._ut ?? this.activeUserText ?? ''));
-        const wkey = `${ev.type}:${ut}|${this.agentTextKey(text)}`;
+        // 跨通道去重：t 流/sessiondb 同文同题答案间隔可达 ~6s 超过旧窗才双发；
+        // 键不含 ev.type、窗 15s，同题重问的新答由 userSeq 语义在别的检查放行。
+        const wkey = `${ut}|${this.agentTextKey(text)}`;
         const last = this.recentAgentEmits.get(wkey) ?? 0;
-        if (Date.now() - last < 5000) return;
+        if (Date.now() - last < 15000) return;
         this.recentAgentEmits.set(wkey, Date.now());
         if (this.recentAgentEmits.size > 300) {
           const cutoff = Date.now() - 60_000;
