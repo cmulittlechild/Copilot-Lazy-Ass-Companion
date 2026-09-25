@@ -487,9 +487,16 @@ export async function activate(context: vscode.ExtensionContext) {
     if (tdir) {
       // chatSessions 兜底源：transcripts 偶尔漏写 assistant 回复（如简短问候），从 chatSessions 补全
       const csdir = findChatSessionsDir(context.storageUri);
+      // session-store.db 快速兜底：Copilot 新版 turns 行响应完成即落库，远快于 chatSessions 落盘
+      const sessionStoreDb = path.join(
+        path.dirname(context.globalStorageUri.fsPath),
+        "github.copilot-chat",
+        "session-store.db",
+      );
       transcriptWatcher = new TranscriptWatcher({
         dir: tdir,
         chatSessionsDir: csdir,
+        sessionStoreDb: fs.existsSync(sessionStoreDb) ? sessionStoreDb : undefined,
         pollMs: Math.max(10, cfg.get<number>("pollMs", 50)),
         onEvent: (ev) => {
           if (
