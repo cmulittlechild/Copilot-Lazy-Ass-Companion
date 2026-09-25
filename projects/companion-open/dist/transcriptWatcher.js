@@ -463,6 +463,12 @@ class TranscriptWatcher {
         this.lastMtimeMs = st?.mtimeMs ?? 0;
         // 会话基名 + chatSessions 兜底源联动
         this.boundSessionBase = path.basename(file);
+        // session-store.db：换会话时重置 turns 游标到当前末尾（只跟新增）
+        const sid = this.boundSessionBase.replace(/\.jsonl$/, '');
+        if (this.sessionDbSessionId !== sid) {
+            this.sessionDbSessionId = sid;
+            this.sessionDbLastRow = this.querySessionDbMaxId();
+        }
         if (this.opts.chatSessionsDir) {
             const csFile = path.join(this.opts.chatSessionsDir, this.boundSessionBase);
             if (fs.existsSync(csFile)) {
@@ -683,10 +689,14 @@ class TranscriptWatcher {
                 this.fallbackOffset = 0;
             }
         }
-        // 周期轮询：chatSessions 无 fs.watch，按最短间隔读增量字节
+        // 周期轮询：chatSessions 无 fs.watch，按最短间隔读增量字节；
+        // 顺带轮询 session-store.db turns（响应完成即落库，先于 chatSessions 写盘）
         if (this.fallbackTimer)
             clearInterval(this.fallbackTimer);
-        this.fallbackTimer = setInterval(() => this.pollFallback(), this.fallbackPollMs);
+        this.fallbackTimer = setInterval(() => {
+            this.pollFallback();
+            this.pollSessionStoreDb();
+        }, this.fallbackPollMs);
     }
     /** 解绑兜底：清文件、清半行缓冲、清轮询定时器 */
     unbindFallback() {
@@ -696,6 +706,90 @@ class TranscriptWatcher {
         if (this.fallbackTimer)
             clearInterval(this.fallbackTimer);
         this.fallbackTimer = undefined;
+    }
+    // ---- session-store.db 快速兜底（Copilot 新版：turns 行响应完成即落库）----
+    sessionDbSessionId;
+    sessionDbLastRow = 0;
+    /** 打开 session-store.db（优先只读，不支持则退回普通模式）；失败返回 null */
+    openSessionDb() {
+        const dbPath = this.opts.sessionStoreDb;
+        if (!dbPath)
+            return null;
+        try {
+            const { DatabaseSync } = require('node:sqlite');
+            try {
+                return new DatabaseSync(dbPath, { readOnly: true });
+            }
+            catch {
+                return new DatabaseSync(dbPath);
+            }
+        }
+        catch {
+            return null;
+        }
+    }
+    /** 当前绑定会话在 turns 表里的最大行号（换会话时调用；失败视为 0 从头跟） */
+    querySessionDbMaxId() {
+        const sid = this.sessionDbSessionId;
+        if (!sid)
+            return 0;
+        const db = this.openSessionDb();
+        if (!db)
+            return 0;
+        try {
+            const row = db
+                .prepare('SELECT MAX(id) AS m FROM turns WHERE session_id = ?')
+                .get(sid);
+            return row?.m ?? 0;
+        }
+        catch {
+            return 0;
+        }
+        finally {
+            db.close();
+        }
+    }
+    /** 轮询 turns 新行：响应完成即落库 → 立即 emit AGENT_MESSAGE（ut 键去重 chatSessions 迟到的重复投影） */
+    pollSessionStoreDb() {
+        const sid = this.sessionDbSessionId;
+        if (!this.opts.sessionStoreDb || !sid || this.disposed)
+            return;
+        let rows;
+        const db = this.openSessionDb();
+        if (!db)
+            return;
+        try {
+            rows = db
+                .prepare('SELECT id, user_message, assistant_response FROM turns WHERE session_id = ? AND id > ? ORDER BY id')
+                .all(sid, this.sessionDbLastRow);
+        }
+        catch {
+            return; // 库被锁/结构变化：下轮再试
+        }
+        finally {
+            db.close();
+        }
+        if (!Array.isArray(rows) || !rows.length)
+            return;
+        for (const r of rows) {
+            if (typeof r.id === 'number' && r.id > this.sessionDbLastRow) {
+                this.sessionDbLastRow = r.id;
+            }
+            const text = String(r.assistant_response || '').trim();
+            if (!text)
+                continue;
+            // 用户文挂上供 ut 键/轮次匹配；streamId 用 sessiondb 前缀区别于其他通道
+            this.emitAgentSide([
+                {
+                    type: 'AGENT_MESSAGE',
+                    text,
+                    streamId: `sessiondb/${sid}/${r.id}`,
+                    requestIndex: -1,
+                    timestamp: Date.now(),
+                    _ut: r.user_message || undefined,
+                },
+            ]);
+        }
     }
     /** catch-up：读取 chatSessions 文件逐行投影（补历史缺失回复）；大文件只读尾部 8MB */
     catchUpFallback() {
@@ -909,7 +1003,9 @@ class TranscriptWatcher {
      * 不再因全局 transcriptHadGap 重扫整文件把旧回复贴到新气泡。
      */
     emitAgentSide(evs) {
-        if (!this.suppressFallbackAgent) {
+        // sessiondb 行是「完成才入库」的新轮次，不是 catch-up 洪水，不走 suppress/pending 门槛
+        const forceLive = evs.some((e) => typeof e?.streamId === 'string' && e.streamId.startsWith('sessiondb/'));
+        if (!this.suppressFallbackAgent || forceLive) {
             for (const ev of evs) {
                 if (ev.type === 'USER_MESSAGE' || ev.type === 'COPILOT_TYPING')
                     continue;
@@ -928,7 +1024,7 @@ class TranscriptWatcher {
                                 reqIdx = idx;
                             rid = this.fallbackRequestIndex.get(idx) || [...this.fallbackSeenRequestIds][idx];
                         }
-                        const ut = rid ? this.fallbackRequestUserText.get(rid) : undefined;
+                        const ut = ev._ut ?? (rid ? this.fallbackRequestUserText.get(rid) : undefined);
                         if (this.hasEmittedAgentText(text, { requestIndex: reqIdx, streamId, rid, userText: ut }))
                             continue;
                     }
@@ -976,6 +1072,9 @@ class TranscriptWatcher {
                         matchedUser = this.fallbackRequestUserText.get(rid);
                     }
                 }
+                // sessiondb 通道行自带用户文，直接用
+                if (!matchedUser)
+                    matchedUser = ev._ut;
                 // 单 pending 或顺序 FIFO 匹配：无 streamId 索引匹配时取队列首个匹配项
                 if (!matchedUser) {
                     if (this.pendingGapQueue.length === 1) {
@@ -1928,7 +2027,7 @@ class TranscriptWatcher {
                     requestIndex: ev.requestIndex,
                     streamId: ev.streamId,
                     rid: ev.requestId,
-                    userText: this.activeUserText,
+                    userText: ev._ut ?? this.activeUserText,
                 });
             }
         }
