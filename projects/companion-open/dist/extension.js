@@ -213,9 +213,22 @@ async function activate(context) {
                 }
             },
         });
-        // 连接回放缺 USER 行时的完整回放源：回读当前会话 chatSessions + sessiondb 补全
+        // 连接回放缺 USER 行时的完整回放源：回读当前会话 chatSessions + sessiondb 补全。
+        // 会话文件源优先级：显式点选/跟随（activeSessionFile）→ chatSessions 当前绑定
+        // → transcript 当前绑定同名映射（重启后 activeSessionFile 为空，必须落到后两者）。
         bridge.historyProvider = () => {
-            const file = (0, inject_1.getActiveSessionFile)();
+            let file = (0, inject_1.getActiveSessionFile)();
+            if (!file || !fs.existsSync(file))
+                file = watcher?.currentFile;
+            const tFile = transcriptWatcher?.currentFile;
+            if ((!file || !fs.existsSync(file)) && tFile) {
+                const csdirP = (0, transcriptWatcher_1.findChatSessionsDir)(context.storageUri);
+                if (csdirP) {
+                    const cand = path.join(csdirP, path.basename(tFile));
+                    if (fs.existsSync(cand))
+                        file = cand;
+                }
+            }
             if (!file || !fs.existsSync(file))
                 return undefined;
             const hist = watcher?.projectHistory(file, 40) ?? [];

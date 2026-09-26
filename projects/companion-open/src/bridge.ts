@@ -446,12 +446,15 @@ export class BridgeServer {
           if (!historyReplayed) {
             historyReplayed = true;
             let replay = this.history.slice(-HISTORY_MAX);
-            // history 只攒 emit 过的事件；fallback 投影（chatSessions/文件回读）按设计
-            // 不 emit USER_MESSAGE → 重启后未点选即连接时回放只剩答案列。
-            // 无 USER 行时回退到提供者回读会话文件的完整回放。
-            if (!replay.some((e) => e?.type === 'USER_MESSAGE')) {
-              const provided = this.historyProvider?.();
-              if (Array.isArray(provided) && provided.length) replay = provided;
+            // 文件回放为权威源：活积 history 缺 USER 行（fallback 通道按设计吞用户文，
+            // 手机发送的几条零星 USER 也会让它"部分缺失"），且 socket 重连会把
+            // 切换前旧会话的 history 重放回来拽回 feed。文件版 USER 数不少于 live 版
+            // 时优先用文件版；只有当刚发出的用户消息尚未落盘时才保留 live 版。
+            const provided = this.historyProvider?.();
+            if (Array.isArray(provided) && provided.length) {
+              const liveUsers = replay.filter((e) => e?.type === 'USER_MESSAGE').length;
+              const provUsers = provided.filter((e) => e?.type === 'USER_MESSAGE').length;
+              if (provUsers >= liveUsers) replay = provided;
             }
             this.send(ws, { type: 'HISTORY_REPLAY', messages: replay });
           }

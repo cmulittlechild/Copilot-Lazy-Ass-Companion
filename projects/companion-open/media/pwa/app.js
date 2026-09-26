@@ -352,24 +352,50 @@
       return false;
     };
     if (requestDoneTimer) clearTimeout(requestDoneTimer);
-    // force：立即结束（COPILOT_DONE / 切会话 / stop），不给残影宽限
-    if (force || !anyStreamingNow()) {
+    // force：立即结束（切会话 / stop / 取消），不给残影宽限
+    if (force) {
       requestDoneTimer = null;
-      // 即使 map 里还有僵尸 streaming，视觉已 finish 过则强制停
-      if (force) {
-        for (const entry of streamingTurns.values()) {
-          if (entry.element) entry.element.classList.remove('streaming');
-          if (entry.bubble) entry.bubble.classList.remove('streaming');
-        }
+      for (const entry of streamingTurns.values()) {
+        if (entry.element) entry.element.classList.remove('streaming');
+        if (entry.bubble) entry.bubble.classList.remove('streaming');
       }
-      if (force || !anyStreamingNow()) {
+      requestRunning = false;
+      paintSendButton();
+      if (statusText && !replaying && !replayingInstant) {
+        statusText.textContent = connectedLabel();
+      }
+      return;
+    }
+    // deferMs：DONE 可能提前于真实轮次结束（tool 循环/长 thinking 间隙、迟到
+    // 的旧请求 DONE）——宽限内任何新流活动（setRequestRunning(true)）会取消
+    // 本定时器；期满仍无活动才释放发送键。否则中途 DONE 会让按钮变回「发送」，
+    // 长轮几乎无法从 PWA 停止。
+    const deferMs = opts && typeof opts.deferMs === 'number' ? opts.deferMs : null;
+    if (deferMs != null) {
+      requestDoneTimer = setTimeout(() => {
+        requestDoneTimer = null;
+        if (anyStreamingNow()) {
+          // 宽限结束仍有流 → 再等一轮短宽限
+          setRequestRunning(false);
+          return;
+        }
         requestRunning = false;
         paintSendButton();
         if (statusText && !replaying && !replayingInstant) {
           statusText.textContent = connectedLabel();
         }
-        return;
+        flushPendingSendQueue();
+      }, deferMs);
+      return;
+    }
+    if (!anyStreamingNow()) {
+      requestDoneTimer = null;
+      requestRunning = false;
+      paintSendButton();
+      if (statusText && !replaying && !replayingInstant) {
+        statusText.textContent = connectedLabel();
       }
+      return;
     }
     // 仍有 streaming：短宽限等下一 turn
     requestDoneTimer = setTimeout(() => {
@@ -1796,10 +1822,15 @@
         }
         markAllToolsDone();
         // 全量收尾：独立 typing-row + 所有行上的 ••• + streaming 光标
-        // force：回复已结束后绝不能继续「…」跳动或发送键停在停止
         finishAllAssistantVisuals();
-        if (!replaying) setRequestRunning(false, undefined, { force: true });
-        setStatus(true, connectedLabel());
+        // 中途 DONE（tool 循环 turn_end / thinking 间隙、旧请求迟到）提前于请求
+        // 真正结束——立即释放会让发送键提前变回「发送」，长轮几乎停不掉。
+        // 3s 宽限释放：期间任何新流活动自动取消；用户主动停/取消仍立即释放。
+        const doneImmediate = msg.reason === 'phone_stop' || msg.reason === 'isCanceled';
+        if (!replaying) {
+          setRequestRunning(false, undefined, doneImmediate ? { force: true } : { deferMs: 3000 });
+        }
+        if (doneImmediate) setStatus(true, connectedLabel());
         if (!replaying) Haptics.success();
         // 回复结束→按 _ut 逐条释放待答条目：服务端 DONE 现带归属轮次，
         // 只清已答的；任意 DONE 整表清会把别轮在途条目误杀 → 用户泡丢、答案裸奔。
