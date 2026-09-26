@@ -213,6 +213,17 @@ async function activate(context) {
                 }
             },
         });
+        // 连接回放缺 USER 行时的完整回放源：回读当前会话 chatSessions + sessiondb 补全
+        bridge.historyProvider = () => {
+            const file = (0, inject_1.getActiveSessionFile)();
+            if (!file || !fs.existsSync(file))
+                return undefined;
+            const hist = watcher?.projectHistory(file, 40) ?? [];
+            if (!hist.length)
+                return undefined;
+            const sid = path.basename(file).replace(/\.jsonl$/i, "");
+            return buildReplayWithDbBackfill(hist, transcriptWatcher?.sessionDbRecentTurns(20, sid), sid);
+        };
         push = new push_1.PushManager(context.globalState);
         bridge.setPushManager?.(push);
         bridge.onPhoneMessage(async (msg) => {

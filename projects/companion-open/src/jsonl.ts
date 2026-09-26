@@ -68,6 +68,8 @@ export class JsonlProjector {
   private lastThinkingKey = new Map<string, string>();
   private doneTimers = new Map<number, NodeJS.Timeout>();
   private doneSink: ((ev: PhoneEvent) => void) | undefined;
+  /** 已投影过错误文本的请求（requestId），避免 kind0 重写/重复收尾重发 */
+  private emittedRequestErrors = new Set<string>();
   /** last kind0 request count to detect growth */
   private lastKind0ReqCount = 0;
   /**
@@ -102,6 +104,7 @@ export class JsonlProjector {
     this.doneTimers.clear();
     this.lastKind0ReqCount = 0;
     this.reqCount = 0;
+    this.emittedRequestErrors.clear();
   }
 
   projectLine(obj: any): PhoneEvent[] {
@@ -125,6 +128,8 @@ export class JsonlProjector {
     ) {
       const reqIndex = k[1] as number;
       const endEvs = this.endActiveStreamsForRequest(reqIndex);
+      // kind=1 result 收尾标记的 obj.v 就是 result 对象（可含 errorDetails）
+      const errEvs = k[2] === 'result' ? this.errorEventsForRequest({ result: obj.v }, reqIndex) : [];
       const doneEv: PhoneEvent = {
         type: 'COPILOT_DONE',
         requestIndex: reqIndex,
@@ -132,11 +137,11 @@ export class JsonlProjector {
         v: obj.v,
       };
       if (this.doneSink) {
-        out.push(...endEvs);
+        out.push(...endEvs, ...errEvs);
         this.scheduleDone(reqIndex, doneEv);
         return out;
       }
-      out.push(...endEvs, doneEv);
+      out.push(...endEvs, ...errEvs, doneEv);
       return out;
     }
 
@@ -165,6 +170,7 @@ export class JsonlProjector {
         const reason = requestDoneReason(v[n]);
         if (reason) {
           out.push(...this.endActiveStreamsForRequest(gi));
+          out.push(...this.errorEventsForRequest(v[n], gi));
           const doneEv: PhoneEvent = { type: 'COPILOT_DONE', requestIndex: gi, reason };
           if (this.doneSink) this.scheduleDone(gi, doneEv);
           else out.push(doneEv);
@@ -202,6 +208,7 @@ export class JsonlProjector {
         const reason = requestDoneReason(req);
         if (reason) {
           out.push(...this.endActiveStreamsForRequest(i));
+          out.push(...this.errorEventsForRequest(req, i));
           const doneEv: PhoneEvent = { type: 'COPILOT_DONE', requestIndex: i, reason };
           if (this.doneSink) this.scheduleDone(i, doneEv);
           else out.push(doneEv);
@@ -350,6 +357,32 @@ export class JsonlProjector {
       this.activeStreams.delete(streamId);
     }
     return out;
+  }
+
+  /**
+   * 上游失败/取消的请求把错误文案投影成 AGENT_MESSAGE——桌面端会显示错误块，
+   * 若不投影，手机端只剩孤儿用户泡 + 死寂（实测 503/空响应均如此）。
+   */
+  private errorEventsForRequest(req: any, reqIndex: number): PhoneEvent[] {
+    const msg =
+      req?.result?.errorDetails?.message ??
+      req?.result?.error?.message ??
+      req?.errorDetails?.message;
+    const text = typeof msg === 'string' ? msg.trim() : '';
+    if (!text) return [];
+    // 以请求下标去重：kind0 快照 / kind2 追加 / kind1 收尾三条路径同一请求共用下标
+    const key = `r${reqIndex}`;
+    if (this.emittedRequestErrors.has(key)) return [];
+    this.emittedRequestErrors.add(key);
+    const rid = String(req?.requestId ?? `idx:${reqIndex}`);
+    return [
+      {
+        type: 'AGENT_MESSAGE',
+        streamId: `reqerr/${rid}`,
+        text: `⚠️ ${text}`,
+        requestIndex: reqIndex,
+      } as PhoneEvent,
+    ];
   }
 
   private endActiveStreamsForRequest(reqIndex: number): PhoneEvent[] {

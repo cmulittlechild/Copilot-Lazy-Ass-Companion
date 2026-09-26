@@ -61,3 +61,8 @@ PWA ↔ VS Code bridge。仓库 `~/repos/sidecar_remote/projects/companion-open`
 - 清单生命周期修复须穷尽所有移除路径逐一验证（本例三杀手：DONE 清/USER 回声 splice/SESSION_SELECTED 清，分三轮补齐）；「回声≠状态存活」是通用判据。
 - 验证"补画/压制"修复须双通道对照：sessiondb 快路径无 STREAM_START；回放态与 live-emit 态是两套"已投"记忆。
 - 马拉松式找 bug 要测"用户真会做的误操作"：连发/边切边发/边打草稿边收推送。
+- 回放有两条不同来源须分别验证：连接回放=原样服务 `this.history`（活积+点选残留），点选回放=`replaySession(projectHistory+db回填)`——点选修好 history 后连接回放才含 USER；宿主重启后未点选即连会暴露"零用户泡"缺陷（fallback 通道按设计吞 USER_MESSAGE 只记 rid→ut）。
+- 快速连发场景坑：在途时发送键是「停止」——点进 composer 打字**必须先截图确认文本进框再点**，否则空值点击=phone_stop 杀在途轮且文本丢失（自动化 type 偶发不落框已复现 2 次）。
+- 答案渲染成 "text|Copy" 灰框 = marked.min.js CDN 没加载（md-fallback-pre 降级）；curl CDN 可达≠页面加载成功，Cmd+Shift+R 硬刷可恢复——是 PWA 对局域网手机场景的健壮性弱点。
+- Copilot 0.67+ 无增量流事件：全程 AGENT_STREAM_START=0 属正常，答案以单条 AGENT_MESSAGE 到达；DONE 由 requestDoneReason（elapsedMs 内联）触发，typing 正常清。
+- 上游模型 503/空响应时桌面显示 "Sorry..." 但 PWA 零错误泡——对账时注意"有问无答"可能是上游失败而非投递缺陷，区分靠看桌面同会话。

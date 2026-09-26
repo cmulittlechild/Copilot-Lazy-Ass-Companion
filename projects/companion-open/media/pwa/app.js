@@ -136,6 +136,8 @@
    * 由 COPILOT_TYPING / STREAM_* 置位，COPILOT_DONE 清除。
    */
   let requestRunning = false;
+  /** 停止需双击确认：空输入点击发送键先武装 3s，再点才真正停（防误触/打字未落框杀掉在途回复） */
+  let stopArmUntil = 0;
   /** COPILOT_DONE 防抖：agent 多 turn（tool 循环）中间 turn_end 也会 DONE，短延迟避免发送键闪烁 */
   let requestDoneTimer = null;
   /** 乐观用户消息短窗：textKey → at（与 bridge 回声去重，不永久禁同文） */
@@ -1821,6 +1823,8 @@
           outboundQueue.length = 0;
           clearFeed();
           replayingInstant = true;
+          // 模型选择按会话分：切完刷新 chip，不然 PWA 显示上个会话的模型
+          send({ type: 'PHONE_MODEL_LIST' });
           // 待答清单按会话分：sess 与即将切到的会话不符就丢——旧会话在途条目
           // 会补画进新 feed（残泡/答案裸奔归因错乱）。无 sess（旧写入）保留。
           {
@@ -2854,7 +2858,7 @@
       forceFinishDeadStream();
     }
     if (requestRunning) {
-      // 有文本 = 排队发送（杀在途轮太狠）；空文本 = 停止
+      // 有文本 = 排队发送（杀在途轮太狠）；空文本 = 停止（需双击确认）
       const queuedText = (input.value || '').trim();
       if (queuedText) {
         pendingSendQueue.push({ text: queuedText, mode: modeEl.value || 'agent' });
@@ -2863,7 +2867,21 @@
         addSys('已排队：当前回复结束后自动发送');
         return;
       }
-      doStop();
+      if (Date.now() < stopArmUntil) {
+        stopArmUntil = 0;
+        try { sendBtn.title = '停止当前 Copilot 请求'; } catch (_) {}
+        doStop();
+        return;
+      }
+      stopArmUntil = Date.now() + 3000;
+      addSys('再次点击「停止」中断当前回复');
+      try { sendBtn.title = '再次点击确认停止'; } catch (_) {}
+      setTimeout(() => {
+        if (stopArmUntil && Date.now() >= stopArmUntil) {
+          stopArmUntil = 0;
+          try { sendBtn.title = '停止当前 Copilot 请求'; } catch (_) {}
+        }
+      }, 3100);
       return;
     }
     const text = (input.value || '').trim();

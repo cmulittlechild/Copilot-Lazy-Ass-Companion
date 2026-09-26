@@ -168,6 +168,11 @@ export class BridgeServer {
   private _port: number;
   private authToken?: string;
   private pwaDir?: string;
+  /**
+   * 连接回放提供者：活积 history 可能缺 USER_MESSAGE（fallback 通道按设计吞用户文
+   * 只记 rid→ut 键），此时由扩展回读当前会话文件重建回放（含 sessiondb 补全）。
+   */
+  historyProvider?: () => any[] | undefined;
   private onClientCount?: (n: number) => void;
   publicUrl: string | null = null;
 
@@ -440,7 +445,15 @@ export class BridgeServer {
           // Single HISTORY_REPLAY per socket — PWA replaces feed, does not append.
           if (!historyReplayed) {
             historyReplayed = true;
-            this.send(ws, { type: 'HISTORY_REPLAY', messages: this.history.slice(-HISTORY_MAX) });
+            let replay = this.history.slice(-HISTORY_MAX);
+            // history 只攒 emit 过的事件；fallback 投影（chatSessions/文件回读）按设计
+            // 不 emit USER_MESSAGE → 重启后未点选即连接时回放只剩答案列。
+            // 无 USER 行时回退到提供者回读会话文件的完整回放。
+            if (!replay.some((e) => e?.type === 'USER_MESSAGE')) {
+              const provided = this.historyProvider?.();
+              if (Array.isArray(provided) && provided.length) replay = provided;
+            }
+            this.send(ws, { type: 'HISTORY_REPLAY', messages: replay });
           }
           if (this.activeStreamId && this.activeStreamAccum) {
             this.send(ws, {
