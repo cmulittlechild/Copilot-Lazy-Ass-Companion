@@ -412,17 +412,14 @@ async function activate(context) {
                     if (ok) {
                         // 完整同步：回放该会话历史 + sessiondb 补全 chatSessions 尚未写盘的回答
                         // （HISTORY_REPLAY 瞬时渲染，不走打字机，不会有滑到尾的动画洪水）。
-                        const sidSel = file
-                            .split("/")
-                            .pop()
-                            ?.replace(/\.jsonl$/, "");
+                        const sidSel = path.basename(file).replace(/\.jsonl$/i, "");
                         const merged = buildReplayWithDbBackfill(ok && file ? (watcher?.projectHistory(file, 20) ?? []) : [], transcriptWatcher?.sessionDbRecentTurns(20, sidSel), sidSel);
                         transcriptWatcher?.seedFromHistory(merged.filter((e) => e.streamId?.startsWith("sessiondb/")));
                         bridge?.replaySession([
                             ...merged,
                             {
                                 type: "SYSTEM_MESSAGE",
-                                text: `已切换到会话: ${file.split("/").pop()}`,
+                                text: `已切换到会话: ${path.basename(file)}`,
                             },
                         ], file);
                     }
@@ -608,7 +605,7 @@ async function activate(context) {
                     // 先 SESSION_SELECTED（PWA 清 feed + 标题 + 切换态），再 HISTORY_REPLAY。
                     if (ev.type === "SESSION_FOLLOW") {
                         const tfile = String(ev.file || ev.csFile || "");
-                        const base = tfile.split("/").pop() || "";
+                        const base = path.basename(tfile);
                         // csFile 优先（transcripts 无同名文件时唯一可用源），否则按基名解析
                         let csFile = typeof ev.csFile === "string" && fs.existsSync(ev.csFile)
                             ? ev.csFile
@@ -624,7 +621,7 @@ async function activate(context) {
                         // 指向所选会话本身的跟随放行并解除窗口。
                         const sel = lastExplicitSelect;
                         if (sel && Date.now() < sel.until) {
-                            const selBase = (sel.file.split("/").pop() || "").replace(/\.jsonl$/i, "");
+                            const selBase = path.basename(sel.file).replace(/\.jsonl$/i, "");
                             const followBase = base.replace(/\.jsonl$/i, "");
                             if (selBase && followBase && selBase !== followBase) {
                                 lastExplicitSelect = { file: sel.file, until: Date.now() + EXPLICIT_SELECT_GUARD_MS };
@@ -639,7 +636,7 @@ async function activate(context) {
                             transcriptWatcher?.seedFromHistory(hist);
                             const title = watcher
                                 ?.listSessions(40)
-                                .find((s) => s.file === csFile || (base && String(s.file || "").endsWith("/" + base)))
+                                .find((s) => s.file === csFile || (base && path.basename(String(s.file || "")) === base))
                                 ?.title || undefined;
                             bridge?.broadcast({
                                 type: "SESSION_SELECTED",
