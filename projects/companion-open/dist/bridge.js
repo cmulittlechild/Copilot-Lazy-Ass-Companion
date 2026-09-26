@@ -958,6 +958,12 @@ class BridgeServer {
                 ws._alive = false;
                 try {
                     ws.ping();
+                    // 应用层心跳：浏览器拿不到协议层 ping/pong 帧，客户端只能靠 inbound
+                    // JSON 消息感知链路活性。前台空闲时半死 socket readyState 仍 OPEN
+                    // → ws.send 静默吞消息；一条周期 PING 让客户端能在 ~30s 内识别断链。
+                    if (ws.readyState === ws_1.WebSocket.OPEN) {
+                        ws.send(JSON.stringify({ type: 'PING', timestamp: Date.now() }));
+                    }
                 }
                 catch {
                     try {

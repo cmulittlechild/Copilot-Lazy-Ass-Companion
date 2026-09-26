@@ -19,7 +19,8 @@ PWA ↔ VS Code bridge。仓库 `~/repos/sidecar_remote/projects/companion-open`
 - `<<<` AGENT_STREAM_START/SET/CHUNK/END 与 AGENT_MESSAGE = 回复到达时刻 → 延迟 = t_reply−t0
 - HISTORY_REPLAY n=N = 切会话回放条数；SYSTEM_MESSAGE = "已切换到会话: <file>"
 - 注意：`MODEL_SELECTED`/`SESSION_SELECTED`/`MODEL_LIST` 是 request→reply 单播，旁路监控看不到，只看 PWA UI。
-- ws 模块在 `projects/companion-open/node_modules/ws`；脚本放 /tmp，Terminal.app 开一个窗口跑它并排录屏，时间戳直接进画面。
+- ws 模块在 `projects/companion-open/node_modules/ws`；监控脚本已固化在本 skill 目录 `ws_monitor.mjs`（Node 24+ 原生 WebSocket 零依赖），直接 `node .agents/skills/testing-sidecar-companion/ws_monitor.mjs` 即可（/tmp 会被系统周期清理，勿再放那里）。Terminal.app 开窗口跑它并排录屏，时间戳直接进画面。
+- 监控须打印 PING 帧（8s 一跳的应用层心跳）：区分"链路活着但没业务流量"与"真断链"；~3min 空闲吞包修复后，前台空闲应见 PING 持续、CLOSED 零次。
 
 ## session-store.db（快速通道验证）
 `~/Library/Application Support/Code/User/globalStorage/github.copilot-chat/session-store.db`

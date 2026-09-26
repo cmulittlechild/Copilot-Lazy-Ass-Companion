@@ -112,6 +112,11 @@
   let intentionalClose = false;
   let lastTunnelUrl = null;
   let reconnectAttempt = 0;
+  // 链路活性：服务端 8s 一次 PING 消息作应用层心跳；前台空闲时半死 socket
+  // readyState 仍 OPEN，send() 成功返回但消息被吞——用最近入站时间判活性。
+  let lastInboundAt = 0;
+  const SOCKET_STALE_MS = 30000; // 3 个心跳周期未入站即判死
+  let linkWatchdog = null;
   /** 用户选择的目标实例 ws 地址（localStorage 持久化）；null = 默认连接当前页面 host */
   let instanceUrlOverride = readStoredInstanceUrl();
   /** INSTANCE_LIST 响应超时兜底 timer（服务端未接线时显示空态） */
@@ -2664,6 +2669,22 @@
 
   function sendMessage(obj, opts) {
     if (!obj || typeof obj !== 'object') return false;
+    // 半死 socket：OPEN 但超过 3 个心跳周期无任何入站 → ws.send 会静默吞。
+    // 不碰这条链路：判离线入队 + 立即重连，消息经重连后 flushOutboundQueue 送达。
+    if (
+      ws &&
+      ws.readyState === WebSocket.OPEN &&
+      lastInboundAt > 0 &&
+      Date.now() - lastInboundAt > SOCKET_STALE_MS
+    ) {
+      if (opts && opts.queueIfOffline && obj.type === 'PHONE_MESSAGE') {
+        if (outboundQueue.length >= MAX_OUTBOUND_QUEUE) outboundQueue.shift();
+        obj.at = Date.now();
+        outboundQueue.push(obj);
+      }
+      forceReconnect();
+      return false;
+    }
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       if (opts && opts.queueIfOffline && obj.type === 'PHONE_MESSAGE') {
         if (outboundQueue.length >= MAX_OUTBOUND_QUEUE) outboundQueue.shift();
@@ -2712,8 +2733,25 @@
     reconnectTimer = setTimeout(connect, delay);
   }
 
+  /** 半死/断链强制重连：摘掉旧 handler 防重复触发，close 后立刻 connect */
+  function forceReconnect() {
+    if (ws) {
+      try {
+        ws.onclose = null;
+        ws.onerror = null;
+        ws.onmessage = null;
+        if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) ws.close();
+      } catch (_) {}
+      ws = null;
+    }
+    clearTimeout(reconnectTimer);
+    connect();
+  }
+
   function connect() {
     intentionalClose = false;
+    // 新连接视为活性起点：首个 PING 未达前不误判半死
+    lastInboundAt = Date.now();
     const tok = pageToken();
     setStatus(
       false,
@@ -2754,6 +2792,8 @@
       }
     };
     ws.onmessage = (ev) => {
+      // 任何入站（含服务端 PING）都算活性证据
+      lastInboundAt = Date.now();
       try {
         handle(JSON.parse(String(ev.data)));
       } catch {
@@ -3036,20 +3076,29 @@
     } else if (document.visibilityState === 'visible') {
       const elapsed = lastHiddenTime ? Date.now() - lastHiddenTime : 0;
       const isZombieOrClosed = !ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING;
-      if (elapsed > 15000 || isZombieOrClosed) {
-        if (ws) {
-          try {
-            ws.onclose = null;
-            ws.onerror = null;
-            ws.onmessage = null;
-            ws.close();
-          } catch (_) {}
-        }
-        connect();
+      // 唤醒即查活性：后台挂起期间入站停摆，lastInboundAt 超时即半死 → 重连
+      const stale = lastInboundAt > 0 && Date.now() - lastInboundAt > SOCKET_STALE_MS;
+      if (elapsed > 15000 || isZombieOrClosed || stale) {
+        forceReconnect();
       }
       lastHiddenTime = 0;
     }
   });
+
+  // 前台空闲半死看门狗：页面不挂起时 socket 仍可能静默断（NAT 超时/网络切换），
+  // 每 10s 查一次——超过 SOCKET_STALE_MS 无任何入站（含服务端 8s PING）即重连。
+  linkWatchdog = setInterval(() => {
+    if (
+      !intentionalClose &&
+      ws &&
+      ws.readyState === WebSocket.OPEN &&
+      lastInboundAt > 0 &&
+      Date.now() - lastInboundAt > SOCKET_STALE_MS
+    ) {
+      setStatus(false, '连接超时，重连中…');
+      forceReconnect();
+    }
+  }, 10000);
 
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker
