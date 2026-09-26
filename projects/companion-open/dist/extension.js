@@ -593,7 +593,10 @@ async function activate(context) {
             transcriptWatcher = new transcriptWatcher_1.TranscriptWatcher({
                 dir: tdir,
                 chatSessionsDir: csdir,
-                sessionStoreDb: fs.existsSync(sessionStoreDb) ? sessionStoreDb : undefined,
+                // 路径恒传入、不做激活期 existsSync 门槛：Copilot 常在扩展激活之后才
+                // 创建 session-store.db（登录/首个会话触发），一次性判定会让 turns
+                // 快速通道永久失效。文件不存在时由 openSessionDb 惰性探测返回 null。
+                sessionStoreDb,
                 pollMs: Math.max(10, cfg.get("pollMs", 50)),
                 onEvent: (ev) => {
                     if (ev.type === "USER_MESSAGE" &&
@@ -606,6 +609,7 @@ async function activate(context) {
                     if (ev.type === "SESSION_FOLLOW") {
                         const tfile = String(ev.file || ev.csFile || "");
                         const base = path.basename(tfile);
+                        qrPanel.addLog(`SESSION_FOLLOW: ${base}`);
                         // csFile 优先（transcripts 无同名文件时唯一可用源），否则按基名解析
                         let csFile = typeof ev.csFile === "string" && fs.existsSync(ev.csFile)
                             ? ev.csFile
@@ -625,6 +629,7 @@ async function activate(context) {
                             const followBase = base.replace(/\.jsonl$/i, "");
                             if (selBase && followBase && selBase !== followBase) {
                                 lastExplicitSelect = { file: sel.file, until: Date.now() + EXPLICIT_SELECT_GUARD_MS };
+                                qrPanel.addLog(`SESSION_FOLLOW 压制: 显式选择窗口内 ${followBase}`);
                                 return;
                             }
                             lastExplicitSelect = undefined;

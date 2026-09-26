@@ -30,6 +30,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { pathKey } from './pathutil';
 
 // ---------------------------------------------------------------------------
 // 类型
@@ -126,8 +127,9 @@ export function defaultWorkspaceStorageRoots(): string[] {
   const out: string[] = [];
   for (const r of roots) {
     const n = path.normalize(r);
-    if (seen.has(n)) continue;
-    seen.add(n);
+    const k = pathKey(n);
+    if (seen.has(k)) continue;
+    seen.add(k);
     out.push(n);
   }
   return out;
@@ -355,7 +357,7 @@ export class WorkspaceIndex {
       for (const ent of entries) {
         if (!ent.isDirectory()) continue;
         const storageDir = path.join(root, ent.name);
-        const norm = path.normalize(storageDir);
+        const norm = pathKey(storageDir);
         if (seenDirs.has(norm)) continue;
         seenDirs.add(norm);
         try {
@@ -375,7 +377,7 @@ export class WorkspaceIndex {
     this.records = records;
     this.byHashMap = new Map(records.map((r) => [r.storageHash, r]));
     this.byIdMap = new Map(records.map((r) => [r.workspaceId, r]));
-    this.byStorageDir = new Map(records.map((r) => [path.normalize(r.storageDir), r]));
+    this.byStorageDir = new Map(records.map((r) => [pathKey(r.storageDir), r]));
     this.log(
       `[workspaceIndex] scan: ${records.length} 个工作区（远程 ${
         records.filter((r) => r.isRemote).length
@@ -478,7 +480,7 @@ export class WorkspaceIndex {
     }
     // 逐级上溯，直到根（parent === dir 时停）
     for (;;) {
-      const hit = this.byStorageDir.get(path.normalize(dir));
+      const hit = this.byStorageDir.get(pathKey(dir));
       if (hit) return hit;
       const parent = path.dirname(dir);
       if (parent === dir) return undefined;

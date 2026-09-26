@@ -2,7 +2,7 @@
   "name": "copilot-sidecar-companion",
   "displayName": "Copilot Lazy Ass Companion",
   "description": "Non-replacing remote companion (Copilot Lazy Ass) for GitHub Copilot Chat: mirror chatSessions over WebSocket/PWA and inject prompts via workbench chat commands.",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "publisher": "local-dev",
   "license": "MIT",
   "icon": "icon.png",

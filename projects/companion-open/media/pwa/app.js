@@ -155,6 +155,8 @@
    */
   const SEND_VERIFY_MS = 9000;
   let pendingSendCheck = null;
+  /** 核验计时器误报时间戳：送达确认若晚于误报到达，补一条「已送达」修正提示 */
+  let sendVerifyMissedAt = 0;
   /** 待发核验持久化 key：页面被半死 socket 刷新杀死内存计时器时，刷新后从这里回填 */
   const PENDING_SEND_KEY = 'sidecar.pendingSend';
   function persistPendingSend(text, key) {
@@ -1762,6 +1764,18 @@
         }
         break;
       case 'COPILOT_DONE':
+        // inject_soft_unverified = 服务端已把消息提交进目标会话（Windows 落盘确认慢
+        // 会触发该路径）——送达核验立即通过，别让 9s 计时器误报「可能未送达」。
+        if (msg.reason === 'inject_soft_unverified') {
+          if (pendingSendCheck) {
+            clearTimeout(pendingSendCheck.timer);
+            pendingSendCheck = null;
+            try { sessionStorage.removeItem(PENDING_SEND_KEY); } catch (_) {}
+          } else if (sendVerifyMissedAt && Date.now() - sendVerifyMissedAt < 120000) {
+            sendVerifyMissedAt = 0;
+            addSys('已确认送达（此前误报未送达，勿重复发送）');
+          }
+        }
         markAllToolsDone();
         // 全量收尾：独立 typing-row + 所有行上的 ••• + streaming 光标
         // force：回复已结束后绝不能继续「…」跳动或发送键停在停止
@@ -2902,6 +2916,7 @@
           requestRunning = false;
           paintSendButton();
         }
+        sendVerifyMissedAt = Date.now();
         addSys('发送可能未送达（连接异常），文本已回填，请重新发送');
       }, SEND_VERIFY_MS),
     };

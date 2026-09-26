@@ -41,6 +41,7 @@ const os = __importStar(require("os"));
 const path = __importStar(require("path"));
 const string_decoder_1 = require("string_decoder");
 const jsonl_1 = require("./jsonl");
+const pathutil_1 = require("./pathutil");
 /**
  * 超过此大小的会话文件不整读（只读尾部）。
  * 本机实测最大会话文件 325MB，整读耗时 4900ms 且堆增长 767MB，
@@ -237,17 +238,19 @@ class SessionWatcher {
             if (!rec.chatSessionsDir)
                 continue;
             const n = path.normalize(rec.chatSessionsDir);
-            if (seenDirs.has(n))
+            const k = (0, pathutil_1.pathKey)(n);
+            if (seenDirs.has(k))
                 continue;
-            seenDirs.add(n);
+            seenDirs.add(k);
             this.collectSessionsFromDir(n, all, rec);
         }
         // 2) 扩展宿主提供的偏好目录
         for (const d of dirs) {
             const n = path.normalize(d);
-            if (seenDirs.has(n))
+            const k = (0, pathutil_1.pathKey)(n);
+            if (seenDirs.has(k))
                 continue;
-            seenDirs.add(n);
+            seenDirs.add(k);
             this.collectSessionsFromDir(n, all);
         }
         // 3) 兜底：全局遍历 workspaceStorage
@@ -264,9 +267,10 @@ class SessionWatcher {
             for (const id of entries) {
                 const dir = path.join(root, id, 'chatSessions');
                 const n = path.normalize(dir);
-                if (seenDirs.has(n))
+                const k = (0, pathutil_1.pathKey)(n);
+                if (seenDirs.has(k))
                     continue;
-                seenDirs.add(n);
+                seenDirs.add(k);
                 this.collectSessionsFromDir(n, all);
             }
         }
@@ -572,9 +576,10 @@ class SessionWatcher {
             const queue = [];
             for (const d of dirs) {
                 const n = path.normalize(d);
-                if (seenDirs.has(n))
+                const k = (0, pathutil_1.pathKey)(n);
+                if (seenDirs.has(k))
                     continue;
-                seenDirs.add(n);
+                seenDirs.add(k);
                 queue.push(n);
             }
             for (const root of roots) {
@@ -588,9 +593,10 @@ class SessionWatcher {
                 for (const e of entries) {
                     const d = path.join(root, e, 'chatSessions');
                     const n = path.normalize(d);
-                    if (seenDirs.has(n))
+                    const k = (0, pathutil_1.pathKey)(n);
+                    if (seenDirs.has(k))
                         continue;
-                    seenDirs.add(n);
+                    seenDirs.add(k);
                     queue.push(n);
                 }
             }
@@ -829,7 +835,7 @@ class SessionWatcher {
             return;
         // 手机端显式选定了会话 → 不再自动跟随最新文件（否则会把选中的会话抢走）
         if (this.pinnedFile) {
-            if (this.current !== this.pinnedFile)
+            if (!(0, pathutil_1.samePath)(this.current, this.pinnedFile))
                 this.bindFile(this.pinnedFile);
             return;
         }
@@ -840,7 +846,7 @@ class SessionWatcher {
             });
         if (!newest)
             return;
-        if (newest !== this.current) {
+        if (!(0, pathutil_1.samePath)(newest, this.current)) {
             this.bindFile(newest);
         }
     }
@@ -1244,9 +1250,10 @@ function sessionDiscoveryFromExtension(storageUri, globalStorageUri) {
     const seen = new Set();
     const pushRoot = (r) => {
         const n = path.normalize(r);
-        if (seen.has(n))
+        const k = (0, pathutil_1.pathKey)(n);
+        if (seen.has(k))
             return;
-        seen.add(n);
+        seen.add(k);
         roots.push(n);
     };
     // storageUri is extension workspaceStorage/<wsHash>/local.xxx — parent is wsHash dir

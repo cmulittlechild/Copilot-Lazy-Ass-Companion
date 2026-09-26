@@ -18,6 +18,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { JsonlProjector, PhoneEvent, isInternalMonologue, textOfUserReq } from './jsonl';
+import { samePath } from './pathutil';
 
 export interface PendingGapRequest {
   userText: string;
@@ -611,7 +612,7 @@ export class TranscriptWatcher {
     // 这解决了：用户从手机发消息 → pinFile → 之后在桌面切换到新会话 →
     // watcher 仍被 pin 在旧会话 → 新会话的回复无法实时推送到远端。
     if (this.pinnedFile) {
-      if (this.current !== this.pinnedFile && fs.existsSync(this.pinnedFile)) {
+      if (!samePath(this.current, this.pinnedFile) && fs.existsSync(this.pinnedFile)) {
         this.bindFile(this.pinnedFile, { liveOnly: true });
       }
       // 检查 pinned 文件是否已沉默
@@ -648,7 +649,7 @@ export class TranscriptWatcher {
               : undefined;
             const tExists = fs.existsSync(tfile);
             const csExists = !!(csPath && fs.existsSync(csPath));
-            if ((tExists || csExists) && (tExists ? tfile : csPath) !== this.current) {
+            if ((tExists || csExists) && !samePath(tExists ? tfile : csPath, this.current)) {
               this.pinnedFile = null; // 解除 pin
               if (tExists) {
                 // 无论谁触发的跟随都 live-only@EOF：重绑定 ≠ 加载历史，
@@ -682,7 +683,7 @@ export class TranscriptWatcher {
     }
     if (!base) return;
     const tfile = path.join(this.opts.dir, base);
-    if (tfile === this.current) return;
+    if (samePath(tfile, this.current)) return;
     const csPath = this.opts.chatSessionsDir ? path.join(this.opts.chatSessionsDir, base) : undefined;
     if (!fs.existsSync(tfile)) {
       // transcripts 无同名文件但 chatSessions 有新会话 → 仍发跟随（扩展用 csFile 回放）。
@@ -691,7 +692,7 @@ export class TranscriptWatcher {
         this.current !== undefined &&
         csPath &&
         fs.existsSync(csPath) &&
-        csPath !== this.lastFollowedPath
+        !samePath(csPath, this.lastFollowedPath)
       ) {
         this.lastFollowedPath = csPath;
         this.emit({
@@ -834,7 +835,9 @@ export class TranscriptWatcher {
     close(): void;
   } | null {
     const dbPath = this.opts.sessionStoreDb;
-    if (!dbPath) return null;
+    // 文件不存在即返回：readOnly 失败后退回的普通打开会在缺失路径上**创建空库**，
+    // 提前创建 session-store.db 会干扰 Copilot 首次初始化。
+    if (!dbPath || !fs.existsSync(dbPath)) return null;
     try {
       const { DatabaseSync } = require('node:sqlite') as {
         DatabaseSync: new (p: string, opts?: { readOnly?: boolean }) => {
@@ -874,6 +877,9 @@ export class TranscriptWatcher {
   private pollSessionStoreDb() {
     const sid = this.sessionDbSessionId;
     if (!this.opts.sessionStoreDb || !sid || this.disposed) return;
+    // 目录在激活时可能尚未创建（db 由 Copilot 登录/首会话后才出现）：
+    // bindSessionDbWatcher 对缺目录早退且绑定期仅一次 → 这里每次轮询重试挂 watch。
+    if (!this.sessionDbWatcher) this.bindSessionDbWatcher();
     let rows: Array<{ id: number; user_message: string | null; assistant_response: string | null }>;
     const db = this.openSessionDb();
     if (!db) return;

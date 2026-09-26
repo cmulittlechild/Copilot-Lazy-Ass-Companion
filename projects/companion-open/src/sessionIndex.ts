@@ -72,6 +72,18 @@ export class SessionIndexReader {
   private cache: Map<string, SessionIndexEntry> = new Map();
   /** 是否已执行过至少一次 readAll（用于 getTitle 首次调用时懒加载）。 */
   private loaded = false;
+  /** 最近一次 readAll 的毫秒时刻（限频重读用）。 */
+  private lastReadMs = 0;
+  /** 未命中/占位标题时的最小重读间隔——state.vscdb 标题由 LLM 滞后生成，
+   *  激活期一次性缓存会让新会话标题永久停在「新建聊天」。 */
+  private static readonly REFRESH_MS = 5000;
+  /** 官方占位标题（命中时也限频重读，等 LLM 真标题落地）。 */
+  private static readonly PLACEHOLDER_TITLES = new Set([
+    'new chat',
+    '新建聊天',
+    '新建会话',
+    'untitled chat',
+  ]);
 
   constructor(private opts: { vscdbPath?: string; log?: (line: string) => void }) {}
 
@@ -83,17 +95,27 @@ export class SessionIndexReader {
     const entries = this.tryRead();
     this.cache = new Map(entries.map((e) => [e.sessionId, e]));
     this.loaded = true;
+    this.lastReadMs = Date.now();
     return entries;
   }
 
   /**
    * 从最近一次 readAll 的缓存中取会话官方标题；首次调用时先 readAll 一次。
+   * 未命中或命中占位标题（「新建聊天」等）时限频重读：索引在会话创建后、
+   * LLM 生成标题后才写入，固定缓存会把标题钉死在占位值上。
    */
   getTitle(sessionId: string): string | undefined {
     if (!this.loaded) {
       this.readAll();
     }
-    return this.cache.get(sessionId)?.title;
+    let title = this.cache.get(sessionId)?.title;
+    const isPlaceholder =
+      title != null && SessionIndexReader.PLACEHOLDER_TITLES.has(title.trim().toLowerCase());
+    if ((title == null || isPlaceholder) && Date.now() - this.lastReadMs >= SessionIndexReader.REFRESH_MS) {
+      this.readAll();
+      title = this.cache.get(sessionId)?.title;
+    }
+    return title;
   }
 
   /** 实际读取逻辑：打开 sqlite → 查询索引 JSON → 解析为条目数组。 */

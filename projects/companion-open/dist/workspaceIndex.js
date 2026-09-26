@@ -67,6 +67,7 @@ exports.decodeRemoteAuthority = decodeRemoteAuthority;
 const fs = __importStar(require("fs"));
 const os = __importStar(require("os"));
 const path = __importStar(require("path"));
+const pathutil_1 = require("./pathutil");
 // ---------------------------------------------------------------------------
 // 根目录发现
 // ---------------------------------------------------------------------------
@@ -93,9 +94,10 @@ function defaultWorkspaceStorageRoots() {
     const out = [];
     for (const r of roots) {
         const n = path.normalize(r);
-        if (seen.has(n))
+        const k = (0, pathutil_1.pathKey)(n);
+        if (seen.has(k))
             continue;
-        seen.add(n);
+        seen.add(k);
         out.push(n);
     }
     return out;
@@ -311,7 +313,7 @@ class WorkspaceIndex {
                 if (!ent.isDirectory())
                     continue;
                 const storageDir = path.join(root, ent.name);
-                const norm = path.normalize(storageDir);
+                const norm = (0, pathutil_1.pathKey)(storageDir);
                 if (seenDirs.has(norm))
                     continue;
                 seenDirs.add(norm);
@@ -330,7 +332,7 @@ class WorkspaceIndex {
         this.records = records;
         this.byHashMap = new Map(records.map((r) => [r.storageHash, r]));
         this.byIdMap = new Map(records.map((r) => [r.workspaceId, r]));
-        this.byStorageDir = new Map(records.map((r) => [path.normalize(r.storageDir), r]));
+        this.byStorageDir = new Map(records.map((r) => [(0, pathutil_1.pathKey)(r.storageDir), r]));
         this.log(`[workspaceIndex] scan: ${records.length} 个工作区（远程 ${records.filter((r) => r.isRemote).length}，有会话 ${records.filter((r) => r.sessionCount > 0).length}）`);
         return records;
     }
@@ -426,7 +428,7 @@ class WorkspaceIndex {
         }
         // 逐级上溯，直到根（parent === dir 时停）
         for (;;) {
-            const hit = this.byStorageDir.get(path.normalize(dir));
+            const hit = this.byStorageDir.get((0, pathutil_1.pathKey)(dir));
             if (hit)
                 return hit;
             const parent = path.dirname(dir);

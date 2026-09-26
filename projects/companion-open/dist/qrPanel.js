@@ -105,6 +105,17 @@ class QrPanelProvider {
         this.post({ type: 'state', key: 'tokenHint', value: hint });
     }
     addLog(line) {
+        // 连续重复行合并为「×N」后缀：模型列表轮询等高频日志会刷屏淹掉有效行。
+        const last = this.state.logLines[this.state.logLines.length - 1];
+        const m = last && last.match(/^(.*) ×(\d+)$/);
+        if (last === line) {
+            this.state.logLines[this.state.logLines.length - 1] = `${line} ×2`;
+            return;
+        }
+        else if (m && m[1] === line) {
+            this.state.logLines[this.state.logLines.length - 1] = `${line} ×${parseInt(m[2], 10) + 1}`;
+            return;
+        }
         this.state.logLines.push(line);
         if (this.state.logLines.length > 40)
             this.state.logLines.shift();

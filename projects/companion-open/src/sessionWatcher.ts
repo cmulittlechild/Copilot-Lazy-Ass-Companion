@@ -4,6 +4,7 @@ import * as path from 'path';
 import { StringDecoder } from 'string_decoder';
 import { JsonlProjector, PhoneEvent, textOfUserReq } from './jsonl';
 import { SessionIndexReader } from './sessionIndex';
+import { pathKey, samePath } from './pathutil';
 import type { WorkspaceIndex, WorkspaceRecord } from './workspaceIndex';
 
 /**
@@ -226,16 +227,18 @@ export class SessionWatcher {
     for (const rec of records) {
       if (!rec.chatSessionsDir) continue;
       const n = path.normalize(rec.chatSessionsDir);
-      if (seenDirs.has(n)) continue;
-      seenDirs.add(n);
+      const k = pathKey(n);
+      if (seenDirs.has(k)) continue;
+      seenDirs.add(k);
       this.collectSessionsFromDir(n, all, rec);
     }
 
     // 2) 扩展宿主提供的偏好目录
     for (const d of dirs) {
       const n = path.normalize(d);
-      if (seenDirs.has(n)) continue;
-      seenDirs.add(n);
+      const k = pathKey(n);
+      if (seenDirs.has(k)) continue;
+      seenDirs.add(k);
       this.collectSessionsFromDir(n, all);
     }
 
@@ -251,8 +254,9 @@ export class SessionWatcher {
       for (const id of entries) {
         const dir = path.join(root, id, 'chatSessions');
         const n = path.normalize(dir);
-        if (seenDirs.has(n)) continue;
-        seenDirs.add(n);
+        const k = pathKey(n);
+        if (seenDirs.has(k)) continue;
+        seenDirs.add(k);
         this.collectSessionsFromDir(n, all);
       }
     }
@@ -535,8 +539,9 @@ export class SessionWatcher {
       const queue: string[] = [];
       for (const d of dirs) {
         const n = path.normalize(d);
-        if (seenDirs.has(n)) continue;
-        seenDirs.add(n);
+        const k = pathKey(n);
+        if (seenDirs.has(k)) continue;
+        seenDirs.add(k);
         queue.push(n);
       }
       for (const root of roots) {
@@ -549,8 +554,9 @@ export class SessionWatcher {
         for (const e of entries) {
           const d = path.join(root, e, 'chatSessions');
           const n = path.normalize(d);
-          if (seenDirs.has(n)) continue;
-          seenDirs.add(n);
+          const k = pathKey(n);
+          if (seenDirs.has(k)) continue;
+          seenDirs.add(k);
           queue.push(n);
         }
       }
@@ -773,7 +779,7 @@ export class SessionWatcher {
     if (this.disposed) return;
     // 手机端显式选定了会话 → 不再自动跟随最新文件（否则会把选中的会话抢走）
     if (this.pinnedFile) {
-      if (this.current !== this.pinnedFile) this.bindFile(this.pinnedFile);
+      if (!samePath(this.current, this.pinnedFile)) this.bindFile(this.pinnedFile);
       return;
     }
     const newest =
@@ -783,7 +789,7 @@ export class SessionWatcher {
         roots: this.opts.roots ?? defaultSessionRoots(),
       });
     if (!newest) return;
-    if (newest !== this.current) {
+    if (!samePath(newest, this.current)) {
       this.bindFile(newest);
     }
   }
@@ -1172,8 +1178,9 @@ export function sessionDiscoveryFromExtension(
   const seen = new Set<string>();
   const pushRoot = (r: string) => {
     const n = path.normalize(r);
-    if (seen.has(n)) return;
-    seen.add(n);
+    const k = pathKey(n);
+    if (seen.has(k)) return;
+    seen.add(k);
     roots.push(n);
   };
   // storageUri is extension workspaceStorage/<wsHash>/local.xxx — parent is wsHash dir

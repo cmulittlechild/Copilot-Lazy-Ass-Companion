@@ -158,6 +158,17 @@ export class JsonlProjector {
             ...this.applyResponseMutation(`requests/${gi}/response`, gi, v[n].response, undefined),
           );
         }
+        // 新版 Copilot 把整个**已完成**请求一条 append 落盘（elapsedMs/result/
+        // modelState.completedAt 随请求对象同来），不再写独立的
+        // ["requests",N,"elapsedMs"] 收尾标记 → 必须就地补 COPILOT_DONE，
+        // 否则手机端 typing/停止按钮要等 transcript 兜底超时（~120s）才清。
+        const reason = requestDoneReason(v[n]);
+        if (reason) {
+          out.push(...this.endActiveStreamsForRequest(gi));
+          const doneEv: PhoneEvent = { type: 'COPILOT_DONE', requestIndex: gi, reason };
+          if (this.doneSink) this.scheduleDone(gi, doneEv);
+          else out.push(doneEv);
+        }
       }
       this.reqCount = Math.max(this.reqCount, base + v.length);
       return out;
@@ -186,9 +197,15 @@ export class JsonlProjector {
       if (Array.isArray(resp) && resp.length) {
         out.push(...this.applyResponseMutation(`requests/${i}/response`, i, resp, undefined));
       }
-      // if request looks finished, end streams
-      if (req?.response && (req.result || req.elapsedMs != null)) {
-        out.push(...this.endActiveStreamsForRequest(i));
+      // if request looks finished, end streams + DONE（快照路径同因嵌带完成标记）
+      if (req?.response) {
+        const reason = requestDoneReason(req);
+        if (reason) {
+          out.push(...this.endActiveStreamsForRequest(i));
+          const doneEv: PhoneEvent = { type: 'COPILOT_DONE', requestIndex: i, reason };
+          if (this.doneSink) this.scheduleDone(i, doneEv);
+          else out.push(doneEv);
+        }
       }
     }
     this.lastKind0ReqCount = reqs.length;
@@ -348,6 +365,22 @@ export class JsonlProjector {
     }
     return out;
   }
+}
+
+/**
+ * 请求对象自带的完成标记。新版 Copilot（0.67+）把整轮请求以单条
+ * `k=["requests"]` append 落盘，完成态直接写在请求对象上
+ * （elapsedMs/result/modelState.completedAt/isCanceled），
+ * 不再有独立的 [N,"elapsedMs"] 行。
+ */
+function requestDoneReason(req: any): string | undefined {
+  if (!req || typeof req !== 'object') return undefined;
+  if (req.isCanceled === true || req.isCanceled === 1) return 'isCanceled';
+  if (req.result != null) return 'result';
+  if (req.elapsedMs != null) return 'elapsedMs';
+  const ms = req.modelState;
+  if (ms && typeof ms === 'object' && ms.completedAt != null) return 'modelState.completedAt';
+  return undefined;
 }
 
 export function textOfUserReq(t: any): string {
