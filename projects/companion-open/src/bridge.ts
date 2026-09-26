@@ -111,6 +111,41 @@ function isInternalSystemMessage(ev: any): boolean {
   );
 }
 
+/**
+ * 历史里被停止/失败/无回复的轮次只剩 USER 行，连排即成「发送堆一起」。
+ * 为每个**非末尾**的孤儿轮（后面已有下一条 USER 即证明该轮已死）补一条终态
+ * 占位回复，恢复一问一答交错。末尾的未答 USER 可能在途，不动。
+ */
+function annotateOrphanUserTurns(events: any[]): any[] {
+  const out = Array.isArray(events) ? events.slice() : [];
+  const isAnswer = (t: string) =>
+    t === 'AGENT_MESSAGE' ||
+    t === 'AGENT_STREAM_SET' ||
+    t === 'AGENT_STREAM_CHUNK' ||
+    t === 'AGENT_STREAM_END' ||
+    t === 'AGENT_STREAM_START';
+  for (let i = 0; i < out.length; i++) {
+    if (out[i]?.type !== 'USER_MESSAGE') continue;
+    let j = i + 1;
+    let answered = false;
+    while (j < out.length && out[j]?.type !== 'USER_MESSAGE') {
+      if (isAnswer(String(out[j]?.type || ''))) { answered = true; break; }
+      j++;
+    }
+    if (!answered && j < out.length) {
+      const u = out[i];
+      out.splice(i + 1, 0, {
+        type: 'AGENT_MESSAGE',
+        streamId: `orphan/${u.requestId || u._ut || i}`,
+        text: '*（该轮无回复——已停止或请求失败）*',
+        requestIndex: typeof u.requestIndex === 'number' ? u.requestIndex : undefined,
+        timestamp: u.timestamp,
+      });
+    }
+  }
+  return out;
+}
+
 /** Stable key for history / offline dedupe. */
 function eventDedupeKey(ev: any): string {
   if (!ev || typeof ev !== 'object') return String(ev);
@@ -456,7 +491,7 @@ export class BridgeServer {
               const provUsers = provided.filter((e) => e?.type === 'USER_MESSAGE').length;
               if (provUsers >= liveUsers) replay = provided;
             }
-            this.send(ws, { type: 'HISTORY_REPLAY', messages: replay });
+            this.send(ws, { type: 'HISTORY_REPLAY', messages: annotateOrphanUserTurns(replay) });
           }
           if (this.activeStreamId && this.activeStreamAccum) {
             this.send(ws, {
@@ -575,7 +610,7 @@ export class BridgeServer {
       const firstUser = tail.findIndex((e) => e.type === 'USER_MESSAGE');
       slice = firstUser > 0 ? tail.slice(firstUser) : tail;
     }
-    this.history = slice;
+    this.history = annotateOrphanUserTurns(slice);
     // file 透传：PWA 回放后据此恢复该会话的滚动位置（切回不从头拉到底）
     this.broadcastRaw({
       type: 'HISTORY_REPLAY',
