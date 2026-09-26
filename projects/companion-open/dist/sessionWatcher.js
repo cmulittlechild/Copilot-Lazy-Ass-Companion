@@ -425,12 +425,15 @@ class SessionWatcher {
                     continue;
                 // 0.5.22：从 request 提取 timestamp 透传到事件，PWA 按时间戳排序
                 const reqTs = typeof req.timestamp === 'number' ? req.timestamp : undefined;
-                // 1) USER_MESSAGE for this request
+                // 1) USER_MESSAGE for this request — 剥离内嵌 response：append 行的
+                //    projectLine 会顺带投影 v[n].response（jsonl.ts），与 step-2 的
+                //    独立 response 突变或 step-3 的显式内嵌投影重复 → 同 streamId 双投。
+                //    统一由 step-3（无突变时）处理内嵌兜底，此处只出 USER。
                 for (const ev of proj.projectLine({
                     kind: 2,
                     k: ['requests'],
                     i: ri,
-                    v: [req],
+                    v: [{ ...req, response: undefined }],
                 })) {
                     if (reqTs != null && ev && !ev.timestamp)
                         ev.timestamp = reqTs;
