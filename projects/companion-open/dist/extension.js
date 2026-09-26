@@ -432,7 +432,15 @@ async function activate(context) {
                         transcriptWatcher?.seedFromHistory(hist);
                         rebindTranscriptForSession(file);
                     }
-                    reply({ type: "SESSION_SELECTED", file, ok, timestamp: Date.now() });
+                    // 附带真实标题：客户端 SESSION_SELECTED 若拿不到 title 会回退到
+                    // currentSessionMeta.title（旧会话名）造成标题滞留。
+                    const selTitle = ok
+                        ? watcher
+                            ?.listSessions(40)
+                            .find((s) => s.file === file || path.basename(String(s.file || "")) === path.basename(file))
+                            ?.title
+                        : undefined;
+                    reply({ type: "SESSION_SELECTED", file, ok, title: selTitle, timestamp: Date.now() });
                     if (ok) {
                         // 完整同步：回放该会话历史 + sessiondb 补全 chatSessions 尚未写盘的回答
                         // （HISTORY_REPLAY 瞬时渲染，不走打字机，不会有滑到尾的动画洪水）。

@@ -1896,8 +1896,9 @@
           }
           setStatus(true, '切换会话…');
           const f = msg.file || currentSessionMeta.file || '';
-          // 已有标题优先于文件名回退：后续不带 title 的广播不得盖掉真会话名
-          const t = (msg.title && String(msg.title).trim()) || currentSessionMeta.title || titleFromSessionFile(f);
+          // 切到新会话时 currentSessionMeta.title 是旧会话名，不能先于文件缓存
+          // 兜底命中——否则头部滞留旧标题。msg.title → 列表缓存/文件名 → 旧 meta。
+          const t = (msg.title && String(msg.title).trim()) || titleFromSessionFile(f) || currentSessionMeta.title;
           if (f || t) setSessionTitle(t, f);
         } else {
           replayingInstant = false;
