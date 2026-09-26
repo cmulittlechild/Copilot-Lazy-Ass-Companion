@@ -700,7 +700,14 @@ class SessionWatcher {
                                         // 位置在前的历史轮一律丢弃（lastReqCount 兜底跨行追踪）
                                         continue;
                                     }
-                                    this.opts.onEvent({ type: 'USER_MESSAGE', text, requestId: rid, foreign: true });
+                                    this.opts.onEvent({
+                                        type: 'USER_MESSAGE',
+                                        text,
+                                        requestId: rid,
+                                        foreign: true,
+                                        // 来源会话标 _sess：否则 PWA 跨会话过滤不认它，外会话泡会漏进当前 feed
+                                        _sess: f.replace(/\.jsonl$/i, ''),
+                                    });
                                 }
                                 if (reqs.length > cursor.lastReqCount)
                                     cursor.lastReqCount = reqs.length;

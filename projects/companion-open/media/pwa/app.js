@@ -1598,6 +1598,22 @@
 
   function handle(msg) {
     if (!msg || !msg.type) return;
+    // 别会话的桌面消息：系统行提示而不是用户泡——否则 foreign 事件无 _sess 打标时
+    // 穿过过滤冒充当前会话的发言，看起来像本会话的轮次（实测漏泡根因）。
+    if (msg.type === 'USER_MESSAGE' && msg.foreign === true) {
+      const sid = String(msg._sess || '');
+      const want = sid + '.jsonl';
+      let label = '其他会话';
+      const cache = window.__sessionTitleCache || {};
+      for (const k in cache) {
+        if (baseNameAny(k) === want) {
+          label = cache[k];
+          break;
+        }
+      }
+      addSys(`【${label}】${String(msg.text || '')}`);
+      return;
+    }
     // 跨会话事件过滤：服务端给 live 事件打 _sess（绑定会话 id）；与当前绑定不符的
     // 直接丢弃，防别会话 USER/AGENT 泡漏进当前 feed（回放类消息不带 _sess 不拦）。
     if (msg._sess && currentSessionMeta.file) {

@@ -58,6 +58,8 @@ const DUP_USER_MS = 3000;
 const REPLAY_USER_TURNS = 10;
 /** pinned 文件超过该时间无新写入视为「沉默」，允许自动切换到更新的会话 */
 const PIN_STALE_MS = 60_000;
+/** 同题 USER_MESSAGE 多通道重影压制窗口：覆盖 chatSessions 批量落盘延迟（Windows ~75s+） */
+const USER_COPY_WINDOW_MS = 120_000;
 /** 手机侧会话绑定后的窗口期：期内自动跟随一律 live-only@EOF，防旧轮次洪水 */
 const PHONE_SELECT_WINDOW_MS = 60_000;
 
@@ -583,6 +585,7 @@ export class TranscriptWatcher {
       return undefined;
     }
     let newest: { name: string; mtimeMs: number } | undefined;
+    const tied: string[] = [];
     for (const name of entries) {
       if (!name.endsWith('.jsonl')) continue;
       const full = path.join(dir, name);
@@ -591,12 +594,60 @@ export class TranscriptWatcher {
         if (!st.isFile()) continue;
         if (!newest || st.mtimeMs > newest.mtimeMs) {
           newest = { name, mtimeMs: st.mtimeMs };
+          tied.length = 0;
+          tied.push(name);
+        } else if (st.mtimeMs === newest.mtimeMs) {
+          tied.push(name);
         }
       } catch {
         /* 不可读/已删除，忽略 */
       }
     }
-    return newest;
+    if (!newest || tied.length <= 1) return newest;
+    // Copilot 会把多个会话文件在同一个 tick 批量落盘（Windows 上实测到完全相同的
+    // mtime），目录枚举序裁决会让「用户最后实际交互的会话」稳定输给某个文件 →
+    // 桌面切会话后跟随永久失效。平手时读各文件尾部最后的时间戳，内容新者胜。
+    let best = newest;
+    let bestTs = this.tailTimestampMs(path.join(dir, best.name));
+    for (const name of tied.slice(1)) {
+      const ts = this.tailTimestampMs(path.join(dir, name));
+      if (ts > bestTs) {
+        bestTs = ts;
+        best = { name, mtimeMs: newest.mtimeMs };
+      }
+    }
+    return best;
+  }
+
+  /** 文件尾 64KB 内最后一个 "timestamp"/"ts" 数字字段：同 mtime 时裁决内容新旧 */
+  private tailTimestampMs(file: string): number {
+    let fd: number | undefined;
+    try {
+      fd = fs.openSync(file, 'r');
+      const size = fs.fstatSync(fd).size;
+      const n = Math.min(size, 64 * 1024);
+      const buf = Buffer.alloc(n);
+      fs.readSync(fd, buf, 0, n, Math.max(0, size - n));
+      const s = buf.toString('utf8');
+      let last = 0;
+      const re = /"(?:timestamp|ts)"\s*:\s*(\d{10,13})/g;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(s))) {
+        const v = Number(m[1]);
+        if (v > last) last = v;
+      }
+      return last;
+    } catch {
+      return 0;
+    } finally {
+      if (fd !== undefined) {
+        try {
+          fs.closeSync(fd);
+        } catch {
+          /* ignore */
+        }
+      }
+    }
   }
 
   /**
@@ -2317,8 +2368,11 @@ export class TranscriptWatcher {
     // suppressFallbackAgent 由 bindFile 设置，不在此清
   }
 
-  /** 归一化用户文+回复文 → 最近发出时间：阻断同轮次响应经不同 streamId/通道的重复投影 */
-  private recentAgentEmits = new Map<string, number>();
+  /** 归一化用户文+回复文 → {emit 时间, 当时的提问 seq}：seq 语义让同题真实重发不被误吞 */
+  private recentAgentEmits = new Map<string, { t: number; seq: number }>();
+  /** 归一化用户文 → 最近一次投影时间/requestId：吞掉多通道迟到重影且不抬提问 seq */
+  private recentUserEmitAt = new Map<string, number>();
+  private recentUserEmitRid = new Map<string, string>();
 
   /** 事件出口：dispose 后不再发出；记录助手正文供 chatSessions gap-fill 去重 */
   private emit(ev: PhoneEvent) {
@@ -2328,10 +2382,25 @@ export class TranscriptWatcher {
       (ev as any)._sess = this.boundSessionBase.replace(/\.jsonl$/, '');
     }
     if (ev && ev.type === 'USER_MESSAGE') {
+      // 同题多通道重影：transcript→sessiondb→chatSessions 各可能重投一次同一条
+      // USER_MESSAGE。若每次都抬 userSeqByUt，迟到 AGENT 副本会被当成「重问后的
+      // 新答」放行 → feed/重连回放双份（Windows 慢落盘把间隔拉到分钟级实测复现）。
+      // 同 ut 在窗口内的重复投影吞掉（不投影也不抬 seq）；带不同 requestId 的视为
+      // 真实重发（新请求新 rid），放行。无 rid 的事件无法区分 → 按重影处理。
+      const utNow = Date.now();
+      const utText = this.normUserText(String((ev as { text?: string }).text || ''));
+      const uRid = typeof (ev as any).requestId === 'string' ? ((ev as any).requestId as string) : '';
+      if (utText) {
+        const lastAt = this.recentUserEmitAt.get(utText) ?? 0;
+        const lastRid = this.recentUserEmitRid.get(utText) ?? '';
+        const freshRid = uRid !== '' && lastRid !== '' && uRid !== lastRid;
+        if (utNow - lastAt < USER_COPY_WINDOW_MS && !freshRid) return;
+        this.recentUserEmitAt.set(utText, utNow);
+        if (uRid) this.recentUserEmitRid.set(utText, uRid);
+      }
       // 记录提问序号：迟到重复投影只有「之后真的重问了同题」才放行
       this.userEmitSeq += 1;
-      const ut = this.normUserText(String((ev as { text?: string }).text || ''));
-      if (ut) this.userSeqByUt.set(ut, this.userEmitSeq);
+      this.userSeqByUt.set(utText, this.userEmitSeq);
     }
     if (ev && (ev.type === 'AGENT_MESSAGE' || ev.type === 'AGENT_STREAM_SET')) {
       const text = String((ev as { text?: string }).text || '');
@@ -2345,11 +2414,12 @@ export class TranscriptWatcher {
           (ev as any)._ut ??
           (Number.isNaN(evTs) ? this.activeUserText : this.resolveUtForTs(evTs));
         const ut = this.normUserText(String(resolvedEvUt ?? ''));
-        // 跨通道去重：t 流/sessiondb 同文同题答案间隔可达 ~6s 超过旧窗才双发；
-        // 键不含 ev.type、窗 15s，同题重问的新答由 userSeq 语义在别的检查放行。
+        // 跨通道去重：chatSessions 批量落盘可达 ~75s（Windows 实测），15s 旧窗
+        // 必漏 → 窗宽 120s；同题真实重发会抬 userSeq → seq 变化时放行，不误吞新答。
         const wkey = `${ut}|${this.agentTextKey(text)}`;
-        const last = this.recentAgentEmits.get(wkey) ?? 0;
-        if (Date.now() - last < 15000) return;
+        const curSeq = this.userSeqByUt.get(ut) ?? 0;
+        const lastE = this.recentAgentEmits.get(wkey);
+        if (lastE && Date.now() - lastE.t < 120_000 && lastE.seq === curSeq) return;
         // 集中兜底：同 ut 已答且本条与已投版本前/后 40 字同形 → 跨通道迟到
         // 残缺重投影（前缀异/超时窗躲过上两层压制）。同轮 text→tool→text 的
         // 第二段正文内容不同、前后 40 字都不同 → 不误伤。
@@ -2361,10 +2431,10 @@ export class TranscriptWatcher {
             (cur.slice(-40).length >= 12 && cur.slice(-40) === prev.slice(-40))
           ) return;
         }
-        this.recentAgentEmits.set(wkey, Date.now());
+        this.recentAgentEmits.set(wkey, { t: Date.now(), seq: curSeq });
         if (this.recentAgentEmits.size > 300) {
-          const cutoff = Date.now() - 60_000;
-          for (const [k, ts] of this.recentAgentEmits) if (ts < cutoff) this.recentAgentEmits.delete(k);
+          const cutoff = Date.now() - 150_000;
+          for (const [k, e] of this.recentAgentEmits) if (e.t < cutoff) this.recentAgentEmits.delete(k);
         }
         this.noteEmittedAgentText(text, {
           requestIndex: (ev as any).requestIndex,
