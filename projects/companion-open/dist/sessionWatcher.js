@@ -448,8 +448,11 @@ class SessionWatcher {
                         out.push(ev);
                     }
                 }
-                // 3) also project any response already embedded on the request object
-                if (Array.isArray(req.response) && req.response.length) {
+                // 3) also project any response already embedded on the request object —
+                //    仅当该请求在文件里没有真正的 response 突变时才走这条兜底：
+                //    两者同投会把同一答案渲染成相邻双块（mutations 先收尾，内嵌再投一遍）。
+                const hasResponseMuts = muts.some((m) => m.reqIndex === ri && m.isResponse);
+                if (!hasResponseMuts && Array.isArray(req.response) && req.response.length) {
                     for (const ev of proj.projectLine({
                         kind: 2,
                         k: ['requests', ri, 'response'],

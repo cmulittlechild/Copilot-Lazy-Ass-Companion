@@ -374,21 +374,25 @@
     // 本定时器；期满仍无活动才释放发送键。否则中途 DONE 会让按钮变回「发送」，
     // 长轮几乎无法从 PWA 停止。
     const deferMs = opts && typeof opts.deferMs === 'number' ? opts.deferMs : null;
+    // 统一的延迟释放检查：残留 .streaming 元素 + 最近 5s 有流活动 → 中途 DONE，
+    // 续查；残留但无活动 → 死流，清尾后释放。此前「仍有流就直接 return」是
+    // 死路——残留元素不消失时按钮滞留 ~60s 直到下一个 DONE。
+    const graceRelease = () => {
+      requestDoneTimer = null;
+      if (anyStreamingNow() && Date.now() - lastStreamActivityAt < 5000) {
+        requestDoneTimer = setTimeout(graceRelease, 1500);
+        return;
+      }
+      finishAllAssistantVisuals();
+      requestRunning = false;
+      paintSendButton();
+      if (statusText && !replaying && !replayingInstant) {
+        statusText.textContent = connectedLabel();
+      }
+      flushPendingSendQueue();
+    };
     if (deferMs != null) {
-      requestDoneTimer = setTimeout(() => {
-        requestDoneTimer = null;
-        if (anyStreamingNow()) {
-          // 宽限结束仍有流 → 再等一轮短宽限
-          setRequestRunning(false);
-          return;
-        }
-        requestRunning = false;
-        paintSendButton();
-        if (statusText && !replaying && !replayingInstant) {
-          statusText.textContent = connectedLabel();
-        }
-        flushPendingSendQueue();
-      }, deferMs);
+      requestDoneTimer = setTimeout(graceRelease, deferMs);
       return;
     }
     if (!anyStreamingNow()) {
@@ -401,15 +405,7 @@
       return;
     }
     // 仍有 streaming：短宽限等下一 turn
-    requestDoneTimer = setTimeout(() => {
-      requestDoneTimer = null;
-      if (anyStreamingNow()) return;
-      requestRunning = false;
-      paintSendButton();
-      if (statusText && !replaying && !replayingInstant) {
-        statusText.textContent = connectedLabel();
-      }
-    }, REQUEST_DONE_GRACE_MS);
+    requestDoneTimer = setTimeout(graceRelease, REQUEST_DONE_GRACE_MS);
   }
 
   function setSessionTitle(title, file) {
