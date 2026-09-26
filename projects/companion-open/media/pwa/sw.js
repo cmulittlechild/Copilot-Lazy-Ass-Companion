@@ -1,4 +1,4 @@
-const CACHE = 'sidecar-pwa-v39';
+const CACHE = 'sidecar-pwa-v40';
 const ASSETS = [
   '/app.js',
   '/styles.css',
@@ -9,6 +9,9 @@ const ASSETS = [
   '/icon-192.png',
   '/icon-512.png',
   '/icon-maskable-512.png',
+  '/vendor/marked.min.js',
+  '/vendor/highlight.min.js',
+  '/vendor/vs2015.min.css',
 ];
 
 self.addEventListener('install', (event) => {
@@ -35,7 +38,8 @@ self.addEventListener('fetch', (event) => {
     path === '/styles.css' ||
     path === '/sw.js' ||
     path.endsWith('/app.js') ||
-    path.endsWith('/styles.css');
+    path.endsWith('/styles.css') ||
+    path.startsWith('/vendor/');
   // 缓存键使用裸路径（剥离 ?token= 等查询串），避免 token 持久化进 Cache Storage。
   const barePath = path === '/' ? '/index.html' : path;
   if (networkFirst) {

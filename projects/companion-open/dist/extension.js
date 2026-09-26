@@ -213,6 +213,30 @@ async function activate(context) {
                 }
             },
         });
+        // 连接回放缺 USER 行时的完整回放源：回读当前会话 chatSessions + sessiondb 补全。
+        // 会话文件源优先级：显式点选/跟随（activeSessionFile）→ chatSessions 当前绑定
+        // → transcript 当前绑定同名映射（重启后 activeSessionFile 为空，必须落到后两者）。
+        bridge.historyProvider = () => {
+            let file = (0, inject_1.getActiveSessionFile)();
+            if (!file || !fs.existsSync(file))
+                file = watcher?.currentFile;
+            const tFile = transcriptWatcher?.currentFile;
+            if ((!file || !fs.existsSync(file)) && tFile) {
+                const csdirP = (0, transcriptWatcher_1.findChatSessionsDir)(context.storageUri);
+                if (csdirP) {
+                    const cand = path.join(csdirP, path.basename(tFile));
+                    if (fs.existsSync(cand))
+                        file = cand;
+                }
+            }
+            if (!file || !fs.existsSync(file))
+                return undefined;
+            const hist = watcher?.projectHistory(file, 40) ?? [];
+            if (!hist.length)
+                return undefined;
+            const sid = path.basename(file).replace(/\.jsonl$/i, "");
+            return buildReplayWithDbBackfill(hist, transcriptWatcher?.sessionDbRecentTurns(20, sid), sid);
+        };
         push = new push_1.PushManager(context.globalState);
         bridge.setPushManager?.(push);
         bridge.onPhoneMessage(async (msg) => {
@@ -408,7 +432,15 @@ async function activate(context) {
                         transcriptWatcher?.seedFromHistory(hist);
                         rebindTranscriptForSession(file);
                     }
-                    reply({ type: "SESSION_SELECTED", file, ok, timestamp: Date.now() });
+                    // 附带真实标题：客户端 SESSION_SELECTED 若拿不到 title 会回退到
+                    // currentSessionMeta.title（旧会话名）造成标题滞留。
+                    const selTitle = ok
+                        ? watcher
+                            ?.listSessions(40)
+                            .find((s) => s.file === file || path.basename(String(s.file || "")) === path.basename(file))
+                            ?.title
+                        : undefined;
+                    reply({ type: "SESSION_SELECTED", file, ok, title: selTitle, timestamp: Date.now() });
                     if (ok) {
                         // 完整同步：回放该会话历史 + sessiondb 补全 chatSessions 尚未写盘的回答
                         // （HISTORY_REPLAY 瞬时渲染，不走打字机，不会有滑到尾的动画洪水）。

@@ -136,6 +136,8 @@
    * 由 COPILOT_TYPING / STREAM_* 置位，COPILOT_DONE 清除。
    */
   let requestRunning = false;
+  /** 停止需双击确认：空输入点击发送键先武装 3s，再点才真正停（防误触/打字未落框杀掉在途回复） */
+  let stopArmUntil = 0;
   /** COPILOT_DONE 防抖：agent 多 turn（tool 循环）中间 turn_end 也会 DONE，短延迟避免发送键闪烁 */
   let requestDoneTimer = null;
   /** 乐观用户消息短窗：textKey → at（与 bridge 回声去重，不永久禁同文） */
@@ -350,24 +352,50 @@
       return false;
     };
     if (requestDoneTimer) clearTimeout(requestDoneTimer);
-    // force：立即结束（COPILOT_DONE / 切会话 / stop），不给残影宽限
-    if (force || !anyStreamingNow()) {
+    // force：立即结束（切会话 / stop / 取消），不给残影宽限
+    if (force) {
       requestDoneTimer = null;
-      // 即使 map 里还有僵尸 streaming，视觉已 finish 过则强制停
-      if (force) {
-        for (const entry of streamingTurns.values()) {
-          if (entry.element) entry.element.classList.remove('streaming');
-          if (entry.bubble) entry.bubble.classList.remove('streaming');
-        }
+      for (const entry of streamingTurns.values()) {
+        if (entry.element) entry.element.classList.remove('streaming');
+        if (entry.bubble) entry.bubble.classList.remove('streaming');
       }
-      if (force || !anyStreamingNow()) {
+      requestRunning = false;
+      paintSendButton();
+      if (statusText && !replaying && !replayingInstant) {
+        statusText.textContent = connectedLabel();
+      }
+      return;
+    }
+    // deferMs：DONE 可能提前于真实轮次结束（tool 循环/长 thinking 间隙、迟到
+    // 的旧请求 DONE）——宽限内任何新流活动（setRequestRunning(true)）会取消
+    // 本定时器；期满仍无活动才释放发送键。否则中途 DONE 会让按钮变回「发送」，
+    // 长轮几乎无法从 PWA 停止。
+    const deferMs = opts && typeof opts.deferMs === 'number' ? opts.deferMs : null;
+    if (deferMs != null) {
+      requestDoneTimer = setTimeout(() => {
+        requestDoneTimer = null;
+        if (anyStreamingNow()) {
+          // 宽限结束仍有流 → 再等一轮短宽限
+          setRequestRunning(false);
+          return;
+        }
         requestRunning = false;
         paintSendButton();
         if (statusText && !replaying && !replayingInstant) {
           statusText.textContent = connectedLabel();
         }
-        return;
+        flushPendingSendQueue();
+      }, deferMs);
+      return;
+    }
+    if (!anyStreamingNow()) {
+      requestDoneTimer = null;
+      requestRunning = false;
+      paintSendButton();
+      if (statusText && !replaying && !replayingInstant) {
+        statusText.textContent = connectedLabel();
       }
+      return;
     }
     // 仍有 streaming：短宽限等下一 turn
     requestDoneTimer = setTimeout(() => {
@@ -1598,6 +1626,22 @@
 
   function handle(msg) {
     if (!msg || !msg.type) return;
+    // 别会话的桌面消息：系统行提示而不是用户泡——否则 foreign 事件无 _sess 打标时
+    // 穿过过滤冒充当前会话的发言，看起来像本会话的轮次（实测漏泡根因）。
+    if (msg.type === 'USER_MESSAGE' && msg.foreign === true) {
+      const sid = String(msg._sess || '');
+      const want = sid + '.jsonl';
+      let label = '其他会话';
+      const cache = window.__sessionTitleCache || {};
+      for (const k in cache) {
+        if (baseNameAny(k) === want) {
+          label = cache[k];
+          break;
+        }
+      }
+      addSys(`【${label}】${String(msg.text || '')}`);
+      return;
+    }
     // 跨会话事件过滤：服务端给 live 事件打 _sess（绑定会话 id）；与当前绑定不符的
     // 直接丢弃，防别会话 USER/AGENT 泡漏进当前 feed（回放类消息不带 _sess 不拦）。
     if (msg._sess && currentSessionMeta.file) {
@@ -1778,10 +1822,15 @@
         }
         markAllToolsDone();
         // 全量收尾：独立 typing-row + 所有行上的 ••• + streaming 光标
-        // force：回复已结束后绝不能继续「…」跳动或发送键停在停止
         finishAllAssistantVisuals();
-        if (!replaying) setRequestRunning(false, undefined, { force: true });
-        setStatus(true, connectedLabel());
+        // 中途 DONE（tool 循环 turn_end / thinking 间隙、旧请求迟到）提前于请求
+        // 真正结束——立即释放会让发送键提前变回「发送」，长轮几乎停不掉。
+        // 3s 宽限释放：期间任何新流活动自动取消；用户主动停/取消仍立即释放。
+        const doneImmediate = msg.reason === 'phone_stop' || msg.reason === 'isCanceled';
+        if (!replaying) {
+          setRequestRunning(false, undefined, doneImmediate ? { force: true } : { deferMs: 3000 });
+        }
+        if (doneImmediate) setStatus(true, connectedLabel());
         if (!replaying) Haptics.success();
         // 回复结束→按 _ut 逐条释放待答条目：服务端 DONE 现带归属轮次，
         // 只清已答的；任意 DONE 整表清会把别轮在途条目误杀 → 用户泡丢、答案裸奔。
@@ -1805,6 +1854,8 @@
           outboundQueue.length = 0;
           clearFeed();
           replayingInstant = true;
+          // 模型选择按会话分：切完刷新 chip，不然 PWA 显示上个会话的模型
+          send({ type: 'PHONE_MODEL_LIST' });
           // 待答清单按会话分：sess 与即将切到的会话不符就丢——旧会话在途条目
           // 会补画进新 feed（残泡/答案裸奔归因错乱）。无 sess（旧写入）保留。
           {
@@ -1845,8 +1896,9 @@
           }
           setStatus(true, '切换会话…');
           const f = msg.file || currentSessionMeta.file || '';
-          // 已有标题优先于文件名回退：后续不带 title 的广播不得盖掉真会话名
-          const t = (msg.title && String(msg.title).trim()) || currentSessionMeta.title || titleFromSessionFile(f);
+          // 切到新会话时 currentSessionMeta.title 是旧会话名，不能先于文件缓存
+          // 兜底命中——否则头部滞留旧标题。msg.title → 列表缓存/文件名 → 旧 meta。
+          const t = (msg.title && String(msg.title).trim()) || titleFromSessionFile(f) || currentSessionMeta.title;
           if (f || t) setSessionTitle(t, f);
         } else {
           replayingInstant = false;
@@ -2838,7 +2890,7 @@
       forceFinishDeadStream();
     }
     if (requestRunning) {
-      // 有文本 = 排队发送（杀在途轮太狠）；空文本 = 停止
+      // 有文本 = 排队发送（杀在途轮太狠）；空文本 = 停止（需双击确认）
       const queuedText = (input.value || '').trim();
       if (queuedText) {
         pendingSendQueue.push({ text: queuedText, mode: modeEl.value || 'agent' });
@@ -2847,7 +2899,21 @@
         addSys('已排队：当前回复结束后自动发送');
         return;
       }
-      doStop();
+      if (Date.now() < stopArmUntil) {
+        stopArmUntil = 0;
+        try { sendBtn.title = '停止当前 Copilot 请求'; } catch (_) {}
+        doStop();
+        return;
+      }
+      stopArmUntil = Date.now() + 3000;
+      addSys('再次点击「停止」中断当前回复');
+      try { sendBtn.title = '再次点击确认停止'; } catch (_) {}
+      setTimeout(() => {
+        if (stopArmUntil && Date.now() >= stopArmUntil) {
+          stopArmUntil = 0;
+          try { sendBtn.title = '停止当前 Copilot 请求'; } catch (_) {}
+        }
+      }, 3100);
       return;
     }
     const text = (input.value || '').trim();

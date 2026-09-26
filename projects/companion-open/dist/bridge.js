@@ -175,6 +175,11 @@ class BridgeServer {
     _port;
     authToken;
     pwaDir;
+    /**
+     * 连接回放提供者：活积 history 可能缺 USER_MESSAGE（fallback 通道按设计吞用户文
+     * 只记 rid→ut 键），此时由扩展回读当前会话文件重建回放（含 sessiondb 补全）。
+     */
+    historyProvider;
     onClientCount;
     publicUrl = null;
     constructor(opts) {
@@ -459,7 +464,19 @@ class BridgeServer {
                         // Single HISTORY_REPLAY per socket — PWA replaces feed, does not append.
                         if (!historyReplayed) {
                             historyReplayed = true;
-                            this.send(ws, { type: 'HISTORY_REPLAY', messages: this.history.slice(-HISTORY_MAX) });
+                            let replay = this.history.slice(-HISTORY_MAX);
+                            // 文件回放为权威源：活积 history 缺 USER 行（fallback 通道按设计吞用户文，
+                            // 手机发送的几条零星 USER 也会让它"部分缺失"），且 socket 重连会把
+                            // 切换前旧会话的 history 重放回来拽回 feed。文件版 USER 数不少于 live 版
+                            // 时优先用文件版；只有当刚发出的用户消息尚未落盘时才保留 live 版。
+                            const provided = this.historyProvider?.();
+                            if (Array.isArray(provided) && provided.length) {
+                                const liveUsers = replay.filter((e) => e?.type === 'USER_MESSAGE').length;
+                                const provUsers = provided.filter((e) => e?.type === 'USER_MESSAGE').length;
+                                if (provUsers >= liveUsers)
+                                    replay = provided;
+                            }
+                            this.send(ws, { type: 'HISTORY_REPLAY', messages: replay });
                         }
                         if (this.activeStreamId && this.activeStreamAccum) {
                             this.send(ws, {
