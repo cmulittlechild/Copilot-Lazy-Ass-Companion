@@ -190,7 +190,8 @@
     "test:unit": "npm run compile && node scripts/test_chatcontrol.mjs && node scripts/test_workspaceindex.mjs && node scripts/test_portscan.mjs && node scripts/test_sessionperf.mjs && node scripts/test_dispatch_isolated.mjs && node scripts/test_pin.mjs && node scripts/test_sessionselect.mjs && node scripts/test_bighistory.mjs && node scripts/test_gapfill_pending.mjs && node scripts/test_transcript_order.mjs",
     "test": "npm run test:unit && SKIP_TUNNEL_SMOKE=1 node scripts/e2e_local.mjs",
     "probe": "node scripts/probe_live.mjs",
-    "package": "npm run compile && npx --yes @vscode/vsce package"
+    "package": "npm run compile && npx --yes @vscode/vsce package",
+    "test:vscode": "npm run compile && tsc -p tsconfig.test.json && node scripts/run_vscode_tests.mjs"
   },
   "dependencies": {
     "qrcode": "^1.5.4",
@@ -198,11 +199,14 @@
     "ws": "^8.18.0"
   },
   "devDependencies": {
+    "@types/mocha": "^10.0.10",
     "@types/node": "^20.11.0",
     "@types/qrcode": "^1.5.5",
     "@types/vscode": "^1.93.0",
     "@types/web-push": "^3.6.4",
     "@types/ws": "^8.5.10",
+    "@vscode/test-electron": "^3.1.0",
+    "mocha": "^12.0.2",
     "typescript": "^5.3.3"
   }
 }

@@ -4,6 +4,8 @@
 .gitignore
 .waylog/**
 src/**
+test/**
+out/**
 scripts/**
 **/*.ts
 **/*.map
