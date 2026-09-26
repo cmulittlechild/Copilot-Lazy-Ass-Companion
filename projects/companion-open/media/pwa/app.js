@@ -389,6 +389,11 @@
     }
   }
 
+  function baseNameAny(p) {
+    const parts = String(p || '').split(/[\\/]/);
+    return parts[parts.length - 1] || '';
+  }
+
   function titleFromSessionFile(file) {
     if (!file) return '';
     // prefer cache from last SESSION_LIST render
@@ -397,7 +402,7 @@
         return window.__sessionTitleCache[file];
       }
     } catch (_) {}
-    const base = String(file).split('/').pop() || '';
+    const base = baseNameAny(file);
     return base.replace(/\.jsonl$/i, '').slice(0, 8) || '';
   }
 
@@ -1594,7 +1599,7 @@
     // 跨会话事件过滤：服务端给 live 事件打 _sess（绑定会话 id）；与当前绑定不符的
     // 直接丢弃，防别会话 USER/AGENT 泡漏进当前 feed（回放类消息不带 _sess 不拦）。
     if (msg._sess && currentSessionMeta.file) {
-      const bound = String(currentSessionMeta.file).split('/').pop().replace(/\.jsonl$/, '');
+      const bound = baseNameAny(currentSessionMeta.file).replace(/\.jsonl$/i, '');
       if (bound && String(msg._sess) !== bound) return;
     }
     switch (msg.type) {
@@ -1789,10 +1794,10 @@
           // 待答清单按会话分：sess 与即将切到的会话不符就丢——旧会话在途条目
           // 会补画进新 feed（残泡/答案裸奔归因错乱）。无 sess（旧写入）保留。
           {
-            const selBase = (String(msg.file || '').split('/').pop() || '').replace(/\.jsonl$/i, '');
+            const selBase = baseNameAny(msg.file).replace(/\.jsonl$/i, '');
             for (let i = sentAwaitingReply.length - 1; i >= 0; i--) {
               const s = sentAwaitingReply[i].sess;
-              const sBase = (String(s || '').split('/').pop() || '').replace(/\.jsonl$/i, '');
+              const sBase = baseNameAny(s).replace(/\.jsonl$/i, '');
               if (sBase && selBase && sBase !== selBase) sentAwaitingReply.splice(i, 1);
             }
           }
