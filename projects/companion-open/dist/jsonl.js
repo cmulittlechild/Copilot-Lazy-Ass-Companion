@@ -173,7 +173,13 @@ class JsonlProjector {
         if (!text)
             return [];
         return [
-            { type: 'USER_MESSAGE', text, requestId: rid, requestIndex: reqIndex },
+            {
+                type: 'USER_MESSAGE',
+                text,
+                requestId: rid,
+                requestIndex: reqIndex,
+                timestamp: typeof t?.timestamp === 'number' ? t.timestamp : undefined,
+            },
             { type: 'COPILOT_TYPING', requestId: rid, requestIndex: reqIndex },
         ];
     }

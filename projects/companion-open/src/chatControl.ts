@@ -73,15 +73,29 @@ const CFG = {
 } as const;
 
 /**
- * workbench 真正「当前面板模型」写在 globalStorage state.vscdb，
- * 不是 settings.json 的 chat.defaultModel（后者常滞后/是默认值 deepseek…）。
- * 实测：chat.currentLanguageModel.panel = oaicopilot/grok-4.5-high
+ * workbench 面板当前模型的存储位置（globalStorage state.vscdb）：
+ * - chat.currentLanguageModel.panel 直接存选中模型的 identifier 字符串，
+ *   对内置与第三方 provider 模型（如 oaicopilot/xxx）都会更新，是权威源。
+ * - chat.modelConfiguration.panel = {"<vendor>/<id>": {…config}} 是各模型的
+ *   配置映射，首 key 仅在内置模型场景与当前选中重合；provider 模型选中后
+ *   该 key 不会变化，只能作兜底。
+ * settings.json 的 chat.defaultModel 常滞后，仅作最后兜底。
  */
+const MODEL_CONFIG_PANEL_KEY = 'chat.modelConfiguration.panel';
 const CURRENT_MODEL_KEYS = [
   'chat.currentLanguageModel.panel',
   'chat.currentLanguageModel.panel.agent-host-copilotcli',
   'chat.currentLanguageModel.editor',
 ] as const;
+
+/**
+ * 桌面模型选择器的「用户可选」过滤源：
+ * chat.cachedLanguageModels.v2 = [{identifier, metadata:{isUserSelectable, targetChatSessionType,...}}]
+ * vscode.lm.selectChatModels() 是全量（含 copilot-utility / dictation / gpt-4o-mini 等
+ * 内部不可选模型）；桌面 picker 只展示 isUserSelectable===true 且 targetChatSessionType
+ * 为空（普通 chat 面板；copilotcli / agent-host-copilotcli 是别的会话目标）的模型。
+ */
+const CACHED_MODELS_KEY = 'chat.cachedLanguageModels.v2';
 
 /**
  * 审批级别 → slash 命令。
@@ -165,8 +179,9 @@ export class ChatControl {
     }
     try {
       // 0.5.18 当前模型权威源（按优先级）：
-      // 1) 本模块最近成功 selectModel
-      // 2) globalStorage state.vscdb: chat.currentLanguageModel.panel（= 面板实际选中）
+      // 1) globalStorage state.vscdb: chat.currentLanguageModel.panel（= 面板实际选中，
+      //    桌面端切换也写这里 —— 双向同步必须以它为先）
+      // 2) 本模块最近成功 selectModel（面板尚未落盘时的短窗口）
       // 3) settings chat.defaultModel（常滞后，仅兜底）
       let configured: string | undefined;
       try {
@@ -176,7 +191,7 @@ export class ChatControl {
         /* ignore */
       }
       const fromPanel = this.readCurrentPanelModelId();
-      const preferred = (this.currentModelId || fromPanel || configured || '').trim();
+      const preferred = (fromPanel || this.currentModelId || configured || '').trim();
       if (!this.currentModelId && (fromPanel || configured)) {
         this.currentModelId = fromPanel || configured;
       }
@@ -187,7 +202,22 @@ export class ChatControl {
         );
       }
 
-      const models = await lm.selectChatModels();
+      const allModels = await lm.selectChatModels();
+      // 只展示桌面 picker 同款「用户可选」模型：selectChatModels() 是全量，
+      // 含 copilot-utility / dictation-cleanup / gpt-4o-mini 等内部不可选项，
+      // 选了也切不动（假成功）。缓存不可用时不过滤（宁可多列不可空列）。
+      const selectable = this.readUserSelectableModelIds();
+      const models = selectable
+        ? allModels.filter(
+            (m) =>
+              selectable.has(`${m.vendor}/${m.id}`) ||
+              selectable.has(`${m.vendor}:${m.id}`) ||
+              selectable.has(m.id),
+          )
+        : allModels;
+      if (selectable && models.length < allModels.length) {
+        this.log(`[chatControl] 模型列表过滤: ${allModels.length} → ${models.length}（仅用户可选）`);
+      }
       // 先按分数选唯一 winner 下标（同 id 多 vendor 时只标一条，避免双 current）
       let winnerIdx = -1;
       if (preferred) {
@@ -222,74 +252,202 @@ export class ChatControl {
   }
 
   /**
-   * 从 globalStorage/state.vscdb 读面板当前模型 id。
+   * 面板当前模型 identifier（公开包装，供轮询桌面侧切换）
+   */
+  peekPanelModelId(): string | undefined {
+    return this.readCurrentPanelModelId();
+  }
+
+  /**
+   * 从 globalStorage/state.vscdb 读面板当前模型 identifier（vendor/id 形式）。
    * 失败返回 undefined（不抛）。
    */
   private readCurrentPanelModelId(): string | undefined {
     try {
-      const globalStorage = (vscode as unknown as { env?: { appRoot?: string } }).env;
-      void globalStorage; // 保留类型探测位
-    } catch {
-      /* ignore */
-    }
-    try {
-      // context.globalStorageUri 不可用时，用标准 User/globalStorage/state.vscdb
-      // ChatControl 不持有 ExtensionContext，按 VS Code 惯例从 APPDATA 推导。
-      const home = process.env.HOME || process.env.USERPROFILE || '';
-      if (!home) return undefined;
-      const candidates = [
-        // macOS
-        pathJoin(home, 'Library/Application Support/Code/User/globalStorage/state.vscdb'),
-        pathJoin(home, 'Library/Application Support/Code - Insiders/User/globalStorage/state.vscdb'),
-        // Linux
-        pathJoin(home, '.config/Code/User/globalStorage/state.vscdb'),
-        // Windows
-        process.env.APPDATA
-          ? pathJoin(process.env.APPDATA, 'Code/User/globalStorage/state.vscdb')
-          : '',
-      ].filter(Boolean);
-
-      // 懒加载 node:sqlite（与 sessionIndex 同策略）
-      let DatabaseSync: undefined | (new (p: string, o?: { readOnly?: boolean }) => {
-        prepare(sql: string): { get(...a: unknown[]): { value?: string } | undefined };
-        close(): void;
-      });
-      try {
-        DatabaseSync = (require('node:sqlite') as { DatabaseSync?: unknown }).DatabaseSync as typeof DatabaseSync;
-      } catch {
-        DatabaseSync = undefined;
+      // 权威：chat.currentLanguageModel.panel 直接存选中 identifier（内置+provider 均更新）
+      for (const key of CURRENT_MODEL_KEYS) {
+        const val = this.readVscdbValue(key);
+        if (val && val !== 'true' && val !== 'false') return val;
       }
-      if (!DatabaseSync) return undefined;
-
-      for (const dbPath of candidates) {
+      // 兜底：chat.modelConfiguration.panel = {"<identifier>": {…}}，首 key
+      const cfg = this.readVscdbValue(MODEL_CONFIG_PANEL_KEY);
+      if (cfg) {
         try {
-          const fs = require('fs') as typeof import('fs');
-          if (!fs.existsSync(dbPath)) continue;
-          const db = new DatabaseSync(dbPath, { readOnly: true });
-          try {
-            const stmt = db.prepare('SELECT value FROM ItemTable WHERE key = ?');
-            for (const key of CURRENT_MODEL_KEYS) {
-              const row = stmt.get(key);
-              const val = row && typeof row.value === 'string' ? row.value.trim() : '';
-              if (val && val !== 'true' && val !== 'false') {
-                return val;
-              }
-            }
-          } finally {
-            try {
-              db.close();
-            } catch {
-              /* ignore */
-            }
-          }
+          const obj = JSON.parse(cfg) as Record<string, unknown>;
+          const first = Object.keys(obj)[0];
+          if (first) return first;
         } catch {
-          /* 下一候选 */
+          /* 非 JSON */
         }
       }
     } catch (err) {
-      this.log(`[chatControl] 读 currentLanguageModel 失败: ${errText(err)}`);
+      this.log(`[chatControl] 读面板当前模型失败: ${errText(err)}`);
     }
     return undefined;
+  }
+
+  /** state.vscdb 候选路径（macOS/Linux/Windows/Insiders） */
+  private vscdbCandidates(): string[] {
+    const home = process.env.HOME || process.env.USERPROFILE || '';
+    if (!home) return [];
+    return [
+      // macOS
+      pathJoin(home, 'Library/Application Support/Code/User/globalStorage/state.vscdb'),
+      pathJoin(home, 'Library/Application Support/Code - Insiders/User/globalStorage/state.vscdb'),
+      // Linux
+      pathJoin(home, '.config/Code/User/globalStorage/state.vscdb'),
+      // Windows
+      process.env.APPDATA
+        ? pathJoin(process.env.APPDATA, 'Code/User/globalStorage/state.vscdb')
+        : '',
+    ].filter(Boolean);
+  }
+
+  /** 打开第一个可用的 state.vscdb（只读），返回 db 与 user 根目录；失败返回 undefined。 */
+  private openVscdb(): { db: { prepare(sql: string): { get(...a: unknown[]): { value?: string } | undefined }; close(): void }; userDir: string } | undefined {
+    let DatabaseSync: undefined | (new (p: string, o?: { readOnly?: boolean }) => {
+      prepare(sql: string): { get(...a: unknown[]): { value?: string } | undefined };
+      close(): void;
+    });
+    try {
+      DatabaseSync = (require('node:sqlite') as { DatabaseSync?: unknown }).DatabaseSync as typeof DatabaseSync;
+    } catch {
+      DatabaseSync = undefined;
+    }
+    if (!DatabaseSync) return undefined;
+    const fs = require('fs') as typeof import('fs');
+    for (const dbPath of this.vscdbCandidates()) {
+      try {
+        if (!fs.existsSync(dbPath)) continue;
+        const db = new DatabaseSync(dbPath, { readOnly: true });
+        // globalStorage/state.vscdb → User 根 = 上两级目录
+        const userDir = dbPath.split(/[\\/]/).slice(0, -2).join(process.platform === 'win32' ? '\\' : '/');
+        return { db, userDir };
+      } catch {
+        /* 下一候选 */
+      }
+    }
+    return undefined;
+  }
+
+  /** 读单个 vscdb key；失败/缺失返回 undefined。 */
+  private readVscdbValue(key: string): string | undefined {
+    const ctx = this.openVscdb();
+    if (!ctx) return undefined;
+    try {
+      const row = ctx.db.prepare('SELECT value FROM ItemTable WHERE key = ?').get(key);
+      const v = row && typeof row.value === 'string' ? row.value.trim() : '';
+      return v || undefined;
+    } catch {
+      return undefined;
+    } finally {
+      try {
+        ctx.db.close();
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  /**
+   * 用户可选模型 identifier 集合（desktop picker 同款过滤）：
+   * chat.cachedLanguageModels.v2 中 isUserSelectable===true 且无 targetChatSessionType 的项。
+   * 返回 undefined = 缓存不可用（调用方应放弃过滤而非列出空表）。
+   */
+  private readUserSelectableModelIds(): Set<string> | undefined {
+    const raw = this.readVscdbValue(CACHED_MODELS_KEY);
+    if (!raw) return undefined;
+    try {
+      const arr = JSON.parse(raw) as unknown[];
+      if (!Array.isArray(arr)) return undefined;
+      const set = new Set<string>();
+      for (const item of arr) {
+        const it = item as { identifier?: string; metadata?: { isUserSelectable?: boolean; targetChatSessionType?: string } };
+        if (
+          typeof it?.identifier === 'string' &&
+          it.metadata?.isUserSelectable === true &&
+          !it.metadata?.targetChatSessionType
+        ) {
+          set.add(it.identifier);
+        }
+      }
+      return set;
+    } catch (err) {
+      this.log(`[chatControl] 解析 ${CACHED_MODELS_KEY} 失败: ${errText(err)}`);
+      return undefined;
+    }
+  }
+
+  /**
+   * 最近写入的 chatSessions 文件里最后一条 inputState.selectedModel 的 identifier。
+   * 模型切换会作为 delta 行落盘到当前会话文件，是「切换是否真的生效」的直接证据。
+   * sinceMs：只接受 mtime ≥ sinceMs-2000 的文件（只看切换之后的新写入���。
+   */
+  private readNewestSessionSelectedModelId(sinceMs = 0): string | undefined {
+    try {
+      const fs = require('fs') as typeof import('fs');
+      const path = require('path') as typeof import('path');
+      const ctx = this.openVscdb();
+      if (!ctx) return undefined;
+      try {
+        ctx.db.close();
+      } catch {
+        /* ignore */
+      }
+      const wsRoot = path.join(ctx.userDir, 'workspaceStorage');
+      if (!fs.existsSync(wsRoot)) return undefined;
+      let newest: { file: string; mtime: number } | undefined;
+      for (const dir of fs.readdirSync(wsRoot)) {
+        const csDir = path.join(wsRoot, dir, 'chatSessions');
+        try {
+          for (const f of fs.readdirSync(csDir)) {
+            if (!f.endsWith('.jsonl')) continue;
+            const fp = path.join(csDir, f);
+            const st = fs.statSync(fp);
+            if (sinceMs && st.mtimeMs < sinceMs - 2000) continue;
+            if (!newest || st.mtimeMs > newest.mtime) newest = { file: fp, mtime: st.mtimeMs };
+          }
+        } catch {
+          /* 该目录无 chatSessions */
+        }
+      }
+      if (!newest) return undefined;
+      // 尾读 64KB，找最后一条 inputState.selectedModel delta
+      const fd = fs.openSync(newest.file, 'r');
+      try {
+        const st = fs.fstatSync(fd);
+        const cap = Math.min(st.size, 64 * 1024);
+        const buf = Buffer.alloc(cap);
+        fs.readSync(fd, buf, 0, cap, st.size - cap);
+        const tail = buf.toString('utf8');
+        const re = /"inputState"\s*,\s*"selectedModel"\s*\][^\n]*?"identifier"\s*:\s*"([^"]+)"/g;
+        let m: RegExpExecArray | null;
+        let last: string | undefined;
+        while ((m = re.exec(tail))) last = m[1];
+        return last;
+      } finally {
+        fs.closeSync(fd);
+      }
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * 等「模型切换已生效」的落盘证据（最长 timeoutMs）：
+   *   a) 面板当前模型（chat.currentLanguageModel.panel，provider 模型也更新）= 目标
+   *   b) 最近 chatSessions 文件最后一条 inputState.selectedModel = 目标 identifier
+   */
+  private async waitSwitchEvidence(identifier: string, sinceMs: number, timeoutMs = 6000): Promise<boolean> {
+    const t0 = Date.now();
+    while (Date.now() - t0 < timeoutMs) {
+      const panel = this.readCurrentPanelModelId();
+      if (panel && identifierEq(panel, identifier)) return true;
+      const fileId = this.readNewestSessionSelectedModelId(sinceMs);
+      if (fileId && identifierEq(fileId, identifier)) return true;
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    return false;
   }
 
   /**
@@ -326,12 +484,39 @@ export class ChatControl {
       return { ok: false, error: '模型信息不完整（需要 vendor/family）' };
     }
 
+    // changeModel 作用于「最近聚焦的 chat widget」——先确保面板聊天输入框有焦点，
+    // 否则命令静默打在没有 widget 的上下文中，手机端收到假成功。
+    try {
+      await vscode.commands.executeCommand(CMD.chatOpen);
+    } catch {
+      /* ignore */
+    }
+    try {
+      await vscode.commands.executeCommand('workbench.action.chat.focusInput');
+    } catch {
+      /* ignore */
+    }
+
+    const switchStart = Date.now();
     try {
       await vscode.commands.executeCommand(CMD.changeModel, { id, vendor, family });
     } catch (err) {
       const msg = errText(err);
       this.log(`[chatControl] changeModel 失败: ${msg}`);
       return { ok: false, error: `切换模型失败: ${msg}` };
+    }
+
+    // 校验切换是否真的生效：等面板模型（currentLanguageModel.panel）或会话
+    // inputState.selectedModel 落盘为目标模型。命令不抛错 ≠ 生效
+    //（免费账号选付费模型、内部模型都不报错但不切换）。
+    const identifier = `${vendor}/${id}`;
+    const applied = await this.waitSwitchEvidence(identifier, switchStart);
+    if (!applied) {
+      this.log(`[chatControl] 切换模型未生效: ${id}（面板模型未变化）`);
+      return {
+        ok: false,
+        error: `切换未生效：桌面面板模型未变为 ${id}（该模型当前可能不可选或需升级）`,
+      };
     }
 
     this.currentModelId = id;
@@ -667,6 +852,21 @@ function modelMatchScore(
   // 惩罚泛化 Auto
   if (idLow === 'auto' || (m.name || '').toLowerCase() === 'auto') score -= 100;
   return score;
+}
+
+/**
+ * 模型 identifier 等价比较：归一化 `host:vendor/id` → `vendor/id` 后小写对比。
+ * identifier 形式不统一（copilot/auto 用 /，agent-host-copilotcli:auto 用 :）。
+ */
+function identifierEq(a: string, b: string): boolean {
+  const norm = (s: string) => {
+    let x = s.trim().toLowerCase();
+    if (x.includes(':') && !x.startsWith('http')) x = x.slice(x.lastIndexOf(':') + 1);
+    return x;
+  };
+  const na = norm(a);
+  const nb = norm(b);
+  return na === nb || na.endsWith('/' + nb) || nb.endsWith('/' + na);
 }
 
 /** 校验并收窄为合法的 PermissionLevel */

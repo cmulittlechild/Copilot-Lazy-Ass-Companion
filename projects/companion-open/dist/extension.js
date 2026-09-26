@@ -55,6 +55,74 @@ const workspaceIndex_1 = require("./workspaceIndex");
 let bridge;
 let watcher;
 let transcriptWatcher;
+// 手机显式点选的会话 + 优先窗截止时间：窗内压制指向别会话的自动跟随，
+// 防止在途会话写盘 newest 把绑定/页面拽回活动会话。被压制时顺延窗口。
+const EXPLICIT_SELECT_GUARD_MS = 20000;
+let lastExplicitSelect;
+/** 正文规范化（dedupe 用）：剥 markdown 强调+压空白+截断，与 transcriptWatcher.agentTextKey 同形 */
+function replayTextKey(text) {
+    return String(text || "")
+        .replace(/[*_`~]/g, "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 160);
+}
+/**
+ * 把 sessiondb turns 里 chatSessions 尚未写盘的回答合回回放：
+ * - 已在 hist 里的回答（按规范化文本键）跳过
+ * - 缺失的回答插到其 user_message 对应的 USER_MESSAGE 之后；
+ *   找不到对应用户文（sessiondb-only）则 USER+AGENT 一对追加到尾部
+ */
+function buildReplayWithDbBackfill(hist, dbTurns, sid) {
+    const out = hist.filter(Boolean); // eslint-disable-line @typescript-eslint/no-explicit-any
+    if (!dbTurns || !dbTurns.length || !sid)
+        return out;
+    const seen = new Set(out
+        .filter((e) => e?.type === "AGENT_MESSAGE")
+        .map((e) => replayTextKey(String(e.text || ""))));
+    const tail = [];
+    for (const r of dbTurns) {
+        const ans = String(r.assistant_response || "").trim();
+        if (!ans)
+            continue;
+        if (seen.has(replayTextKey(ans)))
+            continue;
+        const ev = {
+            type: "AGENT_MESSAGE",
+            text: ans,
+            streamId: `sessiondb/${sid}/${r.id}`,
+            requestIndex: -1,
+            timestamp: Date.now(),
+            _ut: r.user_message || undefined,
+        };
+        // 找该回答所属的用户消息位置：最后一个与该 user_message 同文的 USER_MESSAGE
+        const uKey = replayTextKey(String(r.user_message || ""));
+        let inserted = false;
+        if (uKey) {
+            for (let i = out.length - 1; i >= 0; i--) {
+                const e = out[i];
+                if (e?.type === "USER_MESSAGE" &&
+                    replayTextKey(String(e.text || "")) === uKey) {
+                    out.splice(i + 1, 0, ev);
+                    inserted = true;
+                    break;
+                }
+            }
+        }
+        if (!inserted) {
+            if (uKey) {
+                tail.push({
+                    type: "USER_MESSAGE",
+                    text: String(r.user_message || ""),
+                    timestamp: Date.now(),
+                });
+            }
+            tail.push(ev);
+        }
+        seen.add(replayTextKey(ans));
+    }
+    return out.concat(tail);
+}
 function rebindTranscriptForSession(file) {
     if (!transcriptWatcher || !file)
         return;
@@ -184,7 +252,7 @@ async function activate(context) {
                         /* ignore */
                     }
                     // soft-unverified：已 submit 且无串台证据，落盘可能延迟 — 不吓用户去粘贴双发
-                    if (result.injectPath === "bind+chat.open+soft-unverified") {
+                    if (String(result.injectPath || "").includes("soft-unverified")) {
                         bridge?.broadcast({
                             type: "SYSTEM_MESSAGE",
                             text: "已提交到目标会话（落盘确认稍慢，若桌面未出现再重试）",
@@ -213,7 +281,9 @@ async function activate(context) {
                         // 结束手机端 typing，避免一直转圈
                         bridge?.broadcast({ type: "COPILOT_DONE", reason: "inject_clipboard" });
                     }
-                    else if (result.verified === false) {
+                    else if (result.verified === false &&
+                        !/soft-unverified|leak-warning/.test(String(result.injectPath || ""))) {
+                        // soft-unverified/leak-warning 已在上方链给过提示；避免同一次注入既「已提交」又「警告」。
                         bridge?.broadcast({
                             type: "SYSTEM_MESSAGE",
                             text: "警告：注入未通过目标会话校验，请核对桌面 Chat 是否为手机所选会话",
@@ -292,6 +362,20 @@ async function activate(context) {
         catch {
             /* onDidChangeChatModels 不可用时忽略 */
         }
+        // 桌面端切模型 → 手机同步：onDidChangeChatModels 只管模型集变更，不管选中项。
+        // 轮询面板实际选中（chat.currentLanguageModel.panel，sqlite 读开销小），
+        // 变化时推 MODEL_LIST（isCurrent 已按面板真实选中标记）。
+        let lastPanelModelId = chatControl.peekPanelModelId();
+        const panelModelPoll = setInterval(() => {
+            const cur = chatControl?.peekPanelModelId();
+            if (cur && cur !== lastPanelModelId) {
+                lastPanelModelId = cur;
+                void chatControl?.listModels().then((models) => {
+                    bridge?.broadcast({ type: "MODEL_LIST", models, timestamp: Date.now() });
+                });
+            }
+        }, 2000);
+        context.subscriptions.push(new vscode.Disposable(() => clearInterval(panelModelPoll)));
         bridge.onRequest(async (msg, reply) => {
             switch (msg?.type) {
                 case "PHONE_SESSION_LIST": {
@@ -302,6 +386,9 @@ async function activate(context) {
                 case "PHONE_SESSION_SELECT": {
                     const file = typeof msg.file === "string" ? msg.file : "";
                     const ok = watcher?.selectSession(file) ?? false;
+                    // 显式点选开窗：窗口内压制指向别会话的自动跟随（见 SESSION_FOLLOW 处）。
+                    if (ok && file)
+                        lastExplicitSelect = { file, until: Date.now() + EXPLICIT_SELECT_GUARD_MS };
                     // 记录选中会话：后续 PHONE_MESSAGE 注入必须先切到该会话，
                     // 否则 workbench.action.chat.open 只会打到 VS Code 当前活跃会话。
                     if (ok && file)
@@ -314,17 +401,25 @@ async function activate(context) {
                     // 这里 bindFile **禁止 replay**——否则 transcripts 再投一轮最近 user turns，
                     // 与 HISTORY_REPLAY 叠加，手机端会从头滑到尾（双重洪水）。
                     if (ok && file) {
+                        // 先播种再 rebind：seedFromHistory 会把种子记入 pendingSeed，
+                        // bindFile 内部 resetState/bindFallback 清空去重集合后在收尾处重放，
+                        // 否则清集合发生在播种之后、种子被冲掉，旧轮次会被当实时消息洪水重放。
+                        const hist = watcher?.projectHistory(file, 20) ?? [];
+                        transcriptWatcher?.seedFromHistory(hist);
                         rebindTranscriptForSession(file);
                     }
                     reply({ type: "SESSION_SELECTED", file, ok, timestamp: Date.now() });
                     if (ok) {
-                        const hist = watcher?.projectHistory(file, 20) ?? [];
-                        // 0.5.22b：预填 transcriptWatcher 的 emittedAgentTextKeys 和 fallbackSeenRequestIds，
-                        // 防止 chatSessions gap-fill 把 HISTORY_REPLAY 已显示的旧回复再发一遍
-                        transcriptWatcher?.seedFromHistory(hist);
-                        // 系统提示并入回放末尾，避免回放后再 push 把底部顶开
+                        // 完整同步：回放该会话历史 + sessiondb 补全 chatSessions 尚未写盘的回答
+                        // （HISTORY_REPLAY 瞬时渲染，不走打字机，不会有滑到尾的动画洪水）。
+                        const sidSel = file
+                            .split("/")
+                            .pop()
+                            ?.replace(/\.jsonl$/, "");
+                        const merged = buildReplayWithDbBackfill(ok && file ? (watcher?.projectHistory(file, 20) ?? []) : [], transcriptWatcher?.sessionDbRecentTurns(20, sidSel), sidSel);
+                        transcriptWatcher?.seedFromHistory(merged.filter((e) => e.streamId?.startsWith("sessiondb/")));
                         bridge?.replaySession([
-                            ...hist,
+                            ...merged,
                             {
                                 type: "SYSTEM_MESSAGE",
                                 text: `已切换到会话: ${file.split("/").pop()}`,
@@ -481,6 +576,8 @@ async function activate(context) {
                 // 直接从 Copilot 插件发消息，而 transcripts 源只 tail 当前选中的单个文件，
                 // 若 gate 住 chatSessions 的 USER_MESSAGE，桌面→手机的消息就全丢了。
                 // （assistant 侧仍被 gate 拦，避免双渲染；手机注入回声由 isInjectedEcho 拦。）
+                // USER_MESSAGE 双源重复由 bridge.sendToPhone 的时间窗去重处理
+                // （gate 会矫枉过正：transcripts 静默时唯一来源被吞 → 零气泡）。
                 if (transcriptActive && ev.type !== "USER_MESSAGE")
                     return;
                 if (bridge?.sendToPhone)
@@ -494,14 +591,79 @@ async function activate(context) {
         if (tdir) {
             // chatSessions 兜底源：transcripts 偶尔漏写 assistant 回复（如简短问候），从 chatSessions 补全
             const csdir = (0, transcriptWatcher_1.findChatSessionsDir)(context.storageUri);
+            // session-store.db 快速兜底：Copilot 新版 turns 行响应完成即落库，远快于 chatSessions 落盘
+            const sessionStoreDb = path.join(path.dirname(context.globalStorageUri.fsPath), "github.copilot-chat", "session-store.db");
             transcriptWatcher = new transcriptWatcher_1.TranscriptWatcher({
                 dir: tdir,
                 chatSessionsDir: csdir,
+                sessionStoreDb: fs.existsSync(sessionStoreDb) ? sessionStoreDb : undefined,
                 pollMs: Math.max(10, cfg.get("pollMs", 50)),
                 onEvent: (ev) => {
                     if (ev.type === "USER_MESSAGE" &&
                         typeof ev.text === "string" &&
                         (0, inject_1.isInjectedEcho)(ev.text)) {
+                        return;
+                    }
+                    // 桌面切会话跟随：页面完整同步——feed 换目标会话历史 + 标题切换。
+                    // 先 SESSION_SELECTED（PWA 清 feed + 标题 + 切换态），再 HISTORY_REPLAY。
+                    if (ev.type === "SESSION_FOLLOW") {
+                        const tfile = String(ev.file || ev.csFile || "");
+                        const base = tfile.split("/").pop() || "";
+                        // csFile 优先（transcripts 无同名文件时唯一可用源），否则按基名解析
+                        let csFile = typeof ev.csFile === "string" && fs.existsSync(ev.csFile)
+                            ? ev.csFile
+                            : undefined;
+                        if (!csFile && csdir && base) {
+                            const cand = path.join(csdir, base);
+                            if (fs.existsSync(cand))
+                                csFile = cand;
+                        }
+                        // 显式点选优先窗：手机刚选了别的会话时，在途会话的写盘 newest 会
+                        // 立刻触发跟随把绑定/页面拽回活动会话（实测 +0.7-0.8s 抢回 2 次）。
+                        // 压制窗口内的异向跟随并顺延窗口（活动会话持续写盘不反复抢）；
+                        // 指向所选会话本身的跟随放行并解除窗口。
+                        const sel = lastExplicitSelect;
+                        if (sel && Date.now() < sel.until) {
+                            const selBase = (sel.file.split("/").pop() || "").replace(/\.jsonl$/i, "");
+                            const followBase = base.replace(/\.jsonl$/i, "");
+                            if (selBase && followBase && selBase !== followBase) {
+                                lastExplicitSelect = { file: sel.file, until: Date.now() + EXPLICIT_SELECT_GUARD_MS };
+                                return;
+                            }
+                            lastExplicitSelect = undefined;
+                        }
+                        if (csFile && fs.existsSync(csFile)) {
+                            (0, inject_1.setActiveSessionFile)(csFile);
+                            watcher?.selectSession(csFile);
+                            const hist = watcher?.projectHistory(csFile, 20) ?? [];
+                            transcriptWatcher?.seedFromHistory(hist);
+                            const title = watcher
+                                ?.listSessions(40)
+                                .find((s) => s.file === csFile || (base && String(s.file || "").endsWith("/" + base)))
+                                ?.title || undefined;
+                            bridge?.broadcast({
+                                type: "SESSION_SELECTED",
+                                file: csFile,
+                                ok: true,
+                                title,
+                                timestamp: Date.now(),
+                            });
+                            // 合并 db 补全：chatSessions 尚未写盘的回答（含中间轮次）按用户文位置插回回放
+                            const sidForDb = base ? base.replace(/\.jsonl$/, "") : "";
+                            const mergedHist = buildReplayWithDbBackfill(hist, transcriptWatcher?.sessionDbRecentTurns(20, sidForDb), sidForDb);
+                            transcriptWatcher?.seedFromHistory(mergedHist.filter((e) => e.streamId?.startsWith("sessiondb/")));
+                            bridge?.replaySession([
+                                ...mergedHist,
+                                {
+                                    type: "SYSTEM_MESSAGE",
+                                    text: `已切换到会话: ${base}`,
+                                },
+                            ], csFile);
+                        }
+                        else if (bridge?.sendToPhone) {
+                            // 找不到 chatSessions 对应文件：退化为提示（不替换 feed）
+                            bridge.sendToPhone({ type: "SYSTEM_MESSAGE", text: String(ev.text || "") });
+                        }
                         return;
                     }
                     // 桌面在其他会话直接发消息时，transcripts 单文件 tail 可能没跟过去；

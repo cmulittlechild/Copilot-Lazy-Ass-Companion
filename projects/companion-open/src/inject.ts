@@ -4,9 +4,13 @@ import * as vscode from "vscode";
 
 export type ChatMode = "agent" | "ask" | "edit";
 
-const recentInjects: { text: string; at: number }[] = [];
-const ECHO_WINDOW_MS = 30_000;
+const recentInjects: { text: string; at: number; used: number }[] = [];
+// 落盘回声可能很慢（transcripts 常 10-14s、chatSessions 最长可到 ~60s+ 才写），
+// 30s 窗口会漏掉迟到回声造成手机端重复气泡；放宽到 120s。
+const ECHO_WINDOW_MS = 120_000;
 const ECHO_MAX = 20;
+/** 同一条注入文本最多吞掉的镜像回声条数（transcript 源 + chatSessions 源 + 兜底各可能来一条） */
+const ECHO_SUPPRESS_PER_TEXT = 4;
 
 /** 手机端当前选中的 chatSessions 文件；注入时必须先打开该会话再发消息 */
 let activeSessionFile: string | undefined;
@@ -15,7 +19,7 @@ let activeSessionFile: string | undefined;
 export function noteInjectedText(text: string) {
   const t = (text || "").trim();
   if (!t) return;
-  recentInjects.push({ text: t, at: Date.now() });
+  recentInjects.push({ text: t, at: Date.now(), used: 0 });
   while (recentInjects.length > ECHO_MAX) recentInjects.shift();
 }
 
@@ -26,7 +30,10 @@ export function isInjectedEcho(text: string): boolean {
   while (recentInjects.length && now - recentInjects[0].at > ECHO_WINDOW_MS) {
     recentInjects.shift();
   }
-  return recentInjects.some((x) => x.text === t);
+  const hit = recentInjects.find((x) => x.text === t && x.used < ECHO_SUPPRESS_PER_TEXT);
+  if (!hit) return false;
+  hit.used += 1;
+  return true;
 }
 
 /** 记录手机端选中的会话文件（chatSessions/*.jsonl 绝对路径） */
@@ -551,16 +558,17 @@ export async function injectMessage(
   if (sid && !preferBind) {
     await tryModeCommands(mode);
     if (await submitFocusedQuery(text)) {
-      // 仍尽量 verify；失败只警告不阻断（用户显式选了 focused-only）
+      // 仍尽量 verify；会话激活/首次写盘较慢时 15s 也会误报，放宽到 30s；
+      // 未确认归入 soft-unverified 轻提示，不吓用户。
       let verified: boolean | undefined;
       if (targetFile) {
-        verified = await waitForInjectInSessionFile(targetFile, text, 5000, 150);
+        verified = await waitForInjectInSessionFile(targetFile, text, 30000, 200);
       }
       return {
         ok: true,
         via: "chat.open",
         sessionActivated: false,
-        injectPath: verified ? "focused-only+verified" : "focused-only-policy",
+        injectPath: verified ? "focused-only+verified" : "focused-only+soft-unverified",
         sessionId: sid,
         verified,
       };

@@ -214,7 +214,13 @@ export class JsonlProjector {
     const text = textOfUserReq(t);
     if (!text) return [];
     return [
-      { type: 'USER_MESSAGE', text, requestId: rid, requestIndex: reqIndex },
+      {
+        type: 'USER_MESSAGE',
+        text,
+        requestId: rid,
+        requestIndex: reqIndex,
+        timestamp: typeof t?.timestamp === 'number' ? t.timestamp : undefined,
+      } as PhoneEvent,
       { type: 'COPILOT_TYPING', requestId: rid, requestIndex: reqIndex },
     ];
   }

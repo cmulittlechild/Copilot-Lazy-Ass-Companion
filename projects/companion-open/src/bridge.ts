@@ -85,8 +85,12 @@ const HISTORY_MAX = 200;
 const HISTORY_TEXT_MAX = 8000;
 const OFFLINE_QUEUE_MAX = 80;
 const HEARTBEAT_MS = 8000;
-const PHONE_ECHO_WINDOW_MS = 30_000;
+// 落盘回声可能很慢（chatSessions 最长 ~60s+ 才写），30s 窗口漏掉迟到回声 → 手机端重复气泡。
+const PHONE_ECHO_WINDOW_MS = 120_000;
+const USER_EMIT_DEDUPE_MS = 60_000;
 const PHONE_ECHO_MAX = 20;
+/** 同一条手机文本最多吞掉的镜像条数（transcript 源 + chatSessions 源各可能来一条） */
+const PHONE_ECHO_SUPPRESS_PER_TEXT = 4;
 const WS_MAX_PAYLOAD_BYTES = 2 * 1024 * 1024;
 const MAX_PHONE_TEXT_LENGTH = 256 * 1024;
 const MAX_REQUEST_TYPE_LENGTH = 64;
@@ -155,7 +159,9 @@ export class BridgeServer {
   private activeStreamId: string | null = null;
   private activeStreamAccum = '';
   /** Recent PHONE_MESSAGE texts — suppress JSONL USER_MESSAGE echo back to phone. */
-  private recentPhoneTexts: { text: string; at: number }[] = [];
+  private recentPhoneTexts: { text: string; at: number; used: number }[] = [];
+  /** 非手机来源 USER_MESSAGE 的最近广播（双源去重）：text → 上次广播时刻 */
+  private recentUserEmits = new Map<string, number>();
   readonly host: string;
   private preferredPort: number;
   private portRange: number;
@@ -583,6 +589,21 @@ export class BridgeServer {
     ) {
       return;
     }
+    // 双源去重：同一桌面发出的 USER_MESSAGE 会经 transcripts + chatSessions
+    // 两个通道各投一次（间隔数秒到 ~45s 落盘延迟）。按文本在窗口内去重，
+    // 保证单气泡；超时同文（真的重发同问题）照常放行。
+    if (ev.type === 'USER_MESSAGE' && typeof ev.text === 'string' && !ev.fromPhone) {
+      const t = ev.text.trim();
+      const now = Date.now();
+      for (const [k, ts] of this.recentUserEmits) {
+        if (now - ts > USER_EMIT_DEDUPE_MS) this.recentUserEmits.delete(k);
+      }
+      if (t) {
+        const last = this.recentUserEmits.get(t);
+        if (last != null && now - last <= USER_EMIT_DEDUPE_MS) return;
+        this.recentUserEmits.set(t, now);
+      }
+    }
 
     const stamped = {
       ...ev,
@@ -837,7 +858,7 @@ export class BridgeServer {
   private rememberPhoneText(text: string) {
     const t = (text || '').trim();
     if (!t) return;
-    this.recentPhoneTexts.push({ text: t, at: Date.now() });
+    this.recentPhoneTexts.push({ text: t, at: Date.now(), used: 0 });
     while (this.recentPhoneTexts.length > PHONE_ECHO_MAX) this.recentPhoneTexts.shift();
   }
 
@@ -869,7 +890,12 @@ export class BridgeServer {
     while (this.recentPhoneTexts.length && now - this.recentPhoneTexts[0].at > PHONE_ECHO_WINDOW_MS) {
       this.recentPhoneTexts.shift();
     }
-    return this.recentPhoneTexts.some((x) => x.text === t);
+    // 同一条手机文本可能产生多个镜像源（transcript + chatSessions + 兜底），
+    // 每条最多吞 PHONE_ECHO_SUPPRESS_PER_TEXT 次，之后视为真实新消息放行。
+    const hit = this.recentPhoneTexts.find((x) => x.text === t && x.used < PHONE_ECHO_SUPPRESS_PER_TEXT);
+    if (!hit) return false;
+    hit.used += 1;
+    return true;
   }
 
   private startHeartbeat() {
@@ -884,6 +910,12 @@ export class BridgeServer {
         ws._alive = false;
         try {
           ws.ping();
+          // 应用层心跳：浏览器拿不到协议层 ping/pong 帧，客户端只能靠 inbound
+          // JSON 消息感知链路活性。前台空闲时半死 socket readyState 仍 OPEN
+          // → ws.send 静默吞消息；一条周期 PING 让客户端能在 ~30s 内识别断链。
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'PING', timestamp: Date.now() }));
+          }
         } catch {
           try { ws.terminate(); } catch { /* ignore */ }
           this.clients.delete(ws);
