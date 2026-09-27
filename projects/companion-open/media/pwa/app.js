@@ -130,6 +130,10 @@
   let typingTimer = null;
   /** 会话切换 / 历史回放期间：禁用 smooth 滚动，直接跳到底部（避免整段滑动动画） */
   let replayingInstant = false;
+  /** 最近一次 HISTORY_REPLAY 覆盖到的最大事件 ts：ts 不晚于它的 live 事件
+   *  是迟到重投影（激活 catch-up / sessiondb 轮询 / rewrite 重放），
+   *  按内容查重丢弃；回放里没有的新内容仍照常渲染。 */
+  let replayFloorTs = 0;
   /**
    * 当前是否有进行中的 Copilot 请求（对齐 VS Code 发送键 → Stop）。
    * true：按钮变「停止」；false：恢复「发送」。
@@ -754,6 +758,28 @@
       return false;
     }
     return true;
+  }
+
+  function eventTsNum(o) {
+    const t = Number(o && (o.ts != null ? o.ts : o.timestamp));
+    return Number.isFinite(t) ? t : NaN;
+  }
+
+  function isStaleReplayEvent(ts) {
+    return !replaying && !replayingInstant && replayFloorTs > 0 && Number.isFinite(ts) && ts <= replayFloorTs;
+  }
+
+  function userTextRendered(t) {
+    const k = userTextDedupeKey(t);
+    const nodes = feed.querySelectorAll('.msg.user');
+    for (let i = 0; i < nodes.length; i++) if (nodes[i].dataset.textKey === k) return true;
+    return false;
+  }
+
+  function agentTextRendered(t) {
+    const nodes = feed.querySelectorAll('.msg.agent .body');
+    for (let i = 0; i < nodes.length; i++) if (nodes[i].dataset.raw === t) return true;
+    return false;
   }
 
   /** User message — 官方 chat-row：avatar + "You" + 气泡 */
@@ -1707,6 +1733,8 @@
             }
           }
         } catch {}
+        // 迟到重投影（ts ≤ 回放覆盖范围）且同文已在屏 → 丢弃，防用户泡堆叠
+        if (isStaleReplayEvent(eventTsNum(msg)) && userTextRendered(msg.text || '')) break;
         // requestId 优先；否则文案 key。addUser 短窗去重吞掉 doSend 乐观与 bridge 回声。
         const key = msg.requestId
           ? `user:${msg.requestId}`
@@ -1795,6 +1823,11 @@
             setTimeout(flushPendingSendQueue, 50);
           }
         } catch (_) {}
+        // 迟到重投影且同文已渲染 → 丢；未渲染的迟到 final 照常追加
+        if (isStaleReplayEvent(eventTsNum(msg)) && agentTextRendered(String(msg.text || ''))) {
+          clearTyping();
+          break;
+        }
         if (msg.streamId) {
           completeAssistantTurn(msg.streamId, msg.text || '', msg);
         } else {
@@ -2021,6 +2054,12 @@
           markAllToolsDone();
           replaying = false;
           replayingInstant = false;
+          try {
+            for (const m of list) {
+              const t = eventTsNum(m);
+              if (Number.isFinite(t) && t > replayFloorTs) replayFloorTs = t;
+            }
+          } catch (_) {}
           // 历史里不应残留「正在输入」态
           finishAllAssistantVisuals();
           if (requestDoneTimer) {
