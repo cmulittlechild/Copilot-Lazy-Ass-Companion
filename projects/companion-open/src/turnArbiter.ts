@@ -23,6 +23,9 @@ interface TrackedTurn {
   ts: number;
   reqIdx: number | null;
   answered: boolean;
+  /** 该轮是否已见过流活动（STREAM/THINKING/TOOL）。注入回执 DONE 的特征是
+      发送后 ~2s 即达且此刻该轮还没任何流——用它而不是「无 _ut」判 ack。 */
+  sawStream?: boolean;
 }
 
 function normText(t: unknown): string {
@@ -86,9 +89,9 @@ export class TurnArbiter {
       case "TOOL_RESULT": {
         // 同一工具调用在各通道各投一遍：callId+状态/结果指纹去重。
         // 状态变化（running→done）属于同一 callId 的不同事件，放行。
-        const cid = String(ev.callId || ev.toolCallId || ev.id || "");
+        const cid = String(ev.toolId || ev.callId || ev.toolCallId || ev.id || "");
         if (!cid) return null;
-        const status = String(ev.status ?? ev.done ?? ev.state ?? "");
+        const status = String(ev.status ?? ev.done ?? ev.isComplete ?? ev.state ?? "");
         const res = normText(ev.result || ev.text).slice(0, 40);
         return `t|${sessBase}|${cid}|${status}|${res}`;
       }
@@ -154,22 +157,26 @@ export class TurnArbiter {
       case "AGENT_STREAM_SET":
       case "AGENT_STREAM_CHUNK":
       case "AGENT_STREAM_END":
+      case "TOOL_CALL":
       case "AGENT_TOOL_CALL":
       case "AGENT_TOOL_RESULT":
+      case "TOOL_RESULT":
       case "AGENT_THINKING":
       case "THINKING_START":
       case "THINKING_END":
       case "COPILOT_TYPING": {
-        if (!utKey) {
-          const t = this.newestOpenTurn(sessBase);
-          if (t) utKey = t.utKey;
+        const t = this.newestOpenTurn(sessBase);
+        if (t) {
+          t.sawStream = true;
+          if (!utKey) utKey = t.utKey;
         }
         break;
       }
       case "AGENT_MESSAGE": {
-        if (!utKey) {
-          const t = this.newestOpenTurn(sessBase);
-          if (t) utKey = t.utKey;
+        const t = this.newestOpenTurn(sessBase);
+        if (t) {
+          t.sawStream = true;
+          if (!utKey) utKey = t.utKey;
         }
         break;
       }
@@ -190,9 +197,18 @@ export class TurnArbiter {
           doneTs + STALE_DONE_SKEW_MS < this.latestUserLiveTs;
         if (staleByIdx || staleByTs) ev.stale = true;
 
-        // 注入回执 DONE：发送后 ~2s 必到、无 _ut/requestIndex——不是轮终
-        const newest = this.newestOpenTurn(sessBase);
-        if (!immediate && !utKey && newest && now - newest.ts < INJECT_ACK_WINDOW_MS) {
+        // 注入回执 DONE：发送后 ~2s 必到——特征不是「无 _ut」（回显带上戳后
+        // 它也会带归属），而是「目标轮此刻还没见过任何流事件」。
+        // 携 _ut 的对应到自己那轮；无 _ut 的对应最新未答轮。
+        const doneTurn = utKey
+          ? this.openTurns.find((t) => !t.answered && t.utKey === utKey)
+          : this.newestOpenTurn(sessBase);
+        if (
+          !immediate &&
+          doneTurn &&
+          !doneTurn.sawStream &&
+          now - doneTurn.ts < INJECT_ACK_WINDOW_MS
+        ) {
           ev.ack = true;
         }
 
