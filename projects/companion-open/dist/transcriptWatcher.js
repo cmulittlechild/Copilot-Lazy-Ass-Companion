@@ -772,7 +772,12 @@ class TranscriptWatcher {
         if (!fs.existsSync(tfile)) {
             // transcripts 无同名文件但 chatSessions 有新会话 → 仍发跟随（扩展用 csFile 回放）。
             // lastFollowedPath 去重：否则该会话持续占 newest，每个 tick 都重发（跟随风暴）。
-            if (this.current !== undefined &&
+            // current===undefined 豁免：若首个扫描周期全局 newest 就是 csOnly 文件（典型：
+            // VS Code/Copilot 冷启动自动创建的空 New Chat），current 永远停在 undefined
+            // → 之后所有 csOnly 跟随都被吞，连"空会话获得内容后补发"也失去挂载点。
+            // 对仍在写入的新鲜文件放行；陈旧旧文件赢得首轮扫描仍不发（首载不跟随）。
+            const freshWrite = bestMtime > 0 && Date.now() - bestMtime < PIN_STALE_MS;
+            if ((this.current !== undefined || freshWrite) &&
                 csPath &&
                 fs.existsSync(csPath) &&
                 !(0, pathutil_1.samePath)(csPath, this.lastFollowedPath)) {
@@ -814,8 +819,17 @@ class TranscriptWatcher {
         this.fallbackProjector.setDoneSink((ev) => this.emit(ev));
         const doCatchUp = opts?.catchUp !== false;
         if (doCatchUp) {
-            // 立即 catch-up：把该文件全部投影，transcripts 缺失的历史回复在这里补上
-            this.catchUpFallback();
+            // 立即 catch-up：把该文件全部投影，transcripts 缺失的历史回复在这里补上。
+            // 静默播种：只走去重指纹不落广播——重启/首次绑定时这些旧轮次已通过
+            // connect/follow 回放到 PWA，再按 live 投一遍就是 feed 尾部的答案重复块
+            // （Windows 实测：重启后 catch-up 把 5 条旧答案追加成孤儿泡）。
+            this.catchUpQuiet = true;
+            try {
+                this.catchUpFallback();
+            }
+            finally {
+                this.catchUpQuiet = false;
+            }
         }
         else {
             // 手机切会话：只跟增量，避免与 HISTORY_REPLAY 双通道（TOOL/STREAM 洪水）
@@ -2477,6 +2491,8 @@ class TranscriptWatcher {
     recentUserEmitAt = new Map();
     recentUserEmitRid = new Map();
     /** 事件出口：dispose 后不再发出；记录助手正文供 chatSessions gap-fill 去重 */
+    /** catch-up 静默播种：emit() 照常走去重记账但不广播（见 bindFallback） */
+    catchUpQuiet = false;
     emit(ev) {
         if (this.disposed)
             return;
@@ -2537,15 +2553,17 @@ class TranscriptWatcher {
                 const curSeq = this.userSeqByUt.get(ut) ?? 0;
                 const now = Date.now();
                 const lastE = this.recentAgentEmits.get(wkey);
-                if (lastE && now - lastE.t < 120_000 && lastE.seq === curSeq)
+                if (lastE && now - lastE.t < 120_000 && lastE.seq === curSeq) {
                     return;
+                }
                 // 归属错位副本：live 侧 _ut 解析失败时同一条答案被记进空 ut 桶（键 `|key`），
                 // 迟到通道随后带着真 _ut 到达（或反向）→ 与另一形态键撞车即同一回答重投影。
                 // 仅当一侧归属为空才压：两侧各有归属的同文答案是不同轮次，不误吞。
                 if (ut) {
                     const bare = this.recentAgentEmits.get(`|${akey}`);
-                    if (bare && now - bare.t < 120_000 && (this.userSeqByUt.get('') ?? 0) <= bare.seq)
+                    if (bare && now - bare.t < 120_000 && (this.userSeqByUt.get('') ?? 0) <= bare.seq) {
                         return;
+                    }
                 }
                 else {
                     const suffix = `|${akey}`;
@@ -2553,8 +2571,9 @@ class TranscriptWatcher {
                         if (k === `|${akey}` || !k.endsWith(suffix) || now - e.t >= 120_000)
                             continue;
                         const recUt = k.slice(0, k.length - suffix.length);
-                        if ((this.userSeqByUt.get(recUt) ?? 0) <= e.seq)
+                        if ((this.userSeqByUt.get(recUt) ?? 0) <= e.seq) {
                             return;
+                        }
                     }
                 }
                 // 集中兜底：同 ut 已答且本条与已投版本前/后 40 字同形 → 跨通道迟到
@@ -2564,8 +2583,9 @@ class TranscriptWatcher {
                     const prev = this.emittedTextByUt.get(ut) || '';
                     const cur = this.agentTextKey(text);
                     if ((cur.slice(0, 40).length >= 12 && cur.slice(0, 40) === prev.slice(0, 40)) ||
-                        (cur.slice(-40).length >= 12 && cur.slice(-40) === prev.slice(-40)))
+                        (cur.slice(-40).length >= 12 && cur.slice(-40) === prev.slice(-40))) {
                         return;
+                    }
                 }
                 this.recentAgentEmits.set(wkey, { t: Date.now(), seq: curSeq });
                 if (this.recentAgentEmits.size > 300) {
@@ -2582,7 +2602,8 @@ class TranscriptWatcher {
                 });
             }
         }
-        this.opts.onEvent(ev);
+        if (!this.catchUpQuiet)
+            this.opts.onEvent(ev);
     }
     /** (用户文,正文) 键是否已发过且此后没同题重问（迟到重投影判定） */
     isReplayedFor(text, userText) {

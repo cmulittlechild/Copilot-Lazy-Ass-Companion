@@ -112,6 +112,8 @@
   let intentionalClose = false;
   let lastTunnelUrl = null;
   let reconnectAttempt = 0;
+  /** 是否已经成功连上过一次（区分首次连接与断线重连） */
+  let hasConnectedOnce = false;
   // 链路活性：服务端 8s 一次 PING 消息作应用层心跳；前台空闲时半死 socket
   // readyState 仍 OPEN，send() 成功返回但消息被吞——用最近入站时间判活性。
   let lastInboundAt = 0;
@@ -145,6 +147,8 @@
   /** 本会话见过的最大 requestIndex（仅 live）：用于识别旧请求迟到的 DONE，
       防止把当前在途轮的发送键/队列提前释放 */
   let latestLiveReqIdx = -1;
+  /** 最近 live USER 事件 ts：判 DONE 陈旧用（不带 requestIndex 的兜底通道 DONE） */
+  let latestUserLiveTs = 0;
   /** COPILOT_DONE 防抖：agent 多 turn（tool 循环）中间 turn_end 也会 DONE，短延迟避免发送键闪烁 */
   let requestDoneTimer = null;
   /** 乐观用户消息短窗：textKey → at（与 bridge 回声去重，不永久禁同文） */
@@ -1661,7 +1665,11 @@
   }
   /** 重放/清屏后补画「已发未答」的用户泡（待发路径只覆盖 pendingSend 一条） */
   function repaintAwaitingUserBubbles() {
+    const boundBase = baseNameAny(currentSessionMeta.file).replace(/\.jsonl$/i, '');
     for (const m of sentAwaitingReply) {
+      // 只补画当前会话的条目：sess 属别会话的不该出现在本 feed（防串泡）
+      const mBase = baseNameAny(m.sess || '').replace(/\.jsonl$/i, '');
+      if (boundBase && mBase && mBase !== boundBase) continue;
       let found = false;
       const nodes = feed.querySelectorAll('.msg.user');
       for (let i = nodes.length - 1; i >= Math.max(0, nodes.length - 4); i--) {
@@ -1735,6 +1743,10 @@
         } catch {}
         // 迟到重投影（ts ≤ 回放覆盖范围）且同文已在屏 → 丢弃，防用户泡堆叠
         if (isStaleReplayEvent(eventTsNum(msg)) && userTextRendered(msg.text || '')) break;
+        if (!replaying) {
+          const uts = eventTsNum(msg);
+          if (Number.isFinite(uts) && uts > latestUserLiveTs) latestUserLiveTs = uts;
+        }
         // requestId 优先；否则文案 key。addUser 短窗去重吞掉 doSend 乐观与 bridge 回声。
         const key = msg.requestId
           ? `user:${msg.requestId}`
@@ -1887,7 +1899,13 @@
         // 旧请求的迟到 DONE（requestIndex 小于已见过的最大 live 下标）不动
         // 当前在途轮的发送键/视觉/队列——否则连发 U1U2A1A2 堆叠、长轮无法停。
         const doneIdx = typeof msg.requestIndex === 'number' ? msg.requestIndex : null;
-        const staleDone = doneIdx != null && latestLiveReqIdx > doneIdx;
+        const doneTs = eventTsNum(msg);
+        // requestIndex 之外加时间戳兜底：sessiondb/兜底通道的 DONE 常不带
+        // requestIndex，但其 ts 是轮完成时刻——早于最近 live USER 发送时刻
+        // 就是旧轮迟到件，不得释放当前在途轮的发送键/队列。
+        const staleDone =
+          (doneIdx != null && latestLiveReqIdx > doneIdx) ||
+          (doneIdx == null && Number.isFinite(doneTs) && doneTs + 2000 < latestUserLiveTs);
         if (!staleDone) {
           markAllToolsDone();
           finishAllAssistantVisuals();
@@ -1901,6 +1919,22 @@
         }
         if (doneImmediate && !staleDone) setStatus(true, connectedLabel());
         if (!replaying) Haptics.success();
+        // 停止/取消的 DONE（phone_stop/isCanceled）常不带 _ut——它终止的就是
+        // 当前在途轮，其用户泡是最新一条待答条目；不清会永远「已发未答」，
+        // 之后每次会话切换/重连回放都被 repaintAwaitingUserBubbles 补画回来。
+        if (!replaying && !replayingInstant && doneImmediate && !msg._ut) {
+          const curBase = baseNameAny(currentSessionMeta.file).replace(/\.jsonl$/i, '');
+          const now = Date.now();
+          for (let i = sentAwaitingReply.length - 1; i >= 0; i--) {
+            const e = sentAwaitingReply[i];
+            const eBase = baseNameAny(e.sess || '').replace(/\.jsonl$/i, '');
+            if (now - (e.at || 0) >= AWAIT_REPLY_FLUSH_BLOCK_MS) break;
+            if (!eBase || !curBase || eBase === curBase) {
+              sentAwaitingReply.splice(i, 1);
+              break;
+            }
+          }
+        }
         // 回复结束→按 _ut 逐条释放待答条目：服务端 DONE 现带归属轮次，
         // 只清已答的；任意 DONE 整表清会把别轮在途条目误杀 → 用户泡丢、答案裸奔。
         // 无 _ut 的 DONE（解析不到归属）不清：条目留着，重放靠它补画已发未答泡。
@@ -1923,6 +1957,7 @@
           outboundQueue.length = 0;
           clearFeed();
           latestLiveReqIdx = -1; // 新会话 requestIndex 从 0 起
+          latestUserLiveTs = 0;
           replayingInstant = true;
           // 模型选择按会话分：切完刷新 chip，不然 PWA 显示上个会话的模型
           send({ type: 'PHONE_MODEL_LIST' });
@@ -2937,6 +2972,14 @@
       } else {
         send({ type: 'PHONE_CONNECT', token: t });
       }
+      // 断线重连后重申已选会话：服务端连上即推一次“当前绑定会话”回放，而
+      // 重启/冷启动后绑定可能漂到别的最新文件（空 New Chat、被停止会话等），
+      // 不重申的话错会话历史会直接盖到 feed（标题留旧、内容是别人的）。
+      // 重申后服务端回 SESSION_SELECTED + 正式回放，视图被拉回用户会话。
+      if (hasConnectedOnce && currentSessionMeta.file) {
+        send({ type: 'PHONE_SESSION_SELECT', file: currentSessionMeta.file, reannounce: true });
+      }
+      hasConnectedOnce = true;
     };
     ws.onmessage = (ev) => {
       // 任何入站（含服务端 PING）都算活性证据
