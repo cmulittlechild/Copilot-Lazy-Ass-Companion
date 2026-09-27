@@ -1888,7 +1888,9 @@
         //     都在空闲时到，最新轮的同款回答（"ok"×2）仍放行；
         //  c) _ut 命中的用户轮后面已有助手块（该轮已答），反向找同名泡，
         //     快速连发时未答轮（_ut 是最新一条）必须放行。
-        if (agentTextRendered(String(msg.text || ''))) {
+        // 回放期间不判：历史里不同轮次的同文回答（如连续的 ⚠️ 失败标记）
+        // 必须各自渲染，否则 collapsed 成首个 → 光秃 USER 连排。
+        if (!(replaying || replayingInstant) && agentTextRendered(String(msg.text || ''))) {
           const users = feed.querySelectorAll('.msg.user');
           const lastKey = users.length ? users[users.length - 1].dataset.textKey : '';
           const utIsLatest =
