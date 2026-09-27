@@ -31,6 +31,10 @@ let transcriptWatcher: TranscriptWatcher | undefined;
 // 防止在途会话写盘 newest 把绑定/页面拽回活动会话。被压制时顺延窗口。
 const EXPLICIT_SELECT_GUARD_MS = 20000;
 let lastExplicitSelect: { file: string; until: number } | undefined;
+/** 被显式点选窗吞掉的最后一次 SESSION_FOLLOW：watcher 侧的 newest 转移检测
+ *  只发一次，吞掉即永久丢失（PWA 滞留旧会话）。暂存后于窗口结束补发。 */
+let pendingSuppressedFollow: any;
+let suppressedFollowTimer: NodeJS.Timeout | undefined;
 
 /** 正文规范化（dedupe 用）：剥 markdown 强调+压空白+截断，与 transcriptWatcher.agentTextKey 同形 */
 function replayTextKey(text: string): string {
@@ -240,11 +244,16 @@ export async function activate(context: vscode.ExtensionContext) {
       const hist = watcher?.projectHistory(file, 40) ?? [];
       if (!hist.length) return undefined;
       const sid = path.basename(file).replace(/\.jsonl$/i, "");
-      return buildReplayWithDbBackfill(
+      const merged = buildReplayWithDbBackfill(
         hist,
         transcriptWatcher?.sessionDbRecentTurns(20, sid),
         sid,
       );
+      // 连接回放后播种 watcher 去重集合：激活/catch-up 迟到的整段重投影
+      // （transcript tail、sessiondb 轮询、chatSessions rewrite）会在回放之后
+      // 作为 live 事件再投一遍 → feed 尾部出现用户泡/答案堆叠副本。
+      transcriptWatcher?.seedFromHistory(merged as never);
+      return merged;
     };
 
     push = new PushManager(context.globalState);
@@ -658,7 +667,8 @@ export async function activate(context: vscode.ExtensionContext) {
         // 快速通道永久失效。文件不存在时由 openSessionDb 惰性探测返回 null。
         sessionStoreDb,
         pollMs: Math.max(10, cfg.get<number>("pollMs", 50)),
-        onEvent: (ev) => {
+        // 具名函数表达式：压制窗口补发路径需要重入本 handler（见 SESSION_FOLLOW 压制分支）
+        onEvent: function handleTranscriptWatcherEvent(ev) {
           if (
             ev.type === "USER_MESSAGE" &&
             typeof (ev as any).text === "string" &&
@@ -692,6 +702,30 @@ export async function activate(context: vscode.ExtensionContext) {
               if (selBase && followBase && selBase !== followBase) {
                 lastExplicitSelect = { file: sel.file, until: Date.now() + EXPLICIT_SELECT_GUARD_MS };
                 qrPanel.addLog(`SESSION_FOLLOW 压制: 显式选择窗口内 ${followBase}`);
+                // watcher 的 newest 转移检测只发一次——吞掉就永久丢失，
+                // PWA 会永久滞留旧会话（实测：点选期间桌面开新轮，跟随从此不再来）。
+                // 暂存事件，窗口结束（含顺延）后重入本 handler 补发。
+                pendingSuppressedFollow = ev;
+                if (!suppressedFollowTimer) {
+                  const wait = Math.max(50, lastExplicitSelect.until - Date.now() + 50);
+                  suppressedFollowTimer = setTimeout(function retrySuppressedFollow() {
+                    suppressedFollowTimer = undefined;
+                    const p = pendingSuppressedFollow;
+                    pendingSuppressedFollow = undefined;
+                    if (!p) return;
+                    if (lastExplicitSelect && Date.now() < lastExplicitSelect.until) {
+                      // 窗口仍被顺延（写盘未停/又有点选）→ 继续排队到下一窗口
+                      pendingSuppressedFollow = p;
+                      suppressedFollowTimer = setTimeout(
+                        retrySuppressedFollow,
+                        Math.max(50, lastExplicitSelect.until - Date.now() + 50),
+                      );
+                      return;
+                    }
+                    qrPanel.addLog(`SESSION_FOLLOW 补发: 窗口结束重放被压制的跟随`);
+                    handleTranscriptWatcherEvent(p);
+                  }, wait);
+                }
                 return;
               }
               lastExplicitSelect = undefined;
@@ -797,6 +831,11 @@ export async function activate(context: vscode.ExtensionContext) {
     transcriptActive = false;
     terminalMgr = undefined;
     discovery = undefined;
+    if (suppressedFollowTimer) {
+      clearTimeout(suppressedFollowTimer);
+      suppressedFollowTimer = undefined;
+    }
+    pendingSuppressedFollow = undefined;
     await bridge?.stop();
     bridge = undefined;
     push = undefined;
