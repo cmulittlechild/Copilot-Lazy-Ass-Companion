@@ -2104,6 +2104,38 @@
             }
           }, 15000);
         }
+        // live 失败/空轮占位：DONE 归属轮没产出任何 agent 内容时，在该用户泡下
+        // 补终态占位（回放侧由服务端 annotateOrphanUserTurns 兜底；live 原来完全
+        // 缺失 → 上游 reqerr 轮只剩光秃用户泡，「发送堆一起」的 live 形态）。
+        if (releaseDone && !replaying && !replayingInstant) {
+          const utTxt = String(msg._ut || msg.closedUt || '');
+          if (utTxt) {
+            const want = userTextDedupeKey(utTxt);
+            const users = feed.querySelectorAll('.msg.user');
+            let ownerEl = null;
+            for (let i = users.length - 1; i >= 0; i--) {
+              const b = users[i].querySelector('.user-bubble');
+              if (b && userTextDedupeKey(b.textContent || '') === want) { ownerEl = users[i]; break; }
+            }
+            if (ownerEl) {
+              let hasContent = false;
+              for (let n = ownerEl.nextSibling; n; n = n.nextSibling) {
+                if (n.classList && n.classList.contains('user')) break;
+                if (n.classList && n.classList.contains('agent') && !n.classList.contains('typing-row')) {
+                  const bd = n.querySelector('.body');
+                  if (bd && String(bd.dataset.raw || bd.textContent || '').trim()) { hasContent = true; break; }
+                }
+              }
+              if (!hasContent) {
+                addAgentFinal(
+                  '*（该轮无回复——已停止或请求失败）*',
+                  `orphan-live-${want}-${Date.now()}`,
+                  { ts: Number.isFinite(doneTs) ? doneTs : Date.now() },
+                );
+              }
+            }
+          }
+        }
         if (doneImmediate && releaseDone) setStatus(true, connectedLabel());
         if (!replaying) Haptics.success();
         // 回复结束→排队消息出队（防抖宽限后判 requestRunning）
