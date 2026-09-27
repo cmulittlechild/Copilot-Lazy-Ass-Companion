@@ -147,6 +147,8 @@
   const recentPhoneUserAt = new Map();
   const USER_TEXT_DEDUP_MS = 15000;
   const REQUEST_DONE_GRACE_MS = 600;
+  /** 待答条目阻塞发送队列的时限：超时视为死轮放行（真无回复不能永远卡队列） */
+  const AWAIT_REPLY_FLUSH_BLOCK_MS = 120000;
   /**
    * 死流容忍窗口：最后一次 STREAM_* / COPILOT_TYPING 活动距现在超过该值，
    * 视为僵尸流——requests/N 开流后 END 被服务器端抑制时按钮会永远卡在「停止」。
@@ -1762,12 +1764,14 @@
             pendingSendCheck = null;
             sessionStorage.removeItem(PENDING_SEND_KEY);
           }
-          // 答案落地→同题待答条目释放（多条在途只清已答的）
+          // 答案落地→同题待答条目释放（多条在途只清已答的）；答案到达也是
+          // flush 时机——requestRunning 早已释放而答案后到时，队列靠这里放行
           if (msg._ut) {
             const aut = userTextDedupeKey(String(msg._ut));
             for (let i = sentAwaitingReply.length - 1; i >= 0; i--) {
               if (userTextDedupeKey(sentAwaitingReply[i].text) === aut) sentAwaitingReply.splice(i, 1);
             }
+            setTimeout(flushPendingSendQueue, 50);
           }
         } catch (_) {}
         if (msg.streamId) {
@@ -2937,6 +2941,10 @@
   function flushPendingSendQueue() {
     if (!pendingSendQueue.length || requestRunning) return;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    // 有待答条目 = 上一条答案未落地——0.67 无流路径上 DONE+宽限不等于真轮终，
+    // 此时放行会让下一条插队成 U1U2A1A2。超龄条目（死轮）不挡队列。
+    const now = Date.now();
+    if (sentAwaitingReply.some((e) => now - (e.at || 0) < AWAIT_REPLY_FLUSH_BLOCK_MS)) return;
     const n = pendingSendQueue.shift();
     if (n) sendTextNow(n.text, n.mode);
   }
@@ -2979,7 +2987,7 @@
     persistPendingSend(text, localKey);
     if (sentAwaitingReply.length >= 8) sentAwaitingReply.shift();
     // sess 标发送时的会话文件：SESSION_SELECTED 切换后丢别会话残留，防跨会话误重画
-    sentAwaitingReply.push({ text, key: localKey, sess: currentSessionMeta.file });
+    sentAwaitingReply.push({ text, key: localKey, sess: currentSessionMeta.file, at: Date.now() });
     const sentTextKey = userTextDedupeKey(text);
     pendingSendCheck = {
       textKey: sentTextKey,

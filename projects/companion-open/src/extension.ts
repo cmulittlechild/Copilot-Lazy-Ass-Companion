@@ -697,9 +697,19 @@ export async function activate(context: vscode.ExtensionContext) {
               lastExplicitSelect = undefined;
             }
             if (csFile && fs.existsSync(csFile)) {
+              const hist = watcher?.projectHistory(csFile, 20) ?? [];
+              // 空闲期漂移防护：新建的零内容会话文件（Copilot/宿主空转产生）曾触发
+              // 跟随把 PWA 绑走、feed 清空——目标会话还没有任何用户轮次时不跟随；
+              // 等它出现真实写入后下次跟随自然生效。
+              const histUsers = hist.filter((e) => e?.type === "USER_MESSAGE").length;
+              const dbTurns = transcriptWatcher?.sessionDbRecentTurns(20, base ? base.replace(/\.jsonl$/, "") : "") ?? [];
+              const dbUsers = dbTurns.filter((t) => t.user_message).length;
+              if (!histUsers && !dbUsers) {
+                qrPanel.addLog(`SESSION_FOLLOW 跳过: 目标会话无用户消息 ${base}`);
+                return;
+              }
               setActiveSessionFile(csFile);
               watcher?.selectSession(csFile);
-              const hist = watcher?.projectHistory(csFile, 20) ?? [];
               transcriptWatcher?.seedFromHistory(hist);
               const title =
                 watcher
@@ -715,11 +725,7 @@ export async function activate(context: vscode.ExtensionContext) {
               });
               // 合并 db 补全：chatSessions 尚未写盘的回答（含中间轮次）按用户文位置插回回放
               const sidForDb = base ? base.replace(/\.jsonl$/, "") : "";
-              const mergedHist = buildReplayWithDbBackfill(
-                hist,
-                transcriptWatcher?.sessionDbRecentTurns(20, sidForDb),
-                sidForDb,
-              );
+              const mergedHist = buildReplayWithDbBackfill(hist, dbTurns, sidForDb);
               transcriptWatcher?.seedFromHistory(
                 mergedHist.filter((e) =>
                   (e as { streamId?: string }).streamId?.startsWith("sessiondb/"),
