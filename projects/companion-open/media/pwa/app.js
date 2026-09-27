@@ -1958,7 +1958,16 @@
         if (msg.ok) {
           // Clear immediately so a delayed/lost replay cannot leave the previous
           // session visible under the new session title.
-          outboundQueue.length = 0;
+          // 离线队列里是没送达的用户文本——静默清空 = 重绑竞态吞掉首发
+          // （无泡/无广播/无落盘三空）。捞回输入框再丢队列。
+          {
+            const unsent = outboundQueue.splice(0).filter((m) => m && m.type === 'PHONE_MESSAGE');
+            if (unsent.length) {
+              const lastText = String(unsent[unsent.length - 1].text || '');
+              if (lastText && !(input.value || '').trim()) input.value = lastText;
+              addSys('切换会话：未送达的消息已回填输入框');
+            }
+          }
           clearFeed();
           latestLiveReqIdx = -1; // 新会话 requestIndex 从 0 起
           replayingInstant = true;
