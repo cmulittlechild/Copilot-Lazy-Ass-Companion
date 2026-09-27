@@ -1208,6 +1208,46 @@ export class TranscriptWatcher {
         // 0.5.26 phone gap-fill：只投影「有待补用户文」且带完整 response 的 request
         if (this.suppressFallbackAgent) {
           if (rid) this.fallbackSeenRequestIds.add(rid);
+          // reqerr/取消终态：errorDetails 落在 result 上，response 常为空或只剩
+          // mcpServersStarting 占位——response 长度闸会把它跳过，requestId 又被
+          // 记成 seen 永不重查 → 整轮零事件，手机端卡「正在输入」到硬超时。
+          // 有待补用户文的错误请求直接合成 ⚠️ 正文 + DONE（带 _ut 归属）。
+          const res = asRecord(r?.result);
+          const errMsg =
+            asString(asRecord(res?.errorDetails)?.message) ||
+            asString(asRecord(res?.error)?.message) ||
+            asString(asRecord(r?.errorDetails)?.message);
+          const errored = !!errMsg || (r as any)?.isCanceled === true || (r as any)?.isCanceled === 1;
+          if (
+            errored &&
+            rid &&
+            userText &&
+            this.hasPendingGap(userText) &&
+            !this.gapFilledRequestIds.has(rid)
+          ) {
+            const ets = typeof (r as any)?.timestamp === 'number' ? (r as any).timestamp : undefined;
+            const ee: PhoneEvent[] = [];
+            if (errMsg) {
+              ee.push({
+                type: 'AGENT_MESSAGE',
+                streamId: `reqerr/${rid}`,
+                text: `⚠️ ${errMsg}`,
+                requestIndex: gi,
+                timestamp: ets,
+                _ut: userText,
+                gapFill: true,
+              } as PhoneEvent);
+            }
+            ee.push({
+              type: 'COPILOT_DONE',
+              requestIndex: gi,
+              // DONE 用当下时刻：它是终态信号不是内容——带请求起始 ts 会被仲裁器
+              // stale 判定误杀（doneTs 早于最近 live USER → 丢件 → typing 不消）。
+              timestamp: Date.now(),
+              _ut: userText,
+            } as PhoneEvent);
+            this.emitAgentSide(ee);
+          }
           if (!r || !Array.isArray(r.response) || !r.response.length) continue;
           if (rid && this.gapFilledRequestIds.has(rid)) continue;
           if (!userText || !this.hasPendingGap(userText)) continue;
@@ -1479,12 +1519,9 @@ export class TranscriptWatcher {
 
         if (this.hasEmittedAgentText(text, { requestIndex: reqIdx, streamId, rid: matchedRid, userText: matchedUser })) continue;
 
-        this.noteEmittedAgentText(text, { requestIndex: reqIdx, streamId, rid: matchedRid || undefined, userText: matchedUser });
-        if (matchedRid) this.gapFilledRequestIds.add(matchedRid);
-        this.removePendingGap(matchedUser);
-        this.completedGapUserTexts.add(matchedUser);
-
-        this.emit({
+        // 投递成功才销账：emit() 内部可能因去重/压制返回 false——提前销账
+        // 会让「上游丢了但 pending 已清」的轮次永远补不上（reqerr 轮实测）。
+        const ok = this.emit({
           ...ev,
           type: 'AGENT_MESSAGE',
           text,
@@ -1493,6 +1530,10 @@ export class TranscriptWatcher {
           timestamp: ts,
           _ut: matchedUser,
         } as PhoneEvent);
+        if (!ok) continue;
+        if (matchedRid) this.gapFilledRequestIds.add(matchedRid);
+        this.removePendingGap(matchedUser);
+        this.completedGapUserTexts.add(matchedUser);
         continue;
       }
     }
@@ -2465,8 +2506,8 @@ export class TranscriptWatcher {
   /** catch-up 静默播种：emit() 照常走去重记账但不广播（见 bindFallback） */
   private catchUpQuiet = false;
 
-  private emit(ev: PhoneEvent) {
-    if (this.disposed) return;
+  private emit(ev: PhoneEvent): boolean {
+    if (this.disposed) return false;
     // transcript 通道事件盖上真实记录时间：Windows 慢落盘下 chatSessions/sessiondb
     // 与 transcript 互错数十秒，到达序 != 真实序，靠 ts 在 PWA 侧插回正确位置。
     if (ev && (ev as any).timestamp === undefined && Number.isFinite(this.evTsMs)) {
@@ -2489,11 +2530,11 @@ export class TranscriptWatcher {
         // requestId 级永久去重：Windows 上 transcript/chatSessions 可滞后分钟级，
         // 120s 重影窗过期后迟到副本仍会带同一 rid 重投 → 先按 rid 拦，迟到再久也吞。
         // 真实重发是同文本新 rid → 放行。
-        if (uRid && this.fallbackSeenRequestIds.has(uRid)) return;
+        if (uRid && this.fallbackSeenRequestIds.has(uRid)) return false;
         const lastAt = this.recentUserEmitAt.get(utText) ?? 0;
         const lastRid = this.recentUserEmitRid.get(utText) ?? '';
         const freshRid = uRid !== '' && lastRid !== '' && uRid !== lastRid;
-        if (utNow - lastAt < USER_COPY_WINDOW_MS && !freshRid) return;
+        if (utNow - lastAt < USER_COPY_WINDOW_MS && !freshRid) return false;
         this.recentUserEmitAt.set(utText, utNow);
         if (uRid) {
           this.recentUserEmitRid.set(utText, uRid);
@@ -2528,7 +2569,7 @@ export class TranscriptWatcher {
         const now = Date.now();
         const lastE = this.recentAgentEmits.get(wkey);
         if (lastE && now - lastE.t < 120_000 && lastE.seq === curSeq) {
-          return;
+          return false;
         }
         // 归属错位副本：live 侧 _ut 解析失败时同一条答案被记进空 ut 桶（键 `|key`），
         // 迟到通道随后带着真 _ut 到达（或反向）→ 与另一形态键撞车即同一回答重投影。
@@ -2536,7 +2577,7 @@ export class TranscriptWatcher {
         if (ut) {
           const bare = this.recentAgentEmits.get(`|${akey}`);
           if (bare && now - bare.t < 120_000 && (this.userSeqByUt.get('') ?? 0) <= bare.seq) {
-            return;
+            return false;
           }
         } else {
           const suffix = `|${akey}`;
@@ -2544,7 +2585,7 @@ export class TranscriptWatcher {
             if (k === `|${akey}` || !k.endsWith(suffix) || now - e.t >= 120_000) continue;
             const recUt = k.slice(0, k.length - suffix.length);
             if ((this.userSeqByUt.get(recUt) ?? 0) <= e.seq) {
-              return;
+              return false;
             }
           }
         }
@@ -2558,7 +2599,7 @@ export class TranscriptWatcher {
             (cur.slice(0, 40).length >= 12 && cur.slice(0, 40) === prev.slice(0, 40)) ||
             (cur.slice(-40).length >= 12 && cur.slice(-40) === prev.slice(-40))
           ) {
-            return;
+            return false;
           }
         }
         pendingMark = {
@@ -2580,7 +2621,7 @@ export class TranscriptWatcher {
         this.noteEmittedAgentText(pendingMark.text, pendingMark.ctx);
         this.recentAgentEmits.set(pendingMark.wkey, { t: Date.now(), seq: pendingMark.curSeq });
       }
-      return;
+      return true;
     }
     const delivered = this.opts.onEvent(ev);
     if (delivered !== false && pendingMark) {
@@ -2595,6 +2636,7 @@ export class TranscriptWatcher {
         `[watch] 投递被拒（回声/去重/仲裁器丢弃）未记已投 sid=${pendingMark.ctx.streamId || '-'}`,
       );
     }
+    return delivered !== false;
   }
 
   /** (用户文,正文) 键是否已发过且此后没同题重问（迟到重投影判定） */

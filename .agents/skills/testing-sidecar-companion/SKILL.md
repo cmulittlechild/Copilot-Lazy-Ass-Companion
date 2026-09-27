@@ -97,3 +97,9 @@ PWA ↔ VS Code bridge。仓库 `~/repos/sidecar_remote/projects/companion-open`
 - 造"迟到确认"场景的另一条路：开**第二个 PWA tab**发同文——其 USER_MESSAGE 回声会以 live 事件广播到第一 tab，等价迟到送达确认。
 - sessionStorage `sidecar.pendingSend`（{text,key,at}）可直接种"未送达待发"，刷新即触发「发送可能未送达…已回填」路径——不用真断网。
 - 控制台 JS 错误要警惕：`feed.addEventListener('scroll')` 里 ReferenceError 只污染滚动钩子不阻断其它功能，肉眼难觉——每轮值得瞄一眼 Console。
+
+## R71 取证心得补充
+
+- **WS 监控必须带 token**：QR 面板开隧道会铸 sessionToken 并把裸连客户端踢下广播通道（无 token 的 WS 只剩 PING 心跳、广播静默——极易误判成"服务无广播"）。监控端 PHONE_CONNECT 务必带 `token` 字段，或升级后直接从 QR URL 抠。
+- 裸 DONE（无 _ut/closedUt）在「TOOL→DONE→+10s 正文」形态下会早于答案到达——live 占位误判即源于此；判别这类 DONE 是否误报看轮内是否有工具活动在飞。
+- reqerr 轮特征：chatSessions request 的 `result.errorDetails.message`="Sorry, no response was returned."，response 只剩 mcpServersStarting；transcript 只有 turn_start 无 assistant.message/turn_end；sessiondb assistant_response 为空。

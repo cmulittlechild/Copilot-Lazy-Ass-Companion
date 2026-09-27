@@ -1273,6 +1273,7 @@
     }
     maybeAddFooter(entry.element, entry.markdown);
     streamingTurns.delete(streamId || 'default');
+    rescindOrphanPlaceholders();
     scrollFeed();
     // 该流结束后若没有其它 streaming 回合，收尾状态（防 ••• 与停止键残留）
     if (!replaying) {
@@ -1358,8 +1359,25 @@
     appendFeedChronological(el, opts && (opts.ts != null ? opts.ts : opts.timestamp));
     // 独立助手消息完成 → 底部操作栏（复制按钮）
     maybeAddFooter(el, text);
+    rescindOrphanPlaceholders();
     scrollFeed();
     return el;
+  }
+
+  /** 孤儿占位自清：误判画出的「该轮无回复」下，真答案后到就把占位撤掉 */
+  function rescindOrphanPlaceholders() {
+    const phs = feed.querySelectorAll('.msg.agent[data-orphan-ph]');
+    if (!phs.length) return;
+    phs.forEach((ph) => {
+      for (let n = ph.nextSibling; n; n = n.nextSibling) {
+        if (n.classList && n.classList.contains('user')) break;
+        if (!n.classList || n.dataset.orphanPh) continue;
+        if (n.classList.contains('agent') && !n.classList.contains('typing-row')) {
+          const bd = n.querySelector('.body');
+          if (bd && String(bd.dataset.raw || '').trim()) { ph.remove(); break; }
+        }
+      }
+    });
   }
 
   /** THINKING_STEP：statusHost 内折叠块，流式追加不重渲染 */
@@ -2157,6 +2175,7 @@
           const users = feed.querySelectorAll('.msg.user');
           let ownerEl = null;
           let want = '';
+          let bareDone = false;
           if (utTxt) {
             want = userTextDedupeKey(utTxt);
             for (let i = users.length - 1; i >= 0; i--) {
@@ -2167,6 +2186,7 @@
             // 裸 DONE（无 _ut/closedUt）：归属回退到 feed 末尾最近一个还没答案的
             // 用户泡——sessiondb 孤儿轮就是这种形态（上游写出空流壳+裸 DONE）。
             // 若末尾用户泡已有答案，跳过（这是迟到杂散 DONE，不误画占位）。
+            bareDone = true;
             for (let i = users.length - 1; i >= 0; i--) {
               const u = users[i];
               let answered = false;
@@ -2180,8 +2200,13 @@
               if (!answered) { ownerEl = u; break; }
               break;
             }
+            if (ownerEl) {
+              const ob = ownerEl.querySelector('.user-bubble');
+              want = ob ? userTextDedupeKey(ob.textContent || '') : '';
+            }
           }
-          if (ownerEl) {
+          const drawOrphanPlaceholder = () => {
+            if (!ownerEl || !ownerEl.isConnected) return;
             let hasContent = false;
             for (let n = ownerEl.nextSibling; n; n = n.nextSibling) {
               if (n.classList && n.classList.contains('user')) break;
@@ -2191,11 +2216,25 @@
               }
             }
             if (!hasContent) {
-              addAgentFinal(
+              const ph = addAgentFinal(
                 '*（该轮无回复——已停止或请求失败）*',
                 `orphan-live-${want || 'last'}-${Date.now()}`,
                 { ts: Number.isFinite(doneTs) ? doneTs : Date.now() },
               );
+              if (ph) ph.dataset.orphanPh = '1';
+            }
+          };
+          if (ownerEl) {
+            if (bareDone) {
+              // 裸 DONE 可能早于在途答案（TOOL→DONE→+13s 正文形态实测）：
+              // 延迟复核——到时该泡若已有答案就不画，真孤儿轮才补占位。
+              // want 锁的是这条用户泡本身，期间新发的消息不影响归属。
+              setTimeout(() => {
+                if (!ownerEl.isConnected) return;
+                drawOrphanPlaceholder();
+              }, 15000);
+            } else {
+              drawOrphanPlaceholder();
             }
           }
         }

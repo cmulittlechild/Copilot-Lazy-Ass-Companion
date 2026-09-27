@@ -297,10 +297,12 @@ class BridgeServer {
     setAuthToken(token) {
         const next = token?.trim() || undefined;
         this.authToken = next || (!isLoopbackHost(this.host) ? crypto.randomBytes(16).toString('hex') : undefined);
-        for (const ws of this.clients) {
-            // A token change invalidates previous socket authentication. Clients must
-            // perform PHONE_CONNECT again with the current token.
-            this.clientAuth.set(ws, !this.authToken);
+        // token 从无到有/轮换：已认证的连接保持认证（它们是在旧策略下入场的合法
+        // 会话，全部打回未认证 = 开隧道瞬间把所有在线手机踢成 401 墙）；
+        // 未认证的保持未认证，新连接才需出示新 token。token 清除时全体放行。
+        if (!this.authToken) {
+            for (const ws of this.clients)
+                this.clientAuth.set(ws, true);
         }
         this.emitClientCount();
     }
