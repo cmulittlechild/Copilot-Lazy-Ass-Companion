@@ -59,6 +59,8 @@ let transcriptWatcher;
 // 防止在途会话写盘 newest 把绑定/页面拽回活动会话。被压制时顺延窗口。
 const EXPLICIT_SELECT_GUARD_MS = 20000;
 let lastExplicitSelect;
+/** 因零内容被跳过的跟随目标：该会话出现首个用户轮次时补发跟随 */
+let pendingFollowFile;
 /** 正文规范化（dedupe 用）：剥 markdown 强调+压空白+截断，与 transcriptWatcher.agentTextKey 同形 */
 function replayTextKey(text) {
     return String(text || "")
@@ -429,8 +431,10 @@ async function activate(context) {
                     const file = typeof msg.file === "string" ? msg.file : "";
                     const ok = watcher?.selectSession(file) ?? false;
                     // 显式点选开窗：窗口内压制指向别会话的自动跟随（见 SESSION_FOLLOW 处）。
-                    if (ok && file)
+                    if (ok && file) {
                         lastExplicitSelect = { file, until: Date.now() + EXPLICIT_SELECT_GUARD_MS };
+                        pendingFollowFile = undefined;
+                    }
                     // 记录选中会话：后续 PHONE_MESSAGE 注入必须先切到该会话，
                     // 否则 workbench.action.chat.open 只会打到 VS Code 当前活跃会话。
                     if (ok && file)
@@ -654,6 +658,24 @@ async function activate(context) {
                         (0, inject_1.isInjectedEcho)(ev.text)) {
                         return;
                     }
+                    // 被跳过的空会话出现真实内容后补跟随：下一条用户/回复事件到达时
+                    // 重评估（跳过时目标的写盘变化不会再发 SESSION_FOLLOW）。
+                    if (pendingFollowFile &&
+                        (ev.type === "USER_MESSAGE" ||
+                            ev.type === "AGENT_MESSAGE" ||
+                            ev.type === "AGENT_STREAM_SET" ||
+                            ev.type === "AGENT_STREAM_CHUNK")) {
+                        const pf = pendingFollowFile;
+                        const pfBase = path.basename(pf).replace(/\.jsonl$/i, "");
+                        const pfHist = watcher?.projectHistory(pf, 5) ?? [];
+                        const pfDb = transcriptWatcher?.sessionDbRecentTurns(5, pfBase) ?? [];
+                        if (pfHist.some((e) => e?.type === "USER_MESSAGE") ||
+                            pfDb.some((t) => t.user_message)) {
+                            pendingFollowFile = undefined;
+                            qrPanel.addLog(`SESSION_FOLLOW 补发: ${pfBase} 已有内容`);
+                            ev = { type: "SESSION_FOLLOW", file: pf, csFile: pf };
+                        }
+                    }
                     // 桌面切会话跟随：页面完整同步——feed 换目标会话历史 + 标题切换。
                     // 先 SESSION_SELECTED（PWA 清 feed + 标题 + 切换态），再 HISTORY_REPLAY。
                     if (ev.type === "SESSION_FOLLOW") {
@@ -694,8 +716,10 @@ async function activate(context) {
                             const dbUsers = dbTurns.filter((t) => t.user_message).length;
                             if (!histUsers && !dbUsers) {
                                 qrPanel.addLog(`SESSION_FOLLOW 跳过: 目标会话无用户消息 ${base}`);
+                                pendingFollowFile = csFile;
                                 return;
                             }
+                            pendingFollowFile = undefined;
                             (0, inject_1.setActiveSessionFile)(csFile);
                             watcher?.selectSession(csFile);
                             transcriptWatcher?.seedFromHistory(hist);
