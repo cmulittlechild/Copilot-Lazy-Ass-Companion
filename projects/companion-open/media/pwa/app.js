@@ -138,6 +138,9 @@
   let requestRunning = false;
   /** 停止需双击确认：空输入点击发送键先武装 3s，再点才真正停（防误触/打字未落框杀掉在途回复） */
   let stopArmUntil = 0;
+  /** 本会话见过的最大 requestIndex（仅 live）：用于识别旧请求迟到的 DONE，
+      防止把当前在途轮的发送键/队列提前释放 */
+  let latestLiveReqIdx = -1;
   /** COPILOT_DONE 防抖：agent 多 turn（tool 循环）中间 turn_end 也会 DONE，短延迟避免发送键闪烁 */
   let requestDoneTimer = null;
   /** 乐观用户消息短窗：textKey → at（与 bridge 回声去重，不永久禁同文） */
@@ -371,21 +374,25 @@
     // 本定时器；期满仍无活动才释放发送键。否则中途 DONE 会让按钮变回「发送」，
     // 长轮几乎无法从 PWA 停止。
     const deferMs = opts && typeof opts.deferMs === 'number' ? opts.deferMs : null;
+    // 统一的延迟释放检查：残留 .streaming 元素 + 最近 5s 有流活动 → 中途 DONE，
+    // 续查；残留但无活动 → 死流，清尾后释放。此前「仍有流就直接 return」是
+    // 死路——残留元素不消失时按钮滞留 ~60s 直到下一个 DONE。
+    const graceRelease = () => {
+      requestDoneTimer = null;
+      if (anyStreamingNow() && Date.now() - lastStreamActivityAt < 5000) {
+        requestDoneTimer = setTimeout(graceRelease, 1500);
+        return;
+      }
+      finishAllAssistantVisuals();
+      requestRunning = false;
+      paintSendButton();
+      if (statusText && !replaying && !replayingInstant) {
+        statusText.textContent = connectedLabel();
+      }
+      flushPendingSendQueue();
+    };
     if (deferMs != null) {
-      requestDoneTimer = setTimeout(() => {
-        requestDoneTimer = null;
-        if (anyStreamingNow()) {
-          // 宽限结束仍有流 → 再等一轮短宽限
-          setRequestRunning(false);
-          return;
-        }
-        requestRunning = false;
-        paintSendButton();
-        if (statusText && !replaying && !replayingInstant) {
-          statusText.textContent = connectedLabel();
-        }
-        flushPendingSendQueue();
-      }, deferMs);
+      requestDoneTimer = setTimeout(graceRelease, deferMs);
       return;
     }
     if (!anyStreamingNow()) {
@@ -398,15 +405,7 @@
       return;
     }
     // 仍有 streaming：短宽限等下一 turn
-    requestDoneTimer = setTimeout(() => {
-      requestDoneTimer = null;
-      if (anyStreamingNow()) return;
-      requestRunning = false;
-      paintSendButton();
-      if (statusText && !replaying && !replayingInstant) {
-        statusText.textContent = connectedLabel();
-      }
-    }, REQUEST_DONE_GRACE_MS);
+    requestDoneTimer = setTimeout(graceRelease, REQUEST_DONE_GRACE_MS);
   }
 
   function setSessionTitle(title, file) {
@@ -1648,6 +1647,10 @@
       const bound = baseNameAny(currentSessionMeta.file).replace(/\.jsonl$/i, '');
       if (bound && String(msg._sess) !== bound) return;
     }
+    // 跟踪本会话 live 最大 requestIndex：识别旧请求迟到的 DONE
+    if (!replaying && typeof msg.requestIndex === 'number' && msg.requestIndex > latestLiveReqIdx) {
+      latestLiveReqIdx = msg.requestIndex;
+    }
     switch (msg.type) {
       case 'AUTH_FAILED':
         outboundQueue.length = 0;
@@ -1789,6 +1792,9 @@
         break;
       }
       case 'THINKING_STEP': {
+        // 思考步骤也算在途活动：给 DONE 的延迟释放续命，防 thinking 间隙释放发送键
+        lastStreamActivityAt = Date.now();
+        if (!replaying && requestRunning) setRequestRunning(true);
         const tEntry = resolveEntryFor(msg);
         if (tEntry) appendThinking(tEntry, msg.text || '');
         break;
@@ -1820,17 +1826,22 @@
             addSys('已确认送达（此前误报未送达，勿重复发送）');
           }
         }
-        markAllToolsDone();
-        // 全量收尾：独立 typing-row + 所有行上的 ••• + streaming 光标
-        finishAllAssistantVisuals();
+        // 旧请求的迟到 DONE（requestIndex 小于已见过的最大 live 下标）不动
+        // 当前在途轮的发送键/视觉/队列——否则连发 U1U2A1A2 堆叠、长轮无法停。
+        const doneIdx = typeof msg.requestIndex === 'number' ? msg.requestIndex : null;
+        const staleDone = doneIdx != null && latestLiveReqIdx > doneIdx;
+        if (!staleDone) {
+          markAllToolsDone();
+          finishAllAssistantVisuals();
+        }
         // 中途 DONE（tool 循环 turn_end / thinking 间隙、旧请求迟到）提前于请求
         // 真正结束——立即释放会让发送键提前变回「发送」，长轮几乎停不掉。
         // 3s 宽限释放：期间任何新流活动自动取消；用户主动停/取消仍立即释放。
         const doneImmediate = msg.reason === 'phone_stop' || msg.reason === 'isCanceled';
-        if (!replaying) {
+        if (!replaying && !staleDone) {
           setRequestRunning(false, undefined, doneImmediate ? { force: true } : { deferMs: 3000 });
         }
-        if (doneImmediate) setStatus(true, connectedLabel());
+        if (doneImmediate && !staleDone) setStatus(true, connectedLabel());
         if (!replaying) Haptics.success();
         // 回复结束→按 _ut 逐条释放待答条目：服务端 DONE 现带归属轮次，
         // 只清已答的；任意 DONE 整表清会把别轮在途条目误杀 → 用户泡丢、答案裸奔。
@@ -1853,6 +1864,7 @@
           // session visible under the new session title.
           outboundQueue.length = 0;
           clearFeed();
+          latestLiveReqIdx = -1; // 新会话 requestIndex 从 0 起
           replayingInstant = true;
           // 模型选择按会话分：切完刷新 chip，不然 PWA 显示上个会话的模型
           send({ type: 'PHONE_MODEL_LIST' });

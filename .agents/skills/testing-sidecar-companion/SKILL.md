@@ -66,3 +66,7 @@ PWA ↔ VS Code bridge。仓库 `~/repos/sidecar_remote/projects/companion-open`
 - 答案渲染成 "text|Copy" 灰框 = marked.min.js CDN 没加载（md-fallback-pre 降级）；curl CDN 可达≠页面加载成功，Cmd+Shift+R 硬刷可恢复——是 PWA 对局域网手机场景的健壮性弱点。
 - Copilot 0.67+ 无增量流事件：全程 AGENT_STREAM_START=0 属正常，答案以单条 AGENT_MESSAGE 到达；DONE 由 requestDoneReason（elapsedMs 内联）触发，typing 正常清。
 - 上游模型 503/空响应时桌面显示 "Sorry..." 但 PWA 零错误泡——对账时注意"有问无答"可能是上游失败而非投递缺陷，区分靠看桌面同会话。
+- 回放排序验证用探针 dump 序列最快：UA 过滤后必须严格 `UAUA…` 交错且 `U{2,}|A{2,}` clump 检测零命中；同 streamId 重复 AGENT_MESSAGE 抓双投。
+- 同请求双投排查：会话 jsonl 同一请求可能带「append 内嵌 response」（projectLine 会顺带投影，jsonl.js:121）与「requests[i].response 追加 mut」双形态——守卫需覆盖 step1（append）与 step3（显式内嵌）两条路径。
+- release 链检查看「最后一个 DONE 后按钮是否及时回发送」：滞留超 10s 即疑死链（`anyStreamingNow() return` 不重挂定时器曾是死路）。
+- 孤儿轮（停止/失败/无回复）回放应渲染斜体「该轮无回复」占位恢复交错——live 区不应出现占位（在途轮豁免）。

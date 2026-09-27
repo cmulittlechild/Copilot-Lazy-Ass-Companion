@@ -103,7 +103,25 @@ function buildReplayWithDbBackfill(hist, dbTurns, sid) {
                 const e = out[i];
                 if (e?.type === "USER_MESSAGE" &&
                     replayTextKey(String(e.text || "")) === uKey) {
-                    out.splice(i + 1, 0, ev);
+                    // 该轮到下一条 USER 之间已有助手回复（文件投影或先补全）→ 跳过。
+                    // sessiondb 与文件投影的文本形态常异构（含/不含文件名引用等），
+                    // 纯文本 key 去重会漏 → 同一条答案双投成相邻两块。
+                    let answered = false;
+                    for (let j = i + 1; j < out.length; j++) {
+                        const t = out[j]?.type;
+                        if (t === "USER_MESSAGE")
+                            break;
+                        if (t === "AGENT_MESSAGE" ||
+                            t === "AGENT_STREAM_SET" ||
+                            t === "AGENT_STREAM_CHUNK" ||
+                            t === "AGENT_STREAM_END" ||
+                            t === "AGENT_STREAM_START") {
+                            answered = true;
+                            break;
+                        }
+                    }
+                    if (!answered)
+                        out.splice(i + 1, 0, ev);
                     inserted = true;
                     break;
                 }

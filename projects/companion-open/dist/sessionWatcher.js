@@ -425,12 +425,15 @@ class SessionWatcher {
                     continue;
                 // 0.5.22：从 request 提取 timestamp 透传到事件，PWA 按时间戳排序
                 const reqTs = typeof req.timestamp === 'number' ? req.timestamp : undefined;
-                // 1) USER_MESSAGE for this request
+                // 1) USER_MESSAGE for this request — 剥离内嵌 response：append 行的
+                //    projectLine 会顺带投影 v[n].response（jsonl.ts），与 step-2 的
+                //    独立 response 突变或 step-3 的显式内嵌投影重复 → 同 streamId 双投。
+                //    统一由 step-3（无突变时）处理内嵌兜底，此处只出 USER。
                 for (const ev of proj.projectLine({
                     kind: 2,
                     k: ['requests'],
                     i: ri,
-                    v: [req],
+                    v: [{ ...req, response: undefined }],
                 })) {
                     if (reqTs != null && ev && !ev.timestamp)
                         ev.timestamp = reqTs;
@@ -448,8 +451,11 @@ class SessionWatcher {
                         out.push(ev);
                     }
                 }
-                // 3) also project any response already embedded on the request object
-                if (Array.isArray(req.response) && req.response.length) {
+                // 3) also project any response already embedded on the request object —
+                //    仅当该请求在文件里没有真正的 response 突变时才走这条兜底：
+                //    两者同投会把同一答案渲染成相邻双块（mutations 先收尾，内嵌再投一遍）。
+                const hasResponseMuts = muts.some((m) => m.reqIndex === ri && m.isResponse);
+                if (!hasResponseMuts && Array.isArray(req.response) && req.response.length) {
                     for (const ev of proj.projectLine({
                         kind: 2,
                         k: ['requests', ri, 'response'],
