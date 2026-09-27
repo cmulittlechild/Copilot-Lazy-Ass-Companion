@@ -220,6 +220,10 @@
   const pendingSendQueue = [];
   /** 「已排队」提示元素：出队发走后移除，不再残留（R59 P3）。 */
   let queuedHintEl = null;
+  /** 硬释放看门狗：DONE 触发的宽限释放链会被 setRequestRunning(true) 取消
+      （迟到流事件重置 rr → 悬挂 ~100s 到僵尸看门狗）。DONE 判 release 时
+      独立布一个 15s 检查：rr 仍在且流静默 ≥5s → 强制释放+出队。 */
+  let releaseHardTimer = null;
 
   /**
    * 鉴权 token：URL ?token= 优先，其次 localStorage（tunnel 开了 auth 时必须带）。
@@ -1826,6 +1830,11 @@
             // 无 DONE 收尾的轮（DONE 被判死丢弃）在这里释放——同样出队排队消息
             setTimeout(flushPendingSendQueue, 800);
             setStatus(true, connectedLabel());
+          } else if (!replaying) {
+            // 位置型 streamId（requests/N/…）的 END 只对得上自己那条流——其他
+            // 残卡仍在 streaming → any=true 不放行。END 本身是终止信号，排一个
+            // 宽限释放复查：残卡只是残影时静默 ≥5s 即释（治 R61 悬挂）。
+            setRequestRunning(false, undefined, { deferMs: 3000 });
           }
         }
         break;
@@ -2022,6 +2031,21 @@
         // 3s 宽限释放：期间任何新流活动自动取消；用户主动停/取消仍立即释放。
         if (!replaying && releaseDone) {
           setRequestRunning(false, undefined, doneImmediate ? { force: true } : { deferMs: 3000 });
+          // 硬释放兜底：上面 defer 链若被迟到事件重置 rr 而取消，15s 后兜底检查
+          if (releaseHardTimer) clearTimeout(releaseHardTimer);
+          releaseHardTimer = setTimeout(() => {
+            releaseHardTimer = null;
+            if (requestRunning && Date.now() - lastStreamActivityAt >= 5000) {
+              markAllToolsDone();
+              finishAllAssistantVisuals();
+              requestRunning = false;
+              paintSendButton();
+              if (statusText && !replaying && !replayingInstant) {
+                statusText.textContent = connectedLabel();
+              }
+              flushPendingSendQueue();
+            }
+          }, 15000);
         }
         if (doneImmediate && releaseDone) setStatus(true, connectedLabel());
         if (!replaying) Haptics.success();
