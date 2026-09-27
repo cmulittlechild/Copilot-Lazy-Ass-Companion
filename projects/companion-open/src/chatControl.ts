@@ -207,14 +207,16 @@ export class ChatControl {
       // 含 copilot-utility / dictation-cleanup / gpt-4o-mini 等内部不可选项，
       // 选了也切不动（假成功）。缓存不可用时不过滤（宁可多列不可空列）。
       const selectable = this.readUserSelectableModelIds();
-      const models = selectable
+      const filtered = selectable?.size
         ? allModels.filter(
             (m) =>
               selectable.has(`${m.vendor}/${m.id}`) ||
               selectable.has(`${m.vendor}:${m.id}`) ||
               selectable.has(m.id),
           )
-        : allModels;
+        : [];
+      // 缓存为空集或过滤后为空（provider 暂不可达/缓存未写）时不过滤——宁多列不空列
+      const models = filtered.length ? filtered : allModels;
       if (selectable && models.length < allModels.length) {
         this.log(`[chatControl] 模型列表过滤: ${allModels.length} → ${models.length}（仅用户可选）`);
       }
