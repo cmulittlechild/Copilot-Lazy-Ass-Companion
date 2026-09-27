@@ -128,18 +128,24 @@ function isInternalSystemMessage(ev) {
  */
 function annotateOrphanUserTurns(events) {
     const out = Array.isArray(events) ? events.slice() : [];
-    const isAnswer = (t) => t === 'AGENT_MESSAGE' ||
-        t === 'AGENT_STREAM_SET' ||
-        t === 'AGENT_STREAM_CHUNK' ||
-        t === 'AGENT_STREAM_END' ||
-        t === 'AGENT_STREAM_START';
+    // 只认有正文的答：失败轮会留下 START+END 空流壳（无内容事件），
+    // 生命周期标记不算已答，否则光秃 USER 连排且无占位。
+    const isAnswer = (e) => {
+        const t = String(e?.type || '');
+        if (t === 'AGENT_MESSAGE')
+            return true;
+        if (t === 'AGENT_STREAM_SET' || t === 'AGENT_STREAM_CHUNK') {
+            return typeof e?.text === 'string' && e.text.trim().length > 0;
+        }
+        return false;
+    };
     for (let i = 0; i < out.length; i++) {
         if (out[i]?.type !== 'USER_MESSAGE')
             continue;
         let j = i + 1;
         let answered = false;
         while (j < out.length && out[j]?.type !== 'USER_MESSAGE') {
-            if (isAnswer(String(out[j]?.type || ''))) {
+            if (isAnswer(out[j])) {
                 answered = true;
                 break;
             }

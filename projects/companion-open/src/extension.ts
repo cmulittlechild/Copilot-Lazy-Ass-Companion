@@ -102,16 +102,19 @@ function buildReplayWithDbBackfill(
           // 该轮到下一条 USER 之间已有助手回复（文件投影或先补全）→ 跳过。
           // sessiondb 与文件投影的文本形态常异构（含/不含文件名引用等），
           // 纯文本 key 去重会漏 → 同一条答案双投成相邻两块。
+          // 只认有正文的答：失败轮只剩 START+END 空流壳，生命周期标记不算已答。
           let answered = false;
           for (let j = i + 1; j < out.length; j++) {
             const t = out[j]?.type;
             if (t === "USER_MESSAGE") break;
+            if (t === "AGENT_MESSAGE") {
+              answered = true;
+              break;
+            }
             if (
-              t === "AGENT_MESSAGE" ||
-              t === "AGENT_STREAM_SET" ||
-              t === "AGENT_STREAM_CHUNK" ||
-              t === "AGENT_STREAM_END" ||
-              t === "AGENT_STREAM_START"
+              (t === "AGENT_STREAM_SET" || t === "AGENT_STREAM_CHUNK") &&
+              typeof (out[j] as { text?: unknown })?.text === "string" &&
+              String((out[j] as { text?: unknown }).text).trim().length > 0
             ) {
               answered = true;
               break;
