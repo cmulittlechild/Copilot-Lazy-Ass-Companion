@@ -35,8 +35,6 @@ let lastExplicitSelect: { file: string; until: number } | undefined;
  *  只发一次，吞掉即永久丢失（PWA 滞留旧会话）。暂存后于窗口结束补发。 */
 let pendingSuppressedFollow: any;
 let suppressedFollowTimer: NodeJS.Timeout | undefined;
-/** 首次压制跟随的时刻：比较绑定会话活动时间，判断用户是否在用所选会话 */
-let suppressedFollowAt = 0;
 /** 绑定（点选）会话最近一条可见事件的时间戳——sessionWatcher 只 tail 绑定文件 */
 let boundSessionActivityAt = 0;
 /** 当前绑定是否来自手机显式点选——只有点选来的绑定才有「活跃即续压」资格；
@@ -829,7 +827,6 @@ export async function activate(context: vscode.ExtensionContext) {
                 // PWA 会永久滞留旧会话（实测：点选期间桌面开新轮，跟随从此不再来）。
                 // 暂存事件，窗口结束（含顺延）后重入本 handler 补发。
                 pendingSuppressedFollow = ev;
-                suppressedFollowAt = Date.now();
                 if (!suppressedFollowTimer) {
                   const wait = Math.max(50, lastExplicitSelect.until - Date.now() + 50);
                   suppressedFollowTimer = setTimeout(function retrySuppressedFollow() {
