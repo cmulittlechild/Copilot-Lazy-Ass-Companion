@@ -2110,6 +2110,9 @@
           } catch (_) {}
           // 换会话后排队消息的目标已变化，丢弃并提示（防注入到新会话）
           if (pendingSendQueue.length) {
+            for (const qi of pendingSendQueue) {
+              if (qi && qi.el && qi.el.isConnected) qi.el.remove();
+            }
             pendingSendQueue.length = 0;
             addSys('已切换会话，排队消息已丢弃');
             if (queuedHintEl) { queuedHintEl.remove(); queuedHintEl = null; }
@@ -3127,7 +3130,11 @@
       // 有文本 = 排队发送（杀在途轮太狠）；空文本 = 停止（需双击确认）
       const queuedText = (input.value || '').trim();
       if (queuedText) {
-        pendingSendQueue.push({ text: queuedText, mode: modeEl.value || 'agent' });
+        // 入队即渲泡（半透明排队态）：出队时复用同一元素转正常，不再「提示在泡不在」。
+        const qKey = `user:queued:${Date.now()}:${userTextDedupeKey(queuedText)}`;
+        const qEl = addUser(queuedText, qKey, { force: true, ts: Date.now() });
+        if (qEl) qEl.classList.add('queued');
+        pendingSendQueue.push({ text: queuedText, mode: modeEl.value || 'agent', el: qEl, key: qKey });
         input.value = '';
         input.style.height = 'auto';
         queuedHintEl = addSys('已排队：当前回复结束后自动发送');
@@ -3171,25 +3178,39 @@
     const now = Date.now();
     if (sentAwaitingReply.some((e) => now - (e.at || 0) < AWAIT_REPLY_FLUSH_BLOCK_MS)) return;
     const n = pendingSendQueue.shift();
-    if (n) sendTextNow(n.text, n.mode);
+    if (n) {
+      if (n.el && n.el.isConnected) {
+        // 复用入队时已渲的泡：去掉排队态，别再画第二个
+        n.el.classList.remove('queued');
+        sendTextNow(n.text, n.mode, n.el, n.key);
+      } else {
+        sendTextNow(n.text, n.mode);
+      }
+    }
     if (!pendingSendQueue.length && queuedHintEl) {
       queuedHintEl.remove();
       queuedHintEl = null;
     }
   }
 
-  function sendTextNow(text, mode) {
+  function sendTextNow(text, mode, existingEl, existingKey) {
     Haptics.tap();
     // 0.5.19+：手机发送 force 上屏，避免短文案「1」被历史同文去重吞掉
-    const localKey = `user:local:${Date.now()}:${userTextDedupeKey(text)}`;
-    const painted = addUser(text, localKey, { force: true, ts: Date.now() });
-    if (!painted) {
-      try {
-        recentPhoneUserAt.delete(userTextDedupeKey(text));
-        seenKeys.delete(localKey);
-        seenKeys.delete(userTextDedupeKey(text));
-      } catch (_) {}
-      addUser(text, localKey, { force: true });
+    // existingEl：排队期已渲的泡——复用，不再重复画（localKey 沿用入队时的 key）。
+    const localKey = existingKey || `user:local:${Date.now()}:${userTextDedupeKey(text)}`;
+    if (!(existingEl && existingEl.isConnected)) {
+      const painted = addUser(text, localKey, { force: true, ts: Date.now() });
+      if (!painted) {
+        try {
+          recentPhoneUserAt.delete(userTextDedupeKey(text));
+          seenKeys.delete(localKey);
+          seenKeys.delete(userTextDedupeKey(text));
+        } catch (_) {}
+        addUser(text, localKey, { force: true });
+      }
+    } else {
+      // 入队泡已带 textKey；补齐 dataset.key 使回声去重链路一致
+      try { if (localKey && !existingEl.dataset.key) existingEl.dataset.key = localKey; } catch (_) {}
     }
     const beforeQueue = outboundQueue.length;
     const sent = sendMessage(

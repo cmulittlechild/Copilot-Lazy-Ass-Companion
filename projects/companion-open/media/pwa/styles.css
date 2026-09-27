@@ -312,6 +312,12 @@ body {
   text-align: left;
 }
 
+/* 排队待发消息：半透明 + 斜体提示，出队后移除 .queued */
+.msg.user.queued .user-bubble {
+  opacity: 0.6;
+  font-style: italic;
+}
+
 /* ---- 助手消息：sender header + 行内内容 ---- */
 .msg.agent { align-self: flex-start; width: 100%; }
 /* 同一用户回合内的续写片段：折叠 Copilot 头像/名字，只留正文 */
