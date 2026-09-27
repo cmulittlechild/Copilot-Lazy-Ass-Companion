@@ -202,6 +202,7 @@ class TurnArbiter {
                     ev.ack = true;
                 }
                 // 停止类 DONE：终止最新未答轮，记 closedUt 让客户端精确清条目
+                const newest = this.newestOpenTurn(sessBase);
                 if (immediate && !utKey && newest) {
                     ev.closedUt = newest.utKey;
                     this.markAnswered(sessBase, newest.utKey);
