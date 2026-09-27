@@ -177,6 +177,16 @@
   let pendingSendCheck = null;
   /** 核验计时器误报时间戳：送达确认若晚于误报到达，补一条「已送达」修正提示 */
   let sendVerifyMissedAt = 0;
+  /** 误报后回填进输入框的文本：送达确认到达时若原样未动则自动清，勿留残渣 */
+  let sendVerifyRestoredText = null;
+  /** 送达确认后清回填残渣：仅当输入框内容仍与回填文本原样一致（用户没动过） */
+  function clearRestoredIfConfirmed(confirmedText) {
+    if (!sendVerifyRestoredText) return;
+    if (confirmedText != null &&
+        userTextDedupeKey(String(confirmedText)) !== userTextDedupeKey(sendVerifyRestoredText)) return;
+    if ((input.value || '') === sendVerifyRestoredText) input.value = '';
+    sendVerifyRestoredText = null;
+  }
   /** 待发核验持久化 key：页面被半死 socket 刷新杀死内存计时器时，刷新后从这里回填 */
   const PENDING_SEND_KEY = 'sidecar.pendingSend';
   function persistPendingSend(text, key) {
@@ -208,7 +218,7 @@
         sessionStorage.removeItem(PENDING_SEND_KEY);
         return;
       }
-      if (!(input.value || '').trim()) input.value = p.text;
+      if (!(input.value || '').trim()) { input.value = p.text; sendVerifyRestoredText = p.text; }
       addSys('发送可能未送达（连接中断），文本已回填，请重新发送');
     } catch {}
   }
@@ -1780,6 +1790,8 @@
             }
           }
         } catch {}
+        // 回声即送达证明：误报回填的原样文本清掉（用户改写过则保留）
+        clearRestoredIfConfirmed(msg.text);
         // 迟到重投影（ts ≤ 回放覆盖范围）且同文已在屏 → 丢弃，防用户泡堆叠
         if (isStaleReplayEvent(eventTsNum(msg)) && userTextRendered(msg.text || '')) break;
         if (!replaying) {
@@ -1973,6 +1985,7 @@
             try { sessionStorage.removeItem(PENDING_SEND_KEY); } catch (_) {}
           } else if (sendVerifyMissedAt && Date.now() - sendVerifyMissedAt < 120000) {
             sendVerifyMissedAt = 0;
+            clearRestoredIfConfirmed(null);
             addSys('已确认送达（此前误报未送达，勿重复发送）');
           }
         }
@@ -2095,7 +2108,7 @@
             const unsent = outboundQueue.splice(0).filter((m) => m && m.type === 'PHONE_MESSAGE');
             if (unsent.length) {
               const lastText = String(unsent[unsent.length - 1].text || '');
-              if (lastText && !(input.value || '').trim()) input.value = lastText;
+              if (lastText && !(input.value || '').trim()) { input.value = lastText; sendVerifyRestoredText = lastText; }
               addSys('切换会话：未送达的消息已回填输入框');
             }
           }
@@ -3264,6 +3277,7 @@
     showTyping();
     input.value = '';
     input.style.height = 'auto';
+    sendVerifyRestoredText = null; // 新发送即抛弃旧回填标记
     // 半死 socket 防御：N 秒内服务器没回声这条消息就判丢，回填文本让用户重发。
     // 同时写 sessionStorage——半死 socket 报错可能刷新页面杀死计时器，刷新后启动时回填。
     if (pendingSendCheck) clearTimeout(pendingSendCheck.timer);
@@ -3281,7 +3295,7 @@
         const lostKey = pendingSendCheck.textKey;
         pendingSendCheck = null;
         clearPendingSend();
-        if (!(input.value || '').trim()) input.value = lost;
+        if (!(input.value || '').trim()) { input.value = lost; sendVerifyRestoredText = lost; }
         if (requestRunning) {
           requestRunning = false;
           paintSendButton();
