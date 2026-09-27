@@ -83,3 +83,10 @@ PWA ↔ VS Code bridge。仓库 `~/repos/sidecar_remote/projects/companion-open`
 - 输入变形新特征：变形字符=最近输入过的字符(写→锂、有哪→锂锂)——更像输入层 per-char buffer 复用/替换，而非随机丢字。
 - 停止测试现实约束：快模型(v4-flash ~2s)轮太短打不中；想测停止先切慢模型或发长文+0.5s 内连点两次。
 - macOS "iPhone Mirroring" app 会反复抢前台+弹 iCloud 登录——osascript quit "iPhone Mirroring"(不是 Simulator)。
+
+## R68 取证心得：回放层验证
+
+- monitor 把 HISTORY_REPLAY 折叠成 `n=?`——要看回放内容需写探针：PHONE_CONNECT → PHONE_SESSION_SELECT(file=…jsonl) → dump e.messages 逐条（/tmp/replay_probe.mjs 有模板，~15行）。
+- 手工造孤儿轮：往 chatSessions/<sid>.jsonl 尾追加 `{"kind":2,"k":["requests"],"v":[{…request…}]}`，克隆现有 request 行、换 requestId/timestamp/message.text；`response:[]`=纯孤儿，`response:[{"value":"",…}]`=空流壳（等价失败轮）。注意：尾部（最末）孤儿按设计不加占位——要测占位须再跟一个 request。
+- 副作用：文件监视器会把新追加的 request 当**活轮**再广播一遍 live USER_MESSAGE（wire 上会突然出现非客户端发送的 U）。
+- 客户端同文闸签名：feed 里同一答文第二次不渲（agentTextRendered 闸，无 replaying 豁免）——占位符/重复答案只渲首个。判别：wire 探针里有但 feed 里没有 = 客户端丢弃。
