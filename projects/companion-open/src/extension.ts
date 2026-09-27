@@ -838,7 +838,6 @@ export async function activate(context: vscode.ExtensionContext) {
                     // 90s = 用户正在用它 → 续压顺延，避免「拽走又拽回」的拉锯。
                     if (
                       lastExplicitSelect &&
-                      boundSessionActivityAt > suppressedFollowAt &&
                       Date.now() - boundSessionActivityAt < 90000
                     ) {
                       lastExplicitSelect = {
@@ -850,7 +849,7 @@ export async function activate(context: vscode.ExtensionContext) {
                         retrySuppressedFollow,
                         EXPLICIT_SELECT_GUARD_MS + 50,
                       );
-                      qrPanel.addLog(`SESSION_FOLLOW 续压: 所选会话有新活动`);
+                      qrPanel.addLog(`SESSION_FOLLOW 续压: 所选会话近期有活动`);
                       return;
                     }
                     qrPanel.addLog(`SESSION_FOLLOW 补发: 窗口结束重放被压制的跟随`);

@@ -397,7 +397,10 @@
     // 死路——残留元素不消失时按钮滞留 ~60s 直到下一个 DONE。
     const graceRelease = () => {
       requestDoneTimer = null;
-      if (anyStreamingNow() && Date.now() - lastStreamActivityAt < 5000) {
+      // 续查条件：最近 5s 有任何流活动（含发送打点/THINKING），不限于残留
+      // .streaming 元素——中途 DONE/回执 DONE 后流仍在走，此时释放会让排队
+      // 消息赶在 A1 前插队（U1U2A1A2 残余逃逸）。真轮终后必经历 5s 静默。
+      if (Date.now() - lastStreamActivityAt < 5000) {
         requestDoneTimer = setTimeout(graceRelease, 1500);
         return;
       }
