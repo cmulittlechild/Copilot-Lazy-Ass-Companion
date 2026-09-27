@@ -167,6 +167,8 @@
    * 视为僵尸流——requests/N 开流后 END 被服务器端抑制时按钮会永远卡在「停止」。
    */
   const STREAM_STALE_MS = 75 * 1000;
+  /** 待答条目仍计"活轮"的时限：须 > 上游实际 TTFT/超时（观测 ~90s+） */
+  const STREAM_STALE_AWAIT_MS = 150 * 1000;
   /** 最后一次流活动（STREAM_* / COPILOT_TYPING / AGENT_MESSAGE）时间戳 */
   let lastStreamActivityAt = 0;
   /**
@@ -1689,7 +1691,19 @@
 
   // 死流看门狗：每 10s 检查一次流活性，静默超阈值自动收尸
   setInterval(() => {
-    if (requestRunning && lastStreamActivityAt && Date.now() - lastStreamActivityAt > STREAM_STALE_MS) {
+    // 尚有未超龄的待答条目 = 回声已确认、上游仍在处理——慢上游（TTFT 实测
+    // ~90s+）不能按 75s 静默判死，否则活轮被提前释放，下条发送绕过排队
+    // 直接插队（U1U2A1A2 回归形态）。窗口独立于 AWAIT_REPLY_FLUSH_BLOCK_MS
+    // （15s 只管"刚发未答挡队"语义，此处要覆盖上游超时上限）。
+    const stillAwaitingReply =
+      sentAwaitingReply.length > 0 &&
+      sentAwaitingReply.some((e) => Date.now() - (e.at || 0) < STREAM_STALE_AWAIT_MS);
+    if (
+      requestRunning &&
+      !stillAwaitingReply &&
+      lastStreamActivityAt &&
+      Date.now() - lastStreamActivityAt > STREAM_STALE_MS
+    ) {
       forceFinishDeadStream();
     }
   }, 10 * 1000);
@@ -3257,6 +3271,12 @@
       // 出队才是真正发送时刻：重新盖章回声去重窗——入队时盖的章在
       // 排队 >15s 后已过期，回声穿透去重会再画一个用户泡。
       try { notePhoneUserText(text); } catch (_) {}
+      // 泡随真实发送时刻归位：入队 ts 早于前轮答案 → 留在原位置会把
+      // feed 呈现成 U1U2A1A2 堆叠（线上顺序实为 U1A1U2A2）。
+      try {
+        existingEl.dataset.ts = String(Date.now());
+        appendFeedChronological(existingEl, Date.now());
+      } catch (_) {}
     }
     const beforeQueue = outboundQueue.length;
     const sent = sendMessage(
