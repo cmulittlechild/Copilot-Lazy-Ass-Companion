@@ -1823,6 +1823,8 @@
             });
             markAllToolsDone();
             if (!replaying) setRequestRunning(false, undefined, { force: true });
+            // 无 DONE 收尾的轮（DONE 被判死丢弃）在这里释放——同样出队排队消息
+            setTimeout(flushPendingSendQueue, 800);
             setStatus(true, connectedLabel());
           }
         }
@@ -1848,10 +1850,36 @@
             setTimeout(flushPendingSendQueue, 50);
           }
         } catch (_) {}
-        // 迟到重投影且同文已渲染 → 丢；未渲染的迟到 final 照常追加
-        if (isStaleReplayEvent(eventTsNum(msg)) && agentTextRendered(String(msg.text || ''))) {
-          clearTyping();
-          break;
+        // 迟到重投影且同文已渲染 → 丢；未渲染的迟到 final 照常追加。
+        // 判据（同文已渲染为前提，任一即丢）：
+        //  a) ts ≤ 回放水位（经典迟到件）；
+        //  b) 空闲态且 _ut 不属于最新用户轮——激活/切会话的整文件重投影
+        //     都在空闲时到，最新轮的同款回答（"ok"×2）仍放行；
+        //  c) _ut 命中的用户轮后面已有助手块（该轮已答），反向找同名泡，
+        //     快速连发时未答轮（_ut 是最新一条）必须放行。
+        if (agentTextRendered(String(msg.text || ''))) {
+          const users = feed.querySelectorAll('.msg.user');
+          const lastKey = users.length ? users[users.length - 1].dataset.textKey : '';
+          const utIsLatest =
+            !!msg._ut && !!lastKey && userTextDedupeKey(String(msg._ut)) === lastKey;
+          let oldTurnReproj =
+            isStaleReplayEvent(eventTsNum(msg)) || (!requestRunning && !utIsLatest);
+          if (!oldTurnReproj && msg._ut) {
+            const utKey2 = userTextDedupeKey(String(msg._ut));
+            for (let i = users.length - 1; i >= 0; i--) {
+              if (users[i].dataset.textKey !== utKey2) continue;
+              let sib = users[i].nextElementSibling;
+              while (sib && !sib.classList.contains('user')) {
+                if (sib.classList.contains('agent')) { oldTurnReproj = true; break; }
+                sib = sib.nextElementSibling;
+              }
+              break;
+            }
+          }
+          if (oldTurnReproj) {
+            clearTyping();
+            break;
+          }
         }
         if (msg.streamId) {
           completeAssistantTurn(msg.streamId, msg.text || '', msg);

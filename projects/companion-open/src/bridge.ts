@@ -516,6 +516,8 @@ export class BridgeServer {
             vapidPublicKey: this.vapidPublicKey,
           });
           // Single HISTORY_REPLAY per socket — PWA replaces feed, does not append.
+          let replayMaxTs = 0;
+          const replayKeys = new Set<string>();
           if (!historyReplayed) {
             historyReplayed = true;
             let replay = this.history.slice(-HISTORY_MAX);
@@ -530,6 +532,21 @@ export class BridgeServer {
               if (provUsers >= liveUsers) replay = provided;
             }
             this.send(ws, { type: 'HISTORY_REPLAY', messages: annotateOrphanUserTurns(replay) });
+            for (const e of replay) {
+              const t = Number((e as any)?.timestamp ?? (e as any)?.ts ?? 0);
+              if (Number.isFinite(t) && t > replayMaxTs) replayMaxTs = t;
+              const ty = (e as any)?.type;
+              if (
+                ty === 'USER_MESSAGE' ||
+                ty === 'AGENT_MESSAGE' ||
+                ty === 'TOOL_CALL' ||
+                ty === 'THINKING_STEP'
+              ) {
+                replayKeys.add(
+                  ty + '|' + String((e as any)?.text ?? '').replace(/\s+/g, ' ').trim(),
+                );
+              }
+            }
           }
           if (this.activeStreamId && this.activeStreamAccum) {
             this.send(ws, {
@@ -545,7 +562,25 @@ export class BridgeServer {
           // covers durable chat. Only flush a short tail for raw clients / e2e.
           const offlineTail = this.offlineQueue.slice(-20);
           this.offlineQueue = [];
-          for (const ev of offlineTail) this.send(ws, ev);
+          for (const ev of offlineTail) {
+            // 回放已覆盖的旧事件不再补投：跨通道重投的 sid/文本形态常与回放
+            // 项不一致，客户端 requestId/streamId/同文去重会漏，形成尾部堆叠。
+            // 两道闸：ts ≤ 回放峰值（正常迟到件）；或 同文已在回放里
+            // （入队时被盖了到达时刻、逃逸 ts 闸的激活期重投影）。
+            // fromPhone 的 USER 不在文件回放里（未落盘）→ 始终放行。
+            if (ev?.fromPhone) {
+              this.send(ws, ev);
+              continue;
+            }
+            const et = Number(ev?.timestamp ?? ev?.ts ?? 0);
+            if (Number.isFinite(et) && replayMaxTs > 0 && et <= replayMaxTs) continue;
+            const k =
+              String(ev?.type || '') +
+              '|' +
+              String(ev?.text ?? '').replace(/\s+/g, ' ').trim();
+            if (replayKeys.has(k)) continue;
+            this.send(ws, ev);
+          }
           if (this.pendingConfirm) this.send(ws, this.pendingConfirm);
           // Do NOT re-send TUNNEL_URL here — already sent on socket open if set.
           return;

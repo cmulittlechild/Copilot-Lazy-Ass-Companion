@@ -17,6 +17,9 @@ const CONTENT_DEDUPE_MS = 120_000;
 const TOOL_DEDUPE_MS = 3_000;
 const STALE_DONE_SKEW_MS = 2_000;
 const INJECT_ACK_WINDOW_MS = 8_000;
+/** AGENT_MESSAGE 先行判答后，本轮自己的收尾 DONE 仍须放行（客户端拿它
+    释放 requestRunning/出队排队消息）——只杀「轮已答很久/从未注册」的死件。 */
+const DONE_LATE_CLOSE_MS = 45_000;
 const MAX_TRACKED_TURNS = 64;
 
 interface TrackedTurn {
@@ -24,6 +27,8 @@ interface TrackedTurn {
   ts: number;
   reqIdx: number | null;
   answered: boolean;
+  /** 判答时刻（AGENT_MESSAGE 或首个 DONE 到达时） */
+  answeredAt?: number;
   /** 该轮是否已见过流活动（STREAM/THINKING/TOOL）。注入回执 DONE 的特征是
       发送后 ~2s 即达且此刻该轮还没任何流——用它而不是「无 _ut」判 ack。 */
   sawStream?: boolean;
@@ -119,6 +124,7 @@ export class TurnArbiter {
       if (sessBase && (t as any).sess && (t as any).sess !== sessBase) continue;
       if (utKey && t.utKey !== utKey) continue;
       t.answered = true;
+      t.answeredAt = Date.now();
       if (!utKey) break;
     }
     while (this.openTurns.length > MAX_TRACKED_TURNS) this.openTurns.shift();
@@ -191,10 +197,13 @@ export class TurnArbiter {
         const immediate =
           ev.reason === "phone_stop" || ev.reason === "isCanceled";
 
-        // 过期 DONE：归属旧轮次，不得释放当前在途状态
+        // 过期 DONE：归属旧轮次，不得释放当前在途状态。
+        // staleByTs 与 reqIdx 解耦——各通道 requestIndex 编号域不同
+        // （sessiondb 行号 / transcript turnSeq / chatSessions 请求序），
+        // 跨通道的「同号」其实属于旧轮：ts 早于最近 live USER 即 stale，
+        // 不论它带不带 requestIndex。
         const staleByIdx = reqIdx != null && this.latestReqIdx > reqIdx;
         const staleByTs =
-          reqIdx == null &&
           !immediate &&
           Number.isFinite(doneTs) &&
           doneTs + STALE_DONE_SKEW_MS < this.latestUserLiveTs;
@@ -226,6 +235,23 @@ export class TurnArbiter {
         // 无归属的普通 DONE 不妄关轮次——它可能属于更早的轮（迟到件），
         // 错关最新轮会让后续 ack 判定失去 openTurns 依据。
 
+        // 判死 DONE：doneTurn 落空有两种——死件（轮早答/从未注册，
+        // elapsedMs/迟到通道重投）与合法件（AGENT_MESSAGE 先行判答，
+        // 本 DONE 就是它自己的收尾）。后者必须放行：客户端靠它释放
+        // requestRunning、出队 pendingSendQueue；杀掉会把连发第二条
+        // 卡死在队列里。只对「判答 ≤45s 内的同轮 DONE」放行。
+        if (!immediate && !doneTurn) {
+          let recentClose = false;
+          for (let i = this.openTurns.length - 1; i >= 0; i--) {
+            const t = this.openTurns[i];
+            if (!t.answeredAt) continue;
+            if (sessBase && (t as any).sess && (t as any).sess !== sessBase) continue;
+            if (utKey && t.utKey !== utKey) continue;
+            recentClose = now - t.answeredAt! <= DONE_LATE_CLOSE_MS;
+            break;
+          }
+          if (!recentClose) return null;
+        }
         // 服务端判死的 DONE（stale/ack）不带任何可拼接信息（无 _ut/closedUt）
         // 时，根本没有投递价值——客户端只会拿它做释放判断且一律压制，
         // 广播出去反而多一条可被竞态利用的释放触发。直接丢。
