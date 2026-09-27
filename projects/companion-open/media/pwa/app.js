@@ -653,9 +653,12 @@
       此前用「距底 >96px」判定——大块流内容一次插入把 scrollHeight 拉高即
       误判为上滚，之后整轮长答不再跟底（R66 P3）。 */
   let userScrollHold = false;
+  function feedIsAtBottom() {
+    return feed.scrollHeight - feed.scrollTop - feed.clientHeight < 8;
+  }
   function bindScrollHold() {
     if (!feed) return;
-    const isAtBottom = () => feed.scrollHeight - feed.scrollTop - feed.clientHeight < 8;
+    const isAtBottom = feedIsAtBottom;
     feed.addEventListener('wheel', (e) => {
       if (e.deltaY < 0) userScrollHold = true;
       else if (isAtBottom()) userScrollHold = false;
@@ -1785,6 +1788,10 @@
 
   function handle(msg) {
     if (!msg || !msg.type) return;
+    // 同文 USER 回声无论在哪个会话到达都证明桥端已收——误报回填的原样
+    // 文本在这就清（放在 _sess/foreign 过滤之前，否则别会话回声/重连
+    // 窗口会把残渣留在输入框）。
+    if (msg.type === 'USER_MESSAGE') clearRestoredIfConfirmed(msg.text);
     // 别会话的桌面消息：系统行提示而不是用户泡——否则 foreign 事件无 _sess 打标时
     // 穿过过滤冒充当前会话的发言，看起来像本会话的轮次（实测漏泡根因）。
     if (msg.type === 'USER_MESSAGE' && msg.foreign === true) {
@@ -1844,8 +1851,6 @@
             }
           }
         } catch {}
-        // 回声即送达证明：误报回填的原样文本清掉（用户改写过则保留）
-        clearRestoredIfConfirmed(msg.text);
         // 迟到重投影（ts ≤ 回放覆盖范围）且同文已在屏 → 丢弃，防用户泡堆叠
         if (isStaleReplayEvent(eventTsNum(msg)) && userTextRendered(msg.text || '')) break;
         if (!replaying) {
@@ -3552,7 +3557,7 @@
   if (feed) {
     feed.addEventListener('scroll', () => {
       if (btnScrollBottom) {
-        if (isUserScrolledUp()) {
+        if (!feedIsAtBottom()) {
           btnScrollBottom.classList.add('visible');
         } else {
           btnScrollBottom.classList.remove('visible');
