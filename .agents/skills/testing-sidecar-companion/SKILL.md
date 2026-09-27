@@ -70,3 +70,10 @@ PWA ↔ VS Code bridge。仓库 `~/repos/sidecar_remote/projects/companion-open`
 - 同请求双投排查：会话 jsonl 同一请求可能带「append 内嵌 response」（projectLine 会顺带投影，jsonl.js:121）与「requests[i].response 追加 mut」双形态——守卫需覆盖 step1（append）与 step3（显式内嵌）两条路径。
 - release 链检查看「最后一个 DONE 后按钮是否及时回发送」：滞留超 10s 即疑死链（`anyStreamingNow() return` 不重挂定时器曾是死路）。
 - 孤儿轮（停止/失败/无回复）回放应渲染斜体「该轮无回复」占位恢复交错——live 区不应出现占位（在途轮豁免）。
+- 队列修复验证口径：trailing DONE 常滞后答案 30-50s，U2 应等到 result-DONE 后才广播才算守住；wire 时间戳差 (U2-U1)>(A1-U1)=未逃逸。
+- 停止测试必须 arm 后 <3s 内二击（窗口一过重 arm 不算确认）；停止键恢复延迟 ~3-5s 是 deferMs 宽限预期。
+- 跟随压制测试分清两种触发源：「窗内被压跟随的延后重评」与「窗外新 follow」；后者只有绑定会话经手机点选且 <90s 活跃才被压（boundViaExplicitSelect），桌面主动切换不受压制。
+- 吞包排查新规律：重绑/跟随后首发必死查 SESSION_SELECTED 对 outboundQueue/pendingSendQueue 的清零点（已修为捞回输入框）；三空（无泡无广播无落盘）还可能是输入为空时 doSend 静默 return——发送前先截图确认 input.value。
+- 中文快速输入的「的→一/整句丢字」是电脑控制打字驱动在 IME 输入框丢字符所致（wire _ut 与变形文本一致=发送前已变形），非应用层 bug；报告时先区分驱动伪影。
+- 注入回执 DONE（inject_soft_unverified 等 reason）在发送后 ~1.8s 到达，rr 释放判定要看 DONE 与最年轻待答条目的时距（<8s 不释放）。
+- 勿在桌面 composer 粘贴命令字样文本——会被 agent 当指令执行并写脏会话。

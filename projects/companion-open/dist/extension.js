@@ -63,6 +63,11 @@ let lastExplicitSelect;
  *  只发一次，吞掉即永久丢失（PWA 滞留旧会话）。暂存后于窗口结束补发。 */
 let pendingSuppressedFollow;
 let suppressedFollowTimer;
+/** 绑定（点选）会话最近一条可见事件的时间戳——sessionWatcher 只 tail 绑定文件 */
+let boundSessionActivityAt = 0;
+/** 当前绑定是否来自手机显式点选——只有点选来的绑定才有「活跃即续压」资格；
+ *  桌面跟随绑定的会话若也享有活跃压制权，桌面端主动切会话会被延迟 ~90s */
+let boundViaExplicitSelect = false;
 /** 因零内容被跳过的跟随目标：该会话出现首个用户轮次时补发跟随 */
 let pendingFollowFile;
 // 挂空操作占位；tdir 存在时赋真实现（sessionWatcher 通道先建，引用需提前可解析）
@@ -446,6 +451,8 @@ async function activate(context) {
                     if (ok && file) {
                         lastExplicitSelect = { file, until: Date.now() + EXPLICIT_SELECT_GUARD_MS };
                         pendingFollowFile = undefined;
+                        boundSessionActivityAt = 0;
+                        boundViaExplicitSelect = true;
                     }
                     // 记录选中会话：后续 PHONE_MESSAGE 注入必须先切到该会话，
                     // 否则 workbench.action.chat.open 只会打到 VS Code 当前活跃会话。
@@ -624,6 +631,15 @@ async function activate(context) {
                     (0, inject_1.isInjectedEcho)(ev.text)) {
                     return;
                 }
+                // 绑定会话活动打点：sessionWatcher 只 tail 绑定文件，其可见事件即
+                // 「所选会话仍在被使用」的信号（跟随拉锯评估用）。
+                if (ev.type === "USER_MESSAGE" ||
+                    ev.type === "AGENT_MESSAGE" ||
+                    ev.type === "AGENT_STREAM_SET" ||
+                    ev.type === "AGENT_STREAM_CHUNK" ||
+                    ev.type === "COPILOT_DONE") {
+                    boundSessionActivityAt = Date.now();
+                }
                 // chatSessions 通道的 USER 事件同样是 pending-follow 的内容信号——
                 // 空会话首次写盘常只走此通道，不挂这里补发永远不触发。
                 if (pendingFollowFile && ev.type === "USER_MESSAGE") {
@@ -677,6 +693,7 @@ async function activate(context) {
                     return;
                 }
                 pendingFollowFile = undefined;
+                boundViaExplicitSelect = false;
                 (0, inject_1.setActiveSessionFile)(csFile);
                 watcher?.selectSession(csFile);
                 transcriptWatcher?.seedFromHistory(hist);
@@ -768,38 +785,57 @@ async function activate(context) {
                         // 压制窗口内的异向跟随并顺延窗口（活动会话持续写盘不反复抢）；
                         // 指向所选会话本身的跟随放行并解除窗口。
                         const sel = lastExplicitSelect;
-                        if (sel && Date.now() < sel.until) {
-                            const selBase = path.basename(sel.file).replace(/\.jsonl$/i, "");
-                            const followBase = base.replace(/\.jsonl$/i, "");
-                            if (selBase && followBase && selBase !== followBase) {
-                                lastExplicitSelect = { file: sel.file, until: Date.now() + EXPLICIT_SELECT_GUARD_MS };
-                                qrPanel.addLog(`SESSION_FOLLOW 压制: 显式选择窗口内 ${followBase}`);
-                                // watcher 的 newest 转移检测只发一次——吞掉就永久丢失，
-                                // PWA 会永久滞留旧会话（实测：点选期间桌面开新轮，跟随从此不再来）。
-                                // 暂存事件，窗口结束（含顺延）后重入本 handler 补发。
-                                pendingSuppressedFollow = ev;
-                                if (!suppressedFollowTimer) {
-                                    const wait = Math.max(50, lastExplicitSelect.until - Date.now() + 50);
-                                    suppressedFollowTimer = setTimeout(function retrySuppressedFollow() {
-                                        suppressedFollowTimer = undefined;
-                                        const p = pendingSuppressedFollow;
-                                        pendingSuppressedFollow = undefined;
-                                        if (!p)
-                                            return;
-                                        if (lastExplicitSelect && Date.now() < lastExplicitSelect.until) {
-                                            // 窗口仍被顺延（写盘未停/又有点选）→ 继续排队到下一窗口
-                                            pendingSuppressedFollow = p;
-                                            suppressedFollowTimer = setTimeout(retrySuppressedFollow, Math.max(50, lastExplicitSelect.until - Date.now() + 50));
-                                            return;
-                                        }
-                                        qrPanel.addLog(`SESSION_FOLLOW 补发: 窗口结束重放被压制的跟随`);
-                                        handleTranscriptWatcherEvent(p);
-                                    }, wait);
-                                }
-                                return;
+                        // 窗外也压制：绑定会话 90s 内有可见活动 = 用户正在用它——异向跟随
+                        // 一律延后重评；否则窗外新 follow 绕过压制门把页面拽走（拉锯残余）。
+                        const boundFile = sel?.file || (0, inject_1.getActiveSessionFile)();
+                        const boundHot = boundViaExplicitSelect && Date.now() - boundSessionActivityAt < 90000;
+                        const selBase = boundFile ? path.basename(boundFile).replace(/\.jsonl$/i, "") : "";
+                        const followBase = base.replace(/\.jsonl$/i, "");
+                        const inWindow = !!(sel && Date.now() < sel.until);
+                        if (selBase && followBase && selBase !== followBase && (inWindow || boundHot)) {
+                            lastExplicitSelect = { file: boundFile, until: Date.now() + EXPLICIT_SELECT_GUARD_MS };
+                            qrPanel.addLog(`SESSION_FOLLOW 压制: ${inWindow ? "显式选择窗口内" : "绑定会话活跃"} ${followBase}`);
+                            // watcher 的 newest 转移检测只发一次——吞掉就永久丢失，
+                            // PWA 会永久滞留旧会话（实测：点选期间桌面开新轮，跟随从此不再来）。
+                            // 暂存事件，窗口结束（含顺延）后重入本 handler 补发。
+                            pendingSuppressedFollow = ev;
+                            if (!suppressedFollowTimer) {
+                                const wait = Math.max(50, lastExplicitSelect.until - Date.now() + 50);
+                                suppressedFollowTimer = setTimeout(function retrySuppressedFollow() {
+                                    suppressedFollowTimer = undefined;
+                                    const p = pendingSuppressedFollow;
+                                    pendingSuppressedFollow = undefined;
+                                    if (!p)
+                                        return;
+                                    if (lastExplicitSelect && Date.now() < lastExplicitSelect.until) {
+                                        // 窗口仍被顺延（写盘未停/又有点选）→ 继续排队到下一窗口
+                                        pendingSuppressedFollow = p;
+                                        suppressedFollowTimer = setTimeout(retrySuppressedFollow, Math.max(50, lastExplicitSelect.until - Date.now() + 50));
+                                        return;
+                                    }
+                                    // 重评估而非无脑补发：所选会话在压制期间有新活动且未静默
+                                    // 90s = 用户正在用它 → 续压顺延，避免「拽走又拽回」的拉锯。
+                                    if (lastExplicitSelect &&
+                                        boundViaExplicitSelect &&
+                                        Date.now() - boundSessionActivityAt < 90000) {
+                                        lastExplicitSelect = {
+                                            file: lastExplicitSelect.file,
+                                            until: Date.now() + EXPLICIT_SELECT_GUARD_MS,
+                                        };
+                                        pendingSuppressedFollow = p;
+                                        suppressedFollowTimer = setTimeout(retrySuppressedFollow, EXPLICIT_SELECT_GUARD_MS + 50);
+                                        qrPanel.addLog(`SESSION_FOLLOW 续压: 所选会话近期有活动`);
+                                        return;
+                                    }
+                                    qrPanel.addLog(`SESSION_FOLLOW 补发: 窗口结束重放被压制的跟随`);
+                                    handleTranscriptWatcherEvent(p);
+                                }, wait);
                             }
-                            lastExplicitSelect = undefined;
+                            return;
                         }
+                        // 指向绑定会话本身的跟随：放行并解除显式选择窗口
+                        if (inWindow)
+                            lastExplicitSelect = undefined;
                         if (csFile && fs.existsSync(csFile)) {
                             performSessionFollow(csFile, base);
                         }
