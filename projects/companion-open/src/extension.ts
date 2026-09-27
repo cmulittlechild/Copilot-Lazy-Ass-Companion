@@ -39,6 +39,9 @@ let suppressedFollowTimer: NodeJS.Timeout | undefined;
 let suppressedFollowAt = 0;
 /** 绑定（点选）会话最近一条可见事件的时间戳——sessionWatcher 只 tail 绑定文件 */
 let boundSessionActivityAt = 0;
+/** 当前绑定是否来自手机显式点选——只有点选来的绑定才有「活跃即续压」资格；
+ *  桌面跟随绑定的会话若也享有活跃压制权，桌面端主动切会话会被延迟 ~90s */
+let boundViaExplicitSelect = false;
 /** 因零内容被跳过的跟随目标：该会话出现首个用户轮次时补发跟随 */
 let pendingFollowFile: string | undefined;
 // 挂空操作占位；tdir 存在时赋真实现（sessionWatcher 通道先建，引用需提前可解析）
@@ -449,6 +452,7 @@ export async function activate(context: vscode.ExtensionContext) {
             lastExplicitSelect = { file, until: Date.now() + EXPLICIT_SELECT_GUARD_MS };
             pendingFollowFile = undefined;
             boundSessionActivityAt = 0;
+            boundViaExplicitSelect = true;
           }
           // 记录选中会话：后续 PHONE_MESSAGE 注入必须先切到该会话，
           // 否则 workbench.action.chat.open 只会打到 VS Code 当前活跃会话。
@@ -704,6 +708,7 @@ export async function activate(context: vscode.ExtensionContext) {
           return;
         }
         pendingFollowFile = undefined;
+        boundViaExplicitSelect = false;
         setActiveSessionFile(csFile);
         watcher?.selectSession(csFile);
         transcriptWatcher?.seedFromHistory(hist);
@@ -807,12 +812,19 @@ export async function activate(context: vscode.ExtensionContext) {
             // 压制窗口内的异向跟随并顺延窗口（活动会话持续写盘不反复抢）；
             // 指向所选会话本身的跟随放行并解除窗口。
             const sel = lastExplicitSelect;
-            if (sel && Date.now() < sel.until) {
-              const selBase = path.basename(sel.file).replace(/\.jsonl$/i, "");
-              const followBase = base.replace(/\.jsonl$/i, "");
-              if (selBase && followBase && selBase !== followBase) {
-                lastExplicitSelect = { file: sel.file, until: Date.now() + EXPLICIT_SELECT_GUARD_MS };
-                qrPanel.addLog(`SESSION_FOLLOW 压制: 显式选择窗口内 ${followBase}`);
+            // 窗外也压制：绑定会话 90s 内有可见活动 = 用户正在用它——异向跟随
+            // 一律延后重评；否则窗外新 follow 绕过压制门把页面拽走（拉锯残余）。
+            const boundFile = sel?.file || getActiveSessionFile();
+            const boundHot =
+              boundViaExplicitSelect && Date.now() - boundSessionActivityAt < 90000;
+            const selBase = boundFile ? path.basename(boundFile).replace(/\.jsonl$/i, "") : "";
+            const followBase = base.replace(/\.jsonl$/i, "");
+            const inWindow = !!(sel && Date.now() < sel.until);
+            if (selBase && followBase && selBase !== followBase && (inWindow || boundHot)) {
+                lastExplicitSelect = { file: boundFile!, until: Date.now() + EXPLICIT_SELECT_GUARD_MS };
+                qrPanel.addLog(
+                  `SESSION_FOLLOW 压制: ${inWindow ? "显式选择窗口内" : "绑定会话活跃"} ${followBase}`,
+                );
                 // watcher 的 newest 转移检测只发一次——吞掉就永久丢失，
                 // PWA 会永久滞留旧会话（实测：点选期间桌面开新轮，跟随从此不再来）。
                 // 暂存事件，窗口结束（含顺延）后重入本 handler 补发。
@@ -838,6 +850,7 @@ export async function activate(context: vscode.ExtensionContext) {
                     // 90s = 用户正在用它 → 续压顺延，避免「拽走又拽回」的拉锯。
                     if (
                       lastExplicitSelect &&
+                      boundViaExplicitSelect &&
                       Date.now() - boundSessionActivityAt < 90000
                     ) {
                       lastExplicitSelect = {
@@ -858,8 +871,8 @@ export async function activate(context: vscode.ExtensionContext) {
                 }
                 return;
               }
-              lastExplicitSelect = undefined;
-            }
+            // 指向绑定会话本身的跟随：放行并解除显式选择窗口
+            if (inWindow) lastExplicitSelect = undefined;
             if (csFile && fs.existsSync(csFile)) {
               performSessionFollow(csFile, base);
             } else if (bridge?.sendToPhone) {
