@@ -6,6 +6,7 @@ import * as crypto from 'crypto';
 import { WebSocketServer, WebSocket } from 'ws';
 import { PhoneEvent } from './jsonl';
 import type { PushManager } from './push';
+import { TurnArbiter } from './turnArbiter';
 
 export interface BridgeOptions {
   host: string;
@@ -199,6 +200,9 @@ export class BridgeServer {
   private recentPhoneTexts: { text: string; at: number; used: number }[] = [];
   /** 非手机来源 USER_MESSAGE 的最近广播（双源去重）：text → 上次广播时刻 */
   private recentUserEmits = new Map<string, number>();
+  /** 统一事件裁决器：三源事件在此归一去重定序后再广播（跨通道重投、
+      过期 DONE、注入回执 DONE 都在服务端判死，客户端不再各自猜）。 */
+  private arbiter = new TurnArbiter();
   /** 已投最终答案的指纹：(reqIndex|null)|sess|规范化文本 → 时间戳。
       同一答案可能经 sessiondb 整句 + 流路径收尾各投一遍（相距 ~1s），
       第二个按同轮同文压制；requestIndex 不同（同题重问）不压。 */
@@ -297,6 +301,11 @@ export class BridgeServer {
 
   setPushManager(pm: PushManager | null | undefined) {
     this.push = pm ?? null;
+  }
+
+  /** 会话绑定变更（点选/跟随/重连回放）时重置裁决器轮次状态。 */
+  resetArbiter(sessBase?: string) {
+    this.arbiter.resetForSession(sessBase);
   }
 
   get vapidPublicKey(): string | null {
@@ -604,6 +613,9 @@ export class BridgeServer {
     this.activeStreamId = null;
     this.activeStreamAccum = '';
     this.pendingConfirm = null;
+    // 裁决器轮次状态按会话分——切会话后 openTurns/latestUserLiveTs 属于旧会话，
+    // 不重置会让新会话的 DONE 被判成旧轮迟到件（stale）或吞掉注入回执门。
+    this.arbiter.resetForSession(file ? path.basename(file).replace(/\.jsonl$/i, '') : undefined);
     // 0.5.9：按「对话轮次」裁剪，而不是盲目 slice(-N)。
     // projectHistory 已按 request 交错输出；若再按事件数截断，TOOL 洪水会
     // 挤掉尾部 USER/AGENT（手机只剩中间某次 0.5.4 验证表）。
@@ -687,9 +699,14 @@ export class BridgeServer {
     // 同答跨通道双投压制（在 pushHistory 之前——否则两份都进回放）
     if (ev.type === 'AGENT_MESSAGE' && this.isDupAgentFinal(ev)) return;
 
+    // 服务端裁决：归属戳（_sess/_ut/_seq）、跨通道重投丢弃、DONE 打
+    // stale/ack/closedUt 标记——客户端据戳渲染，不再各自猜归属。
+    const arbitrated = this.arbiter.accept(ev);
+    if (!arbitrated) return;
+
     const stamped = {
-      ...ev,
-      timestamp: ev?.timestamp ?? Date.now(),
+      ...arbitrated,
+      timestamp: arbitrated?.timestamp ?? Date.now(),
     };
 
     this.trackStreamState(stamped);
@@ -842,10 +859,13 @@ export class BridgeServer {
       if (url) this.setPublicUrl(url);
       return;
     }
-    if (ev?.type === 'AGENT_CONFIRM') this.pendingConfirm = ev;
-    this.trackStreamState(ev);
-    this.pushHistory(ev);
-    this.broadcastRaw(ev);
+    // 与 sendToPhone 同走裁决器：注入回执 DONE/过期 DONE 在此打 stale/ack 标记
+    const arbitrated = this.arbiter.accept(ev);
+    if (!arbitrated) return;
+    if (arbitrated?.type === 'AGENT_CONFIRM') this.pendingConfirm = arbitrated;
+    this.trackStreamState(arbitrated);
+    this.pushHistory(arbitrated);
+    this.broadcastRaw(arbitrated);
   }
 
   private broadcastRaw(ev: any) {

@@ -1924,7 +1924,10 @@
         // 就是旧轮迟到件，不得释放当前在途轮的发送键/队列。
         const doneIdx = typeof msg.requestIndex === 'number' ? msg.requestIndex : null;
         const doneTs = eventTsNum(msg);
+        // 服务端裁决器（turnArbiter）已按轮次状态判过 stale/ack——直接采信，
+        // 本地判定留作兜底（旧版扩展无标记时仍生效）。
         const staleDone =
+          msg.stale === true ||
           (doneIdx != null && latestLiveReqIdx > doneIdx) ||
           (doneIdx == null && Number.isFinite(doneTs) && doneTs + 2000 < latestUserLiveTs);
         // 注入回执 DONE（发送后 ~2s 必发的那批，无 _ut/requestIndex 归属）不是
@@ -1938,7 +1941,8 @@
         );
         const doneImmediate = msg.reason === 'phone_stop' || msg.reason === 'isCanceled';
         const injectAckDone =
-          !doneImmediate && youngestAwaitAt > 0 && now0 - youngestAwaitAt < 8000;
+          msg.ack === true ||
+          (!doneImmediate && youngestAwaitAt > 0 && now0 - youngestAwaitAt < 8000);
         const releaseDone = !staleDone && !injectAckDone;
         if (injectAckDone) {
           // 被挡的 DONE 不会重发——若它其实是真轮终（无 _ut 的收尾通道），
@@ -1958,10 +1962,20 @@
           markAllToolsDone();
           finishAllAssistantVisuals();
         }
+        // 服务端裁决：停止类 DONE 已解出确切归属轮次（closedUt），按它精确清
+        if (!replaying && !replayingInstant && msg.closedUt) {
+          const cut = userTextDedupeKey(String(msg.closedUt));
+          for (let i = sentAwaitingReply.length - 1; i >= 0; i--) {
+            if (userTextDedupeKey(sentAwaitingReply[i].text) === cut) {
+              sentAwaitingReply.splice(i, 1);
+              break;
+            }
+          }
+        }
         // 停止/取消的 DONE（phone_stop/isCanceled）常不带 _ut——它终止的就是
         // 当前在途轮，其用户泡是最新一条待答条目；不清会永远「已发未答」，
         // 之后每次会话切换/重连回放都被 repaintAwaitingUserBubbles 补画回来。
-        if (!replaying && !replayingInstant && doneImmediate && !msg._ut) {
+        if (!replaying && !replayingInstant && doneImmediate && !msg._ut && !msg.closedUt) {
           const curBase = baseNameAny(currentSessionMeta.file).replace(/\.jsonl$/i, '');
           for (let i = sentAwaitingReply.length - 1; i >= 0; i--) {
             const e = sentAwaitingReply[i];
