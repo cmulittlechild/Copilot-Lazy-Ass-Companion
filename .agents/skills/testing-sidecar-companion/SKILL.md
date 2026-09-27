@@ -90,3 +90,10 @@ PWA ↔ VS Code bridge。仓库 `~/repos/sidecar_remote/projects/companion-open`
 - 手工造孤儿轮：往 chatSessions/<sid>.jsonl 尾追加 `{"kind":2,"k":["requests"],"v":[{…request…}]}`，克隆现有 request 行、换 requestId/timestamp/message.text；`response:[]`=纯孤儿，`response:[{"value":"",…}]`=空流壳（等价失败轮）。注意：尾部（最末）孤儿按设计不加占位——要测占位须再跟一个 request。
 - 副作用：文件监视器会把新追加的 request 当**活轮**再广播一遍 live USER_MESSAGE（wire 上会突然出现非客户端发送的 U）。
 - 客户端同文闸签名：feed 里同一答文第二次不渲（agentTextRendered 闸，无 replaying 豁免）——占位符/重复答案只渲首个。判别：wire 探针里有但 feed 里没有 = 客户端丢弃。
+
+## R69 取证心得补充
+
+- Chrome devtools Offline **只拦新连接/HTTP**，不杀已建 WS——掐活 socket 要配合 chrome://net-internals/#sockets "Flush socket pools"，但 app 重连 ~2s 内完成，手速追不上；可靠方案是 Offline 保持开→flush→重连握手被拦→死窗期可拉长。
+- 造"迟到确认"场景的另一条路：开**第二个 PWA tab**发同文——其 USER_MESSAGE 回声会以 live 事件广播到第一 tab，等价迟到送达确认。
+- sessionStorage `sidecar.pendingSend`（{text,key,at}）可直接种"未送达待发"，刷新即触发「发送可能未送达…已回填」路径——不用真断网。
+- 控制台 JS 错误要警惕：`feed.addEventListener('scroll')` 里 ReferenceError 只污染滚动钩子不阻断其它功能，肉眼难觉——每轮值得瞄一眼 Console。
