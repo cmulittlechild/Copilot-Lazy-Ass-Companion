@@ -1871,8 +1871,14 @@
           const lastKey = users.length ? users[users.length - 1].dataset.textKey : '';
           const utIsLatest =
             !!msg._ut && !!lastKey && userTextDedupeKey(String(msg._ut)) === lastKey;
+          // d) 事件自带源 ts 早于最新用户泡的发送时刻 >2s → 旧轮经慢通道
+          //    迟到的重投影：在途态（requestRunning）不影响判定。
+          const lastUserTs = users.length ? Number(users[users.length - 1].dataset.ts) : NaN;
+          const evTs = eventTsNum(msg);
+          const predatesLatestUser =
+            Number.isFinite(evTs) && Number.isFinite(lastUserTs) && evTs < lastUserTs - 2000;
           let oldTurnReproj =
-            isStaleReplayEvent(eventTsNum(msg)) || (!requestRunning && !utIsLatest);
+            isStaleReplayEvent(evTs) || predatesLatestUser || (!requestRunning && !utIsLatest);
           if (!oldTurnReproj && msg._ut) {
             const utKey2 = userTextDedupeKey(String(msg._ut));
             for (let i = users.length - 1; i >= 0; i--) {

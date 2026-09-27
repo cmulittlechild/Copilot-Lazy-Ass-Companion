@@ -118,6 +118,21 @@ export class TurnArbiter {
     return undefined;
   }
 
+  /** 归属判定用：事件自带源时间戳且早于最新未答轮的开启时刻 >2s → 上一轮
+      经慢通道迟到的重投影，不归本轮（否则盖错 _ut，客户端把旧答案当本轮
+      答案渲染出串位泡）。无 ts 的事件照常归属（只能靠到达序）。 */
+  private openTurnForEvent(sessBase: string, evTs: number | null): TrackedTurn | undefined {
+    const t = this.newestOpenTurn(sessBase);
+    if (!t) return undefined;
+    if (evTs != null && evTs < t.ts - 2_000) return undefined;
+    return t;
+  }
+
+  private static tsOf(ev: any): number | null {
+    const v = typeof ev?.timestamp === "number" ? ev.timestamp : typeof ev?.ts === "number" ? ev.ts : null;
+    return v;
+  }
+
   private markAnswered(sessBase: string, utKey?: string) {
     for (const t of this.openTurns) {
       if (t.answered) continue;
@@ -174,7 +189,7 @@ export class TurnArbiter {
       case "THINKING_START":
       case "THINKING_END":
       case "COPILOT_TYPING": {
-        const t = this.newestOpenTurn(sessBase);
+        const t = this.openTurnForEvent(sessBase, TurnArbiter.tsOf(ev));
         if (t) {
           t.sawStream = true;
           if (!utKey) utKey = t.utKey;
@@ -182,7 +197,7 @@ export class TurnArbiter {
         break;
       }
       case "AGENT_MESSAGE": {
-        const t = this.newestOpenTurn(sessBase);
+        const t = this.openTurnForEvent(sessBase, TurnArbiter.tsOf(ev));
         if (t) {
           t.sawStream = true;
           if (!utKey) utKey = t.utKey;
