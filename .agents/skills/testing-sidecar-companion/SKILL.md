@@ -77,3 +77,9 @@ PWA ↔ VS Code bridge。仓库 `~/repos/sidecar_remote/projects/companion-open`
 - 中文快速输入的「的→一/整句丢字」是电脑控制打字驱动在 IME 输入框丢字符所致（wire _ut 与变形文本一致=发送前已变形），非应用层 bug；报告时先区分驱动伪影。
 - 注入回执 DONE（inject_soft_unverified 等 reason）在发送后 ~1.8s 到达，rr 释放判定要看 DONE 与最年轻待答条目的时距（<8s 不释放）。
 - 勿在桌面 composer 粘贴命令字样文本——会被 agent 当指令执行并写脏会话。
+
+## R55 (v1.0.6 仲裁器)
+- 仲裁器副作用验证口径：USER→DONE 之间若零 AGENT=答案被吞（对磁盘 jsonl 确认答案确实生成——区分"没生成"与"没广播")；DONE 连发突发(×6)=仲裁器积压释放；AGENT 行尾的 sess=/ut= 是归属戳；TOOL_CALL 不在 dedup 范围会双投。
+- 输入变形新特征：变形字符=最近输入过的字符(写→锂、有哪→锂锂)——更像输入层 per-char buffer 复用/替换，而非随机丢字。
+- 停止测试现实约束：快模型(v4-flash ~2s)轮太短打不中；想测停止先切慢模型或发长文+0.5s 内连点两次。
+- macOS "iPhone Mirroring" app 会反复抢前台+弹 iCloud 登录——osascript quit "iPhone Mirroring"(不是 Simulator)。

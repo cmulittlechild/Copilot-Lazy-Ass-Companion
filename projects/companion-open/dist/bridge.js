@@ -726,9 +726,12 @@ class BridgeServer {
         // 同答跨通道双投压制（在 pushHistory 之前——否则两份都进回放）
         if (ev.type === 'AGENT_MESSAGE' && this.isDupAgentFinal(ev))
             return;
-        // 服务端裁决：归属戳（_sess/_ut/_seq）、跨通道重投丢弃、DONE 打
-        // stale/ack/closedUt 标记——客户端据戳渲染，不再各自猜归属。
-        const arbitrated = this.arbiter.accept(ev);
+        // 服务端裁决：归属戳（_sess/_ut/_seq）、跨通道重投丢弃、DONE 判
+        // stale/ack（判死的直接不广播）/closedUt——客户端据戳渲染，不再各自猜。
+        // markEmitted 按是否真的上公网记名：离线排队的首发不算已投递，
+        // 否则首份排队丢弃/未达 + 重发被当重复 = 净丢一条。
+        const willBroadcast = this.authorizedClientCount() !== 0;
+        const arbitrated = this.arbiter.accept(ev, { markEmitted: willBroadcast });
         if (!arbitrated)
             return;
         const stamped = {
@@ -743,7 +746,7 @@ class BridgeServer {
             stamped.type === 'COPILOT_DONE' ||
             stamped.type === 'TUNNEL_URL' ||
             stamped.type === 'SYSTEM_MESSAGE';
-        if (this.authorizedClientCount() === 0) {
+        if (!willBroadcast) {
             // Queue durable + non-stream events for flush on next PHONE_CONNECT.
             // HISTORY_REPLAY also has durable items; PWA dedupes by requestId/streamId,
             // and connect path skips offline items already present in history keys.
@@ -1026,8 +1029,11 @@ class BridgeServer {
             timestamp: Date.now(),
             fromPhone: true,
         };
-        this.pushHistory(ev);
-        this.broadcastRaw(ev);
+        // 手机发起的轮次同样登记进裁决器——否则注入回执 DONE 因缺 openTurn
+        // 判不出 ack，透传给客户端造成提前释放/连发逃逸。
+        const arbitrated = this.arbiter.accept(ev) || ev;
+        this.pushHistory(arbitrated);
+        this.broadcastRaw(arbitrated);
         this.rememberPhoneText(t);
     }
     isPhoneEcho(ev) {

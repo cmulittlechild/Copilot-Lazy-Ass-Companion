@@ -74,11 +74,23 @@ export class TurnArbiter {
         const sid = String(ev.streamId || "");
         const req =
           typeof ev.requestIndex === "number" ? `r${ev.requestIndex}` : "";
-        // streamId 相同 = 同一条流终帧在多个通道各发一遍（sendStreamEnd /
-        // transcripts 收尾 / sessiondb 投影）；reqIdx 区分同题重问。
+        // streamId 相同 = 同一条流终帧在多个通道各发一遍；但 requests/N/...
+        // 这类位置型 sid 跨轮复用，必须再按文本前缀区分才不会误杀新答案。
         return sid
-          ? `a|${sessBase}|${sid}`
+          ? `a|${sessBase}|${sid}|${t.slice(0, 40)}`
           : `a|${sessBase}|${req}|${utKey}|${t.slice(0, 80)}`;
+      }
+      case "TOOL_CALL":
+      case "AGENT_TOOL_CALL":
+      case "AGENT_TOOL_RESULT":
+      case "TOOL_RESULT": {
+        // 同一工具调用在各通道各投一遍：callId+状态/结果指纹去重。
+        // 状态变化（running→done）属于同一 callId 的不同事件，放行。
+        const cid = String(ev.callId || ev.toolCallId || ev.id || "");
+        if (!cid) return null;
+        const status = String(ev.status ?? ev.done ?? ev.state ?? "");
+        const res = normText(ev.result || ev.text).slice(0, 40);
+        return `t|${sessBase}|${cid}|${status}|${res}`;
       }
       default:
         return null;
@@ -109,8 +121,11 @@ export class TurnArbiter {
   /**
    * 裁决一条待广播事件。返回打戳后的事件；返回 null = 丢弃（跨通道重复）。
    * 非内容类事件（MODEL_LIST/SYSTEM_MESSAGE 等）原样放行，仅打 _seq。
+   * markEmitted=false 表示这条不会立刻上公网（如离线排队）：去重判定照常，
+   * 但不消耗首发名额——首个真正广播出去的副本才有资格记名。
    */
-  accept(ev: any): any | null {
+  accept(ev: any, opts?: { markEmitted?: boolean }): any | null {
+    const markEmitted = opts?.markEmitted !== false;
     if (!ev || typeof ev !== "object") return ev;
     const now = Date.now();
     this.pruneEmitted(now);
@@ -187,24 +202,32 @@ export class TurnArbiter {
           this.markAnswered(sessBase, newest.utKey);
         } else if (utKey) {
           this.markAnswered(sessBase, utKey);
-        } else if (!immediate && !staleByIdx && !staleByTs && newest) {
-          this.markAnswered(sessBase, newest.utKey);
         }
+        // 无归属的普通 DONE 不妄关轮次——它可能属于更早的轮（迟到件），
+        // 错关最新轮会让后续 ack 判定失去 openTurns 依据。
+
+        // 服务端判死的 DONE（stale/ack）不带任何可拼接信息（无 _ut/closedUt）
+        // 时，根本没有投递价值——客户端只会拿它做释放判断且一律压制，
+        // 广播出去反而多一条可被竞态利用的释放触发。直接丢。
+        if (!immediate && (ev.stale === true || ev.ack === true)) return null;
         break;
       }
       default:
         break;
     }
 
-    // 跨通道去重（USER/AGENT_MESSAGE 两类；USER 另有文本窗去重在前置层）
-    if (type === "AGENT_MESSAGE") {
+    // 跨通道去重：AGENT_MESSAGE 与 TOOL_* 事件按指纹在窗口内只放行首发。
+    // （USER 另有 recentUserEmits 文本窗去重——同题重问是合法行为，这里不拦。）
+    if (type === "AGENT_MESSAGE" || type.endsWith("TOOL_CALL") || type.endsWith("TOOL_RESULT")) {
       const key = this.contentKey(ev, sessBase, utKey);
       if (key) {
         const seen = this.emitted.get(key);
         if (seen != null && now - seen <= CONTENT_DEDUPE_MS) return null;
-        this.emitted.set(key, now);
+        // 只在「真的会广播」时记名：离线排队/被后续闸丢弃的首发不算已投递，
+        // 否则首份被吞、重发又被当重复——净丢一条消息。
+        if (markEmitted) this.emitted.set(key, now);
       }
-      this.markAnswered(sessBase, utKey);
+      if (type === "AGENT_MESSAGE") this.markAnswered(sessBase, utKey);
     }
 
     const out = { ...ev, _seq: ++this.seq };
