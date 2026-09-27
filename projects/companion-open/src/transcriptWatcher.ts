@@ -33,8 +33,12 @@ export interface TranscriptWatcherOptions {
   chatSessionsDir?: string;
   /** 轮询兜底间隔 ms，默认 100 */
   pollMs?: number;
-  /** 投影出的 PhoneEvent 回调 */
-  onEvent: (ev: PhoneEvent) => void;
+  /** 投影出的 PhoneEvent 回调；返回 false 表示该事件最终未被投递
+      （回声/去重/仲裁器丢弃）——emit() 据此不记「已投」指纹，避免
+      首通道被丢后后续通道的同答案被误判重投影而净丢。 */
+  onEvent: (ev: PhoneEvent) => boolean | void;
+  /** 诊断日志（接到扩展 QR 面板）；压制类丢弃必须可观测 */
+  onLog?: (line: string) => void;
   /** 兜底轮询 chatSessions 兜底源的最短间隔（ms），默认 2000 */
   fallbackPollMs?: number;
   /** Copilot 会话库（globalStorage/github.copilot-chat/session-store.db）：
@@ -1353,11 +1357,13 @@ export class TranscriptWatcher {
               }
             };
             if (this.hasEmittedAgentText(text, { requestIndex: reqIdx, streamId, rid, userText: ut })) {
+              this.opts.onLog?.(`[watch] 压制已投同文 sid=${streamId} len=${text.length}`);
               suppressLiveStream();
               continue;
             }
             // 自轮重投影：同一答案文本经另一流形态再投（requests/N 重放）→ 双气泡
             if (this.isReplayedFor(text, ut)) {
+              this.opts.onLog?.(`[watch] 压制重投影 sid=${streamId} len=${text.length}`);
               suppressLiveStream();
               continue;
             }
@@ -1372,6 +1378,7 @@ export class TranscriptWatcher {
                 (cur.slice(0, 40).length >= 12 && cur.slice(0, 40) === prev.slice(0, 40)) ||
                 (cur.slice(-40).length >= 12 && cur.slice(-40) === prev.slice(-40))
               ) {
+                this.opts.onLog?.(`[watch] 压制文本变体 sid=${streamId} len=${text.length}`);
                 suppressLiveStream();
                 continue;
               }
@@ -2497,6 +2504,10 @@ export class TranscriptWatcher {
       this.userEmitSeq += 1;
       this.userSeqByUt.set(utText, this.userEmitSeq);
     }
+    // 正文类事件：通过门后先交给下游投递，投递成功才记「已投」指纹——
+    // 先记名再投递会让桥端/仲裁器的丢弃变成假阳性「已投」，后续通道
+    // 的同答案再被 isReplayedFor/已投去重压制 → 净丢一条答案（玻尔轮实测）。
+    let pendingMark: { text: string; ctx: { requestIndex?: number; streamId?: string; rid?: string; userText?: string }; wkey: string; curSeq: number } | null = null;
     if (ev && (ev.type === 'AGENT_MESSAGE' || ev.type === 'AGENT_STREAM_SET')) {
       const text = String((ev as { text?: string }).text || '');
       if (text.trim() && !isInternalMonologue(text)) {
@@ -2550,20 +2561,40 @@ export class TranscriptWatcher {
             return;
           }
         }
-        this.recentAgentEmits.set(wkey, { t: Date.now(), seq: curSeq });
-        if (this.recentAgentEmits.size > 300) {
-          const cutoff = Date.now() - 150_000;
-          for (const [k, e] of this.recentAgentEmits) if (e.t < cutoff) this.recentAgentEmits.delete(k);
-        }
-        this.noteEmittedAgentText(text, {
-          requestIndex: (ev as any).requestIndex,
-          streamId: (ev as any).streamId,
-          rid: (ev as any).requestId,
-          userText: resolvedEvUt,
-        });
+        pendingMark = {
+          text,
+          ctx: {
+            requestIndex: (ev as any).requestIndex,
+            streamId: (ev as any).streamId,
+            rid: (ev as any).requestId,
+            userText: resolvedEvUt,
+          },
+          wkey,
+          curSeq,
+        };
       }
     }
-    if (!this.catchUpQuiet) this.opts.onEvent(ev);
+    if (this.catchUpQuiet) {
+      // 静默播种语义：内容已在回放里投递过，照记「已投」防 live 重投。
+      if (pendingMark) {
+        this.noteEmittedAgentText(pendingMark.text, pendingMark.ctx);
+        this.recentAgentEmits.set(pendingMark.wkey, { t: Date.now(), seq: pendingMark.curSeq });
+      }
+      return;
+    }
+    const delivered = this.opts.onEvent(ev);
+    if (delivered !== false && pendingMark) {
+      this.noteEmittedAgentText(pendingMark.text, pendingMark.ctx);
+      this.recentAgentEmits.set(pendingMark.wkey, { t: Date.now(), seq: pendingMark.curSeq });
+      if (this.recentAgentEmits.size > 300) {
+        const cutoff = Date.now() - 150_000;
+        for (const [k, e] of this.recentAgentEmits) if (e.t < cutoff) this.recentAgentEmits.delete(k);
+      }
+    } else if (delivered === false && pendingMark) {
+      this.opts.onLog?.(
+        `[watch] 投递被拒（回声/去重/仲裁器丢弃）未记已投 sid=${pendingMark.ctx.streamId || '-'}`,
+      );
+    }
   }
 
   /** (用户文,正文) 键是否已发过且此后没同题重问（迟到重投影判定） */

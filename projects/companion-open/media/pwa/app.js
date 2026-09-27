@@ -2154,30 +2154,48 @@
         // 缺失 → 上游 reqerr 轮只剩光秃用户泡，「发送堆一起」的 live 形态）。
         if (releaseDone && !replaying && !replayingInstant) {
           const utTxt = String(msg._ut || msg.closedUt || '');
+          const users = feed.querySelectorAll('.msg.user');
+          let ownerEl = null;
+          let want = '';
           if (utTxt) {
-            const want = userTextDedupeKey(utTxt);
-            const users = feed.querySelectorAll('.msg.user');
-            let ownerEl = null;
+            want = userTextDedupeKey(utTxt);
             for (let i = users.length - 1; i >= 0; i--) {
               const b = users[i].querySelector('.user-bubble');
               if (b && userTextDedupeKey(b.textContent || '') === want) { ownerEl = users[i]; break; }
             }
-            if (ownerEl) {
-              let hasContent = false;
-              for (let n = ownerEl.nextSibling; n; n = n.nextSibling) {
+          } else {
+            // 裸 DONE（无 _ut/closedUt）：归属回退到 feed 末尾最近一个还没答案的
+            // 用户泡——sessiondb 孤儿轮就是这种形态（上游写出空流壳+裸 DONE）。
+            // 若末尾用户泡已有答案，跳过（这是迟到杂散 DONE，不误画占位）。
+            for (let i = users.length - 1; i >= 0; i--) {
+              const u = users[i];
+              let answered = false;
+              for (let n = u.nextSibling; n; n = n.nextSibling) {
                 if (n.classList && n.classList.contains('user')) break;
                 if (n.classList && n.classList.contains('agent') && !n.classList.contains('typing-row')) {
                   const bd = n.querySelector('.body');
-                  if (bd && String(bd.dataset.raw || bd.textContent || '').trim()) { hasContent = true; break; }
+                  if (bd && String(bd.dataset.raw || bd.textContent || '').trim()) { answered = true; break; }
                 }
               }
-              if (!hasContent) {
-                addAgentFinal(
-                  '*（该轮无回复——已停止或请求失败）*',
-                  `orphan-live-${want}-${Date.now()}`,
-                  { ts: Number.isFinite(doneTs) ? doneTs : Date.now() },
-                );
+              if (!answered) { ownerEl = u; break; }
+              break;
+            }
+          }
+          if (ownerEl) {
+            let hasContent = false;
+            for (let n = ownerEl.nextSibling; n; n = n.nextSibling) {
+              if (n.classList && n.classList.contains('user')) break;
+              if (n.classList && n.classList.contains('agent') && !n.classList.contains('typing-row')) {
+                const bd = n.querySelector('.body');
+                if (bd && String(bd.dataset.raw || bd.textContent || '').trim()) { hasContent = true; break; }
               }
+            }
+            if (!hasContent) {
+              addAgentFinal(
+                '*（该轮无回复——已停止或请求失败）*',
+                `orphan-live-${want || 'last'}-${Date.now()}`,
+                { ts: Number.isFinite(doneTs) ? doneTs : Date.now() },
+              );
             }
           }
         }
@@ -2242,13 +2260,17 @@
             requestRunning = false;
             paintSendButton();
           } catch (_) {}
-          // 换会话后排队消息的目标已变化，丢弃并提示（防注入到新会话）
+          // 换会话后排队消息的目标已变化：泡丢掉（防注入到新会话），但文本
+          // 捞回输入框而不是蒸发——用户重发还是复制走由用户决定。
           if (pendingSendQueue.length) {
+            let lastText = '';
             for (const qi of pendingSendQueue) {
               if (qi && qi.el && qi.el.isConnected) qi.el.remove();
+              if (qi && qi.text) lastText = qi.text;
             }
             pendingSendQueue.length = 0;
-            addSys('已切换会话，排队消息已丢弃');
+            if (lastText && !(input.value || '').trim()) input.value = lastText;
+            addSys('已切换会话，排队消息已回填输入框');
             if (queuedHintEl) { queuedHintEl.remove(); queuedHintEl = null; }
           }
           setStatus(true, '切换会话…');

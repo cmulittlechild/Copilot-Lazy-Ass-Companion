@@ -790,14 +790,17 @@ export async function activate(context: vscode.ExtensionContext) {
         // 快速通道永久失效。文件不存在时由 openSessionDb 惰性探测返回 null。
         sessionStoreDb,
         pollMs: Math.max(10, cfg.get<number>("pollMs", 50)),
+        onLog: (line) => qrPanel.addLog(line),
         // 具名函数表达式：压制窗口补发路径需要重入本 handler（见 SESSION_FOLLOW 压制分支）
+        // 返回 sendToPhone 的投递结果：false = 事件在桥端被丢（回声/去重/仲裁），
+        // watcher 据此不记「已投」——否则后续通道的同答案会被误判重投影而净丢。
         onEvent: function handleTranscriptWatcherEvent(ev) {
           if (
             ev.type === "USER_MESSAGE" &&
             typeof (ev as any).text === "string" &&
             isInjectedEcho((ev as any).text)
           ) {
-            return;
+            return false;
           }
           // 被跳过的空会话出现真实内容后补跟随：内容事件到达时重评估
           // （本通道 + sessionWatcher 通道都挂；跳过的写盘不会再发 FOLLOW）。
@@ -907,9 +910,9 @@ export async function activate(context: vscode.ExtensionContext) {
           // 用 chatSessions 的 USER_MESSAGE 兜底（bridge sendToPhone 的 isPhoneEcho
           // 会拦手机回声，不会双出现）。
           if (ev.type === "USER_MESSAGE") {
-            if (bridge?.sendToPhone) bridge.sendToPhone(ev);
-            else bridge?.broadcast(ev);
-            return;
+            if (bridge?.sendToPhone) return bridge.sendToPhone(ev);
+            bridge?.broadcast(ev);
+            return true;
           }
           if (
             ev.type === "SYSTEM_MESSAGE" &&
@@ -918,8 +921,9 @@ export async function activate(context: vscode.ExtensionContext) {
             writeChannelArtifact();
             return;
           }
-          if (bridge?.sendToPhone) bridge.sendToPhone(ev);
-          else bridge?.broadcast(ev);
+          if (bridge?.sendToPhone) return bridge.sendToPhone(ev);
+          bridge?.broadcast(ev);
+          return true;
         },
       });
       transcriptWatcher.start();

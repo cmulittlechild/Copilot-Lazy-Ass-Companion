@@ -732,9 +732,13 @@ class BridgeServer {
      * Offline queue only keeps non-history edge events; no double-flush with history.
      * Triggers web-push on AGENT_CONFIRM.
      */
+    /**
+     * 返回该事件是否真的被投递（进历史/广播/离线队列均可——历史会在下次
+     * 回放补上）。false = 在回声/去重/仲裁器处被丢弃，调用方不得记「已投」。
+     */
     sendToPhone(ev) {
         if (!ev || isInternalSystemMessage(ev))
-            return;
+            return false;
         // 0.5.19：仅抑制「手机刚发出」的 JSONL 回声。
         // 注意：短文案（「1」/「2」）会话历史里可能多次出现；若无条件吞掉，
         // 切会话 HISTORY / 桌面侧同文新消息都会在远端消失。
@@ -742,7 +746,7 @@ class BridgeServer {
         if (ev.type === 'USER_MESSAGE' &&
             typeof ev.text === 'string' &&
             this.isPhoneEcho(ev)) {
-            return;
+            return false;
         }
         // 双源去重：同一桌面发出的 USER_MESSAGE 会经 transcripts + chatSessions
         // 两个通道各投一次（间隔数秒到 ~45s 落盘延迟）。按文本在窗口内去重，
@@ -757,13 +761,13 @@ class BridgeServer {
             if (t) {
                 const last = this.recentUserEmits.get(t);
                 if (last != null && now - last <= USER_EMIT_DEDUPE_MS)
-                    return;
+                    return false;
                 this.recentUserEmits.set(t, now);
             }
         }
         // 同答跨通道双投压制（在 pushHistory 之前——否则两份都进回放）
         if (ev.type === 'AGENT_MESSAGE' && this.isDupAgentFinal(ev))
-            return;
+            return false;
         // 服务端裁决：归属戳（_sess/_ut/_seq）、跨通道重投丢弃、DONE 判
         // stale/ack（判死的直接不广播）/closedUt——客户端据戳渲染，不再各自猜。
         // markEmitted 按是否真的上公网记名：离线排队的首发不算已投递，
@@ -771,7 +775,7 @@ class BridgeServer {
         const willBroadcast = this.authorizedClientCount() !== 0;
         const arbitrated = this.arbiter.accept(ev, { markEmitted: willBroadcast });
         if (!arbitrated)
-            return;
+            return false;
         const stamped = {
             ...arbitrated,
             timestamp: arbitrated?.timestamp ?? Date.now(),
@@ -807,6 +811,7 @@ class BridgeServer {
             const message = String(stamped.message ?? '');
             void this.push?.notify(title, message).catch(() => { });
         }
+        return true;
     }
     /** Keep active stream snapshot in sync for projector path (not only sendStream*). */
     trackStreamState(ev) {
