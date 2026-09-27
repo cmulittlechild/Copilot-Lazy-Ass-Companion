@@ -147,6 +147,8 @@
   const recentPhoneUserAt = new Map();
   const USER_TEXT_DEDUP_MS = 15000;
   const REQUEST_DONE_GRACE_MS = 600;
+  /** 回放里刚画过的用户泡 → 迟到 live 回声去重窗口（chatSessions 写盘滞后可达 ~60s+） */
+  const REPLAY_ECHO_DEDUP_MS = 120000;
   /** 待答条目阻塞发送队列的时限：超时视为死轮放行（真无回复不能永远卡队列） */
   const AWAIT_REPLY_FLUSH_BLOCK_MS = 120000;
   /**
@@ -171,6 +173,8 @@
   }
   /** 已发出但未收到回答的用户消息（清屏/重放后重画用）；回声到达或回答完成即移除 */
   const sentAwaitingReply = [];
+  /** 回放渲染过的用户文 textKey→ts：跟随/重连回放后迟到的同文 live USER 回声据此吞掉 */
+  const recentReplayedUserText = new Map();
   function clearPendingSend() {
     try { sessionStorage.removeItem(PENDING_SEND_KEY); } catch {}
     if (pendingSendCheck) { clearTimeout(pendingSendCheck.timer); pendingSendCheck = null; }
@@ -782,7 +786,24 @@
     if (!isReplay && !force && key && seenKeys.has(key) && !isRecentPhoneUserText(t)) {
       return null;
     }
+    // 回放刚含该条、迟到 live 同文回声（跟随/重连后文件二次写盘）→ 吞掉并消耗，
+    // 用户真重发同文时第二次放行
+    if (!isReplay && !force) {
+      const rat = recentReplayedUserText.get(textKey);
+      if (rat != null && Date.now() - rat <= REPLAY_ECHO_DEDUP_MS) {
+        const nodes = feed.querySelectorAll('.msg.user');
+        for (let i = nodes.length - 1; i >= Math.max(0, nodes.length - 8); i--) {
+          const body = nodes[i].querySelector('.user-bubble');
+          if (body && body.textContent === t) {
+            recentReplayedUserText.delete(textKey);
+            if (key) seenKeys.add(key);
+            return null;
+          }
+        }
+      }
+    }
     if (key) seenKeys.add(key);
+    if (isReplay) recentReplayedUserText.set(textKey, Date.now());
     if (!isReplay && force) notePhoneUserText(t);
     clearTyping();
     const el = document.createElement('div');
