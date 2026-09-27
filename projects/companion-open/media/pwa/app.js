@@ -637,18 +637,39 @@
   }
 
   let scrollRafId = null;
-  /** 判断用户是否手动向上滚动了一定距离（> 96px） */
-  function isUserScrolledUp() {
-    if (!feed) return false;
-    const distanceToBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight;
-    return distanceToBottom > 96;
+  /** 用户主动上滚持锁：只在真实滚轮/触摸向上时置位，滚回底部解除。
+      此前用「距底 >96px」判定——大块流内容一次插入把 scrollHeight 拉高即
+      误判为上滚，之后整轮长答不再跟底（R66 P3）。 */
+  let userScrollHold = false;
+  function bindScrollHold() {
+    if (!feed) return;
+    const isAtBottom = () => feed.scrollHeight - feed.scrollTop - feed.clientHeight < 8;
+    feed.addEventListener('wheel', (e) => {
+      if (e.deltaY < 0) userScrollHold = true;
+      else if (isAtBottom()) userScrollHold = false;
+    }, { passive: true });
+    let touchY = null;
+    feed.addEventListener('touchstart', (e) => {
+      touchY = e.touches && e.touches.length ? e.touches[0].clientY : null;
+    }, { passive: true });
+    feed.addEventListener('touchmove', (e) => {
+      if (touchY == null || !(e.touches && e.touches.length)) return;
+      const dy = e.touches[0].clientY - touchY;
+      touchY = e.touches[0].clientY;
+      // 手指下滑 = 内容上滚查看历史；上滑到底解除
+      if (dy > 4) userScrollHold = true;
+      else if (dy < -4 && isAtBottom()) userScrollHold = false;
+    }, { passive: true });
+    feed.addEventListener('scroll', () => {
+      if (isAtBottom()) userScrollHold = false;
+    }, { passive: true });
   }
 
   function scrollFeed(force) {
     // 回放期间完全禁止滚动——逐条渲染若每次 scroll，手机会从第一条一路滑到尾。
     if (replaying || replayingInstant) return;
     // 非强制且用户手动向上滑动翻阅历史时，不打断用户
-    if (!force && isUserScrolledUp()) return;
+    if (!force && userScrollHold) return;
     if (scrollRafId) cancelAnimationFrame(scrollRafId);
     scrollRafId = requestAnimationFrame(() => {
       scrollRafId = null;
@@ -3402,6 +3423,7 @@
     input.style.height = 'auto';
     input.style.height = Math.min(140, input.scrollHeight) + 'px';
   });
+  bindScrollHold();
 
   const btnScrollBottom = document.getElementById('btnScrollBottom');
   if (btnScrollBottom) {
