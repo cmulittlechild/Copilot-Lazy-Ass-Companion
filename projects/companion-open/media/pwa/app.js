@@ -838,8 +838,9 @@
     // 0.5.19：同文去重只吞「短窗内刚画过的手机回声」，不再扫历史 12 条。
     // 否则会话里曾经有过「1」，用户再发「1」会被静默丢掉（截图：远端无用户气泡）。
     if (!isReplay && !force && isRecentPhoneUserText(t)) {
+      // 全量扫：迟到的重投影/回放副本可能把真泡顶出尾部窗口，按 DOM 位置限扫会漏
       const nodes = feed.querySelectorAll('.msg.user');
-      for (let i = nodes.length - 1; i >= Math.max(0, nodes.length - 4); i--) {
+      for (let i = nodes.length - 1; i >= 0; i--) {
         const body = nodes[i].querySelector('.user-bubble');
         if (body && body.textContent === t) {
           // 吞掉回声后即消耗该记录：用户同文重问（>回声到达）不该被二次吞掉变裸文本
@@ -860,7 +861,7 @@
       const rat = recentReplayedUserText.get(textKey);
       if (rat != null && Date.now() - rat <= REPLAY_ECHO_DEDUP_MS) {
         const nodes = feed.querySelectorAll('.msg.user');
-        for (let i = nodes.length - 1; i >= Math.max(0, nodes.length - 8); i--) {
+        for (let i = nodes.length - 1; i >= 0; i--) {
           const body = nodes[i].querySelector('.user-bubble');
           if (body && body.textContent === t) {
             recentReplayedUserText.delete(textKey);
@@ -1693,7 +1694,7 @@
       if (!p || typeof p.text !== 'string' || !p.text.trim()) return;
       let found = false;
       const nodes = feed.querySelectorAll('.msg.user');
-      for (let i = nodes.length - 1; i >= Math.max(0, nodes.length - 4); i--) {
+      for (let i = nodes.length - 1; i >= 0; i--) {
         const body = nodes[i].querySelector('.user-bubble');
         if (body && body.textContent === p.text) { found = true; break; }
       }
@@ -1710,7 +1711,7 @@
       if (boundBase && mBase && mBase !== boundBase) continue;
       let found = false;
       const nodes = feed.querySelectorAll('.msg.user');
-      for (let i = nodes.length - 1; i >= Math.max(0, nodes.length - 4); i--) {
+      for (let i = nodes.length - 1; i >= 0; i--) {
         const body = nodes[i].querySelector('.user-bubble');
         if (body && body.textContent === m.text) { found = true; break; }
       }
@@ -3238,6 +3239,9 @@
     } else {
       // 入队泡已带 textKey；补齐 dataset.key 使回声去重链路一致
       try { if (localKey && !existingEl.dataset.key) existingEl.dataset.key = localKey; } catch (_) {}
+      // 出队才是真正发送时刻：重新盖章回声去重窗——入队时盖的章在
+      // 排队 >15s 后已过期，回声穿透去重会再画一个用户泡。
+      try { notePhoneUserText(text); } catch (_) {}
     }
     const beforeQueue = outboundQueue.length;
     const sent = sendMessage(
