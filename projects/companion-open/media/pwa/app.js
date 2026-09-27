@@ -218,6 +218,8 @@
   const OUTBOUND_QUEUE_TTL_MS = 90000;
   /** 请求进行中用户再次输入的消息队列：排队而非停轮（发送键=有文本就排队，空文本才停止） */
   const pendingSendQueue = [];
+  /** 「已排队」提示元素：出队发走后移除，不再残留（R59 P3）。 */
+  let queuedHintEl = null;
 
   /**
    * 鉴权 token：URL ?token= 优先，其次 localStorage（tunnel 开了 auth 时必须带）。
@@ -2058,6 +2060,7 @@
           if (pendingSendQueue.length) {
             pendingSendQueue.length = 0;
             addSys('已切换会话，排队消息已丢弃');
+            if (queuedHintEl) { queuedHintEl.remove(); queuedHintEl = null; }
           }
           setStatus(true, '切换会话…');
           const f = msg.file || currentSessionMeta.file || '';
@@ -3075,7 +3078,7 @@
         pendingSendQueue.push({ text: queuedText, mode: modeEl.value || 'agent' });
         input.value = '';
         input.style.height = 'auto';
-        addSys('已排队：当前回复结束后自动发送');
+        queuedHintEl = addSys('已排队：当前回复结束后自动发送');
         return;
       }
       if (Date.now() < stopArmUntil) {
@@ -3117,6 +3120,10 @@
     if (sentAwaitingReply.some((e) => now - (e.at || 0) < AWAIT_REPLY_FLUSH_BLOCK_MS)) return;
     const n = pendingSendQueue.shift();
     if (n) sendTextNow(n.text, n.mode);
+    if (!pendingSendQueue.length && queuedHintEl) {
+      queuedHintEl.remove();
+      queuedHintEl = null;
+    }
   }
 
   function sendTextNow(text, mode) {
