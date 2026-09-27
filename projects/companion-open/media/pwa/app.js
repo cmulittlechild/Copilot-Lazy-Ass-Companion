@@ -158,7 +158,10 @@
   /** 回放里刚画过的用户泡 → 迟到 live 回声去重窗口（chatSessions 写盘滞后可达 ~60s+） */
   const REPLAY_ECHO_DEDUP_MS = 120000;
   /** 待答条目阻塞发送队列的时限：超时视为死轮放行（真无回复不能永远卡队列） */
-  const AWAIT_REPLY_FLUSH_BLOCK_MS = 120000;
+  // 待答条目挡队列的窗口：只挡「刚发出还没等到答案」的段（15s）。
+  // 更长没有意义——发送核验 9s 会清未送达条目；真在途轮由 requestRunning 挡；
+  // 120s 旧窗曾把孤儿条目挡足两分钟 → 跟随/回放后排队消息滞留 40-55s。
+  const AWAIT_REPLY_FLUSH_BLOCK_MS = 15000;
   /**
    * 死流容忍窗口：最后一次 STREAM_* / COPILOT_TYPING 活动距现在超过该值，
    * 视为僵尸流——requests/N 开流后 END 被服务器端抑制时按钮会永远卡在「停止」。
@@ -355,6 +358,11 @@
         requestDoneTimer = null;
       }
       requestRunning = true;
+      // 新请求开始本身就是活动：否则首个流事件到达前的空窗里，
+      // lastStreamActivityAt 还是上一轮的旧值，doSend/flush 的僵尸检查
+      // （>STREAM_STALE_MS 判死）会把刚发起的活轮当死轮收尸 → 连发绕过
+      // 排队直接插队广播（U1U2A1A2 回归形态）。
+      lastStreamActivityAt = Date.now();
       paintSendButton();
       if (statusText) statusText.textContent = statusLabel || 'Copilot 正在输入…';
       return;
@@ -393,7 +401,10 @@
     // 死路——残留元素不消失时按钮滞留 ~60s 直到下一个 DONE。
     const graceRelease = () => {
       requestDoneTimer = null;
-      if (anyStreamingNow() && Date.now() - lastStreamActivityAt < 5000) {
+      // 续查条件：最近 5s 有任何流活动（含发送打点/THINKING），不限于残留
+      // .streaming 元素——中途 DONE/回执 DONE 后流仍在走，此时释放会让排队
+      // 消息赶在 A1 前插队（U1U2A1A2 残余逃逸）。真轮终后必经历 5s 静默。
+      if (Date.now() - lastStreamActivityAt < 5000) {
         requestDoneTimer = setTimeout(graceRelease, 1500);
         return;
       }
@@ -1896,54 +1907,80 @@
             addSys('已确认送达（此前误报未送达，勿重复发送）');
           }
         }
-        // 旧请求的迟到 DONE（requestIndex 小于已见过的最大 live 下标）不动
-        // 当前在途轮的发送键/视觉/队列——否则连发 U1U2A1A2 堆叠、长轮无法停。
-        const doneIdx = typeof msg.requestIndex === 'number' ? msg.requestIndex : null;
-        const doneTs = eventTsNum(msg);
-        // requestIndex 之外加时间戳兜底：sessiondb/兜底通道的 DONE 常不带
-        // requestIndex，但其 ts 是轮完成时刻——早于最近 live USER 发送时刻
-        // 就是旧轮迟到件，不得释放当前在途轮的发送键/队列。
-        const staleDone =
-          (doneIdx != null && latestLiveReqIdx > doneIdx) ||
-          (doneIdx == null && Number.isFinite(doneTs) && doneTs + 2000 < latestUserLiveTs);
-        if (!staleDone) {
-          markAllToolsDone();
-          finishAllAssistantVisuals();
-        }
-        // 中途 DONE（tool 循环 turn_end / thinking 间隙、旧请求迟到）提前于请求
-        // 真正结束——立即释放会让发送键提前变回「发送」，长轮几乎停不掉。
-        // 3s 宽限释放：期间任何新流活动自动取消；用户主动停/取消仍立即释放。
-        const doneImmediate = msg.reason === 'phone_stop' || msg.reason === 'isCanceled';
-        if (!replaying && !staleDone) {
-          setRequestRunning(false, undefined, doneImmediate ? { force: true } : { deferMs: 3000 });
-        }
-        if (doneImmediate && !staleDone) setStatus(true, connectedLabel());
-        if (!replaying) Haptics.success();
-        // 停止/取消的 DONE（phone_stop/isCanceled）常不带 _ut——它终止的就是
-        // 当前在途轮，其用户泡是最新一条待答条目；不清会永远「已发未答」，
-        // 之后每次会话切换/重连回放都被 repaintAwaitingUserBubbles 补画回来。
-        if (!replaying && !replayingInstant && doneImmediate && !msg._ut) {
-          const curBase = baseNameAny(currentSessionMeta.file).replace(/\.jsonl$/i, '');
-          const now = Date.now();
-          for (let i = sentAwaitingReply.length - 1; i >= 0; i--) {
-            const e = sentAwaitingReply[i];
-            const eBase = baseNameAny(e.sess || '').replace(/\.jsonl$/i, '');
-            if (now - (e.at || 0) >= AWAIT_REPLY_FLUSH_BLOCK_MS) break;
-            if (!eBase || !curBase || eBase === curBase) {
-              sentAwaitingReply.splice(i, 1);
-              break;
-            }
-          }
-        }
         // 回复结束→按 _ut 逐条释放待答条目：服务端 DONE 现带归属轮次，
         // 只清已答的；任意 DONE 整表清会把别轮在途条目误杀 → 用户泡丢、答案裸奔。
         // 无 _ut 的 DONE（解析不到归属）不清：条目留着，重放靠它补画已发未答泡。
+        // 先清再放行：下面的释放判断要看「清完本 DONE 归属后还剩谁没答」。
         if (!replaying && !replayingInstant && msg._ut) {
           const daut = userTextDedupeKey(String(msg._ut));
           for (let i = sentAwaitingReply.length - 1; i >= 0; i--) {
             if (userTextDedupeKey(sentAwaitingReply[i].text) === daut) sentAwaitingReply.splice(i, 1);
           }
         }
+        // 旧请求的迟到 DONE（requestIndex 小于已见过的最大 live 下标）不动
+        // 当前在途轮的发送键/视觉/队列——否则连发 U1U2A1A2 堆叠、长轮无法停。
+        // requestIndex 之外加时间戳兜底：sessiondb/兜底通道的 DONE 常不带
+        // requestIndex，但其 ts 是轮完成时刻——早于最近 live USER 发送时刻
+        // 就是旧轮迟到件，不得释放当前在途轮的发送键/队列。
+        const doneIdx = typeof msg.requestIndex === 'number' ? msg.requestIndex : null;
+        const doneTs = eventTsNum(msg);
+        const staleDone =
+          (doneIdx != null && latestLiveReqIdx > doneIdx) ||
+          (doneIdx == null && Number.isFinite(doneTs) && doneTs + 2000 < latestUserLiveTs);
+        // 注入回执 DONE（发送后 ~2s 必发的那批，无 _ut/requestIndex 归属）不是
+        // 轮终——恰好落在「已发未答」消息的头 8s 里就拒绝释放：此前它 +3s 宽限
+        // 在首流事件前放行 rr → 连发绕过排队直接插队（U1U2A1A2 回归形态）。
+        // 带 _ut 归属的 DONE 已在上面先清掉自己的待答条目，不受此门限制。
+        const now0 = Date.now();
+        const youngestAwaitAt = Math.max(
+          0,
+          ...sentAwaitingReply.map((e) => e.at || 0),
+        );
+        const doneImmediate = msg.reason === 'phone_stop' || msg.reason === 'isCanceled';
+        const injectAckDone =
+          !doneImmediate && youngestAwaitAt > 0 && now0 - youngestAwaitAt < 8000;
+        const releaseDone = !staleDone && !injectAckDone;
+        if (injectAckDone) {
+          // 被挡的 DONE 不会重发——若它其实是真轮终（无 _ut 的收尾通道），
+          // 8s 窗口到期后补一次释放评估，否则 rr 要靠 75s 看门狗才放得掉。
+          setTimeout(() => {
+            if (!requestRunning) return;
+            const n2 = Date.now();
+            const y2 = Math.max(0, ...sentAwaitingReply.map((e) => e.at || 0));
+            if (y2 === 0 || n2 - y2 >= 8000) {
+              markAllToolsDone();
+              finishAllAssistantVisuals();
+              setRequestRunning(false, undefined, { deferMs: 1500 });
+            }
+          }, 8100);
+        }
+        if (releaseDone) {
+          markAllToolsDone();
+          finishAllAssistantVisuals();
+        }
+        // 停止/取消的 DONE（phone_stop/isCanceled）常不带 _ut——它终止的就是
+        // 当前在途轮，其用户泡是最新一条待答条目；不清会永远「已发未答」，
+        // 之后每次会话切换/重连回放都被 repaintAwaitingUserBubbles 补画回来。
+        if (!replaying && !replayingInstant && doneImmediate && !msg._ut) {
+          const curBase = baseNameAny(currentSessionMeta.file).replace(/\.jsonl$/i, '');
+          for (let i = sentAwaitingReply.length - 1; i >= 0; i--) {
+            const e = sentAwaitingReply[i];
+            const eBase = baseNameAny(e.sess || '').replace(/\.jsonl$/i, '');
+            if (now0 - (e.at || 0) >= AWAIT_REPLY_FLUSH_BLOCK_MS) break;
+            if (!eBase || !curBase || eBase === curBase) {
+              sentAwaitingReply.splice(i, 1);
+              break;
+            }
+          }
+        }
+        // 中途 DONE（tool 循环 turn_end / thinking 间隙、旧请求迟到）提前于请求
+        // 真正结束——立即释放会让发送键提前变回「发送」，长轮几乎停不掉。
+        // 3s 宽限释放：期间任何新流活动自动取消；用户主动停/取消仍立即释放。
+        if (!replaying && releaseDone) {
+          setRequestRunning(false, undefined, doneImmediate ? { force: true } : { deferMs: 3000 });
+        }
+        if (doneImmediate && releaseDone) setStatus(true, connectedLabel());
+        if (!replaying) Haptics.success();
         // 回复结束→排队消息出队（防抖宽限后判 requestRunning）
         setTimeout(flushPendingSendQueue, 800);
         break;
@@ -1954,7 +1991,16 @@
         if (msg.ok) {
           // Clear immediately so a delayed/lost replay cannot leave the previous
           // session visible under the new session title.
-          outboundQueue.length = 0;
+          // 离线队列里是没送达的用户文本——静默清空 = 重绑竞态吞掉首发
+          // （无泡/无广播/无落盘三空）。捞回输入框再丢队列。
+          {
+            const unsent = outboundQueue.splice(0).filter((m) => m && m.type === 'PHONE_MESSAGE');
+            if (unsent.length) {
+              const lastText = String(unsent[unsent.length - 1].text || '');
+              if (lastText && !(input.value || '').trim()) input.value = lastText;
+              addSys('切换会话：未送达的消息已回填输入框');
+            }
+          }
           clearFeed();
           latestLiveReqIdx = -1; // 新会话 requestIndex 从 0 起
           latestUserLiveTs = 0;
@@ -3042,10 +3088,17 @@
 
   /** 队列出队发送（仅在未运行且有连接时）；供回复结束/停止/收尸后触发 */
   function flushPendingSendQueue() {
-    if (!pendingSendQueue.length || requestRunning) return;
+    if (!pendingSendQueue.length) return;
+    // 僵尸 rr：DONE 丢失/被去重吞掉时 rr 卡死，flush 全靠 10s 看门狗兜底，
+    // 实测排队消息滞留 40-55s。这里就地收尸（内部会再调本函数重试）。
+    if (requestRunning && lastStreamActivityAt && Date.now() - lastStreamActivityAt > STREAM_STALE_MS) {
+      forceFinishDeadStream();
+      return;
+    }
+    if (requestRunning) return;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    // 有待答条目 = 上一条答案未落地——0.67 无流路径上 DONE+宽限不等于真轮终，
-    // 此时放行会让下一条插队成 U1U2A1A2。超龄条目（死轮）不挡队列。
+    // 刚发未答的条目挡队列：0.67 无流路径上 DONE+宽限不等于真轮终，
+    // 此时放行会让下一条插队成 U1U2A1A2。超龄条目（死轮/孤儿）不挡队列。
     const now = Date.now();
     if (sentAwaitingReply.some((e) => now - (e.at || 0) < AWAIT_REPLY_FLUSH_BLOCK_MS)) return;
     const n = pendingSendQueue.shift();
@@ -3098,12 +3151,18 @@
       timer: setTimeout(() => {
         if (!pendingSendCheck) return;
         const lost = pendingSendCheck.text;
+        const lostKey = pendingSendCheck.textKey;
         pendingSendCheck = null;
         clearPendingSend();
         if (!(input.value || '').trim()) input.value = lost;
         if (requestRunning) {
           requestRunning = false;
           paintSendButton();
+        }
+        // 判定未送达的消息不再是「待答」——残留条目会让后来的真 DONE 因
+        // hasFreshAwait 永远拿不到释放权（rr 卡 120s），队列随之卡死。
+        for (let i = sentAwaitingReply.length - 1; i >= 0; i--) {
+          if (userTextDedupeKey(sentAwaitingReply[i].text) === lostKey) sentAwaitingReply.splice(i, 1);
         }
         sendVerifyMissedAt = Date.now();
         addSys('发送可能未送达（连接异常），文本已回填，请重新发送');
@@ -3233,7 +3292,8 @@
     if (e.key === 'Escape') closeSheets();
   });
   input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    // IME 组词期间 Enter 是选词确认，不是发送——缺此判断中文输入会误发。
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
       e.preventDefault();
       doSend();
     }
