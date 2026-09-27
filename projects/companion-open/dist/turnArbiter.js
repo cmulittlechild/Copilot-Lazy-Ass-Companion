@@ -80,11 +80,18 @@ class TurnArbiter {
                 // 同一工具调用在各通道各投一遍：callId+状态/结果指纹去重。
                 // 状态变化（running→done）属于同一 callId 的不同事件，放行。
                 const cid = String(ev.toolId || ev.callId || ev.toolCallId || ev.id || "");
-                if (!cid)
-                    return null;
                 const status = String(ev.status ?? ev.done ?? ev.isComplete ?? ev.state ?? "");
                 const res = normText(ev.result || ev.text).slice(0, 40);
-                return `t|${sessBase}|${cid}|${status}|${res}`;
+                if (cid)
+                    return `t|${sessBase}|${cid}|${status}|${res}`;
+                // 无 id 的副本（部分通道不发 toolId）：退化为名称+参数+状态指纹。
+                // 两个同 tick 的 create_file 同名同参 = 跨通道重投；不同参数的同工具
+                // 并发调用参数不同，不误伤。
+                const name = normText(ev.text || ev.name || ev.tool);
+                if (!name)
+                    return null;
+                const args = normText(ev.args ?? ev.arguments ?? ev.input).slice(0, 60);
+                return `t|${sessBase}|n:${name}|${args}|${status}|${res}`;
             }
             default:
                 return null;
