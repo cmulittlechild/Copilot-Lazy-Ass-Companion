@@ -54,12 +54,19 @@ export class TurnArbiter {
   private latestReqIdx = -1;
   private openTurns: TrackedTurn[] = [];
   private emitted = new Map<string, number>();
+  /** 已 END 的 streamId → 终结时刻。END 后迟到的 START/CHUNK 服务端丢弃——
+      否则客户端流卡已收尾又追加一遍（R64 双渲）且迟到帧会重新置 rr、
+      把队列挂到看门狗（~135s 悬挂）。位置型 sid（requests/N/…）每轮唯一，
+      60s 窗不会误伤下一轮。 */
+  private endedStreams = new Map<string, number>();
 
   /** 会话切换/绑定变更时调用：清本轮状态，避免跨会话误杀。 */
   resetForSession(sessBase?: string) {
     this.openTurns = [];
     this.latestUserLiveTs = 0;
     this.latestReqIdx = -1;
+    // 位置型 streamId（requests/N/…）每个会话文件从 0 重新计数——换会话必须清
+    this.endedStreams.clear();
     if (sessBase) this.pruneEmitted(0);
   }
 
@@ -179,8 +186,34 @@ export class TurnArbiter {
       }
       case "AGENT_STREAM_START":
       case "AGENT_STREAM_SET":
-      case "AGENT_STREAM_CHUNK":
-      case "AGENT_STREAM_END":
+      case "AGENT_STREAM_CHUNK": {
+        const sid = String(ev.streamId || "");
+        const endedAt = sid ? this.endedStreams.get(sid) : undefined;
+        if (endedAt != null && now - endedAt < 60_000) return null;
+        const t = this.openTurnForEvent(sessBase, TurnArbiter.tsOf(ev));
+        if (t) {
+          t.sawStream = true;
+          if (!utKey) utKey = t.utKey;
+        }
+        break;
+      }
+      case "AGENT_STREAM_END": {
+        const sid = String(ev.streamId || "");
+        if (sid) {
+          this.endedStreams.set(sid, now);
+          if (this.endedStreams.size > 128) {
+            for (const [k, ts] of this.endedStreams) {
+              if (now - ts > 60_000) this.endedStreams.delete(k);
+            }
+          }
+        }
+        const t = this.openTurnForEvent(sessBase, TurnArbiter.tsOf(ev));
+        if (t) {
+          t.sawStream = true;
+          if (!utKey) utKey = t.utKey;
+        }
+        break;
+      }
       case "TOOL_CALL":
       case "AGENT_TOOL_CALL":
       case "AGENT_TOOL_RESULT":
