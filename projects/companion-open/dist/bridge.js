@@ -97,6 +97,8 @@ const HEARTBEAT_MS = 8000;
 // 落盘回声可能很慢（chatSessions 最长 ~60s+ 才写），30s 窗口漏掉迟到回声 → 手机端重复气泡。
 const PHONE_ECHO_WINDOW_MS = 120_000;
 const USER_EMIT_DEDUPE_MS = 60_000;
+/** 同一答案跨通道（sessiondb 整句 vs 流式收尾）重复到达的压制窗口 */
+const AGENT_FINAL_DEDUPE_MS = 120_000;
 const PHONE_ECHO_MAX = 20;
 /** 同一条手机文本最多吞掉的镜像条数（transcript 源 + chatSessions 源各可能来一条） */
 const PHONE_ECHO_SUPPRESS_PER_TEXT = 4;
@@ -206,6 +208,32 @@ class BridgeServer {
     recentPhoneTexts = [];
     /** 非手机来源 USER_MESSAGE 的最近广播（双源去重）：text → 上次广播时刻 */
     recentUserEmits = new Map();
+    /** 已投最终答案的指纹：(reqIndex|null)|sess|规范化文本 → 时间戳。
+        同一答案可能经 sessiondb 整句 + 流路径收尾各投一遍（相距 ~1s），
+        第二个按同轮同文压制；requestIndex 不同（同题重问）不压。 */
+    recentAgentFinals = [];
+    isDupAgentFinal(ev) {
+        const textKey = String(ev?.text || '')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .slice(0, 400);
+        if (!textKey)
+            return false;
+        const now = Date.now();
+        this.recentAgentFinals = this.recentAgentFinals.filter((r) => now - r.at <= AGENT_FINAL_DEDUPE_MS);
+        const reqKey = typeof ev?.requestIndex === 'number' ? String(ev.requestIndex) : null;
+        const sess = String(ev?._sess || '');
+        for (const r of this.recentAgentFinals) {
+            if (r.textKey !== textKey || r.sess !== sess)
+                continue;
+            // 两侧都带 requestIndex 且不同 → 不同轮次（同题重问），放行
+            if (r.reqKey != null && reqKey != null && r.reqKey !== reqKey)
+                continue;
+            return true;
+        }
+        this.recentAgentFinals.push({ reqKey, sess, textKey, at: now });
+        return false;
+    }
     host;
     preferredPort;
     portRange;
@@ -684,6 +712,9 @@ class BridgeServer {
                 this.recentUserEmits.set(t, now);
             }
         }
+        // 同答跨通道双投压制（在 pushHistory 之前——否则两份都进回放）
+        if (ev.type === 'AGENT_MESSAGE' && this.isDupAgentFinal(ev))
+            return;
         const stamped = {
             ...ev,
             timestamp: ev?.timestamp ?? Date.now(),
@@ -806,10 +837,13 @@ class BridgeServer {
             streamId,
             timestamp: Date.now(),
         };
-        this.pushHistory(msg);
+        const dupFinal = this.isDupAgentFinal(msg);
+        if (!dupFinal)
+            this.pushHistory(msg);
         this.broadcastRaw({ type: 'AGENT_STREAM_END', streamId, timestamp: Date.now() });
         // Final snapshot for clients that only listen for AGENT_MESSAGE.
-        this.broadcastRaw(msg);
+        if (!dupFinal)
+            this.broadcastRaw(msg);
         if (this.authorizedClientCount() === 0 && this.activeStreamAccum) {
             void this.push
                 ?.notify('Copilot finished', this.activeStreamAccum.slice(0, 160))
