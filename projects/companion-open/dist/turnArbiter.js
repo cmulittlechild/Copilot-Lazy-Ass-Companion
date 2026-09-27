@@ -16,6 +16,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.TurnArbiter = void 0;
 const CONTENT_DEDUPE_MS = 120_000;
+const TOOL_DEDUPE_MS = 3_000;
 const STALE_DONE_SKEW_MS = 2_000;
 const INJECT_ACK_WINDOW_MS = 8_000;
 const MAX_TRACKED_TURNS = 64;
@@ -77,21 +78,17 @@ class TurnArbiter {
             case "AGENT_TOOL_CALL":
             case "AGENT_TOOL_RESULT":
             case "TOOL_RESULT": {
-                // 同一工具调用在各通道各投一遍：callId+状态/结果指纹去重。
-                // 状态变化（running→done）属于同一 callId 的不同事件，放行。
+                // 同一工具调用在各通道各投一遍。指纹【不含】状态：两通道副本恰好
+                // running/done 双态不同，含状态会被当不同事件放行（R58 实测）。
+                // 真实 running→done 更新间隔常 >3s，配合 TOOL 短窗去重不伤进度更新。
                 const cid = String(ev.toolId || ev.callId || ev.toolCallId || ev.id || "");
-                const status = String(ev.status ?? ev.done ?? ev.isComplete ?? ev.state ?? "");
-                const res = normText(ev.result || ev.text).slice(0, 40);
                 if (cid)
-                    return `t|${sessBase}|${cid}|${status}|${res}`;
-                // 无 id 的副本（部分通道不发 toolId）：退化为名称+参数+状态指纹。
-                // 两个同 tick 的 create_file 同名同参 = 跨通道重投；不同参数的同工具
-                // 并发调用参数不同，不误伤。
+                    return `t|${sessBase}|${cid}`;
                 const name = normText(ev.text || ev.name || ev.tool);
                 if (!name)
                     return null;
                 const args = normText(ev.args ?? ev.arguments ?? ev.input).slice(0, 60);
-                return `t|${sessBase}|n:${name}|${args}|${status}|${res}`;
+                return `t|${sessBase}|n:${name}|${args}`;
             }
             default:
                 return null;
@@ -233,14 +230,24 @@ class TurnArbiter {
         // （USER 另有 recentUserEmits 文本窗去重——同题重问是合法行为，这里不拦。）
         if (type === "AGENT_MESSAGE" || type.endsWith("TOOL_CALL") || type.endsWith("TOOL_RESULT")) {
             const key = this.contentKey(ev, sessBase, utKey);
-            if (key) {
-                const seen = this.emitted.get(key);
-                if (seen != null && now - seen <= CONTENT_DEDUPE_MS)
-                    return null;
-                // 只在「真的会广播」时记名：离线排队/被后续闸丢弃的首发不算已投递，
-                // 否则首份被吞、重发又被当重复——净丢一条消息。
-                if (markEmitted)
+            // AGENT_MESSAGE 再配一条「轮次+前缀」副指纹：sessiondb 位置型 streamId
+            // （requests/N/）与实时流 id 不同，同一答文经异构 sid 双通道到会各渲一
+            // 张卡片（R58 长答双渲）。同轮同前缀即重复，无论 sid 形态。
+            const altKey = type === "AGENT_MESSAGE" && utKey
+                ? `a2|${sessBase}|${utKey}|${normText(ev.text).slice(0, 80)}`
+                : null;
+            const window = type === "AGENT_MESSAGE" ? CONTENT_DEDUPE_MS : TOOL_DEDUPE_MS;
+            const isDup = (key && (this.emitted.get(key) ?? 0) && now - this.emitted.get(key) <= window) ||
+                (altKey && (this.emitted.get(altKey) ?? 0) && now - this.emitted.get(altKey) <= window);
+            if (isDup)
+                return null;
+            // 只在「真的会广播」时记名：离线排队/被后续闸丢弃的首发不算已投递，
+            // 否则首份被吞、重发又被当重复——净丢一条消息。
+            if (markEmitted) {
+                if (key)
                     this.emitted.set(key, now);
+                if (altKey)
+                    this.emitted.set(altKey, now);
             }
             if (type === "AGENT_MESSAGE")
                 this.markAnswered(sessBase, utKey);
