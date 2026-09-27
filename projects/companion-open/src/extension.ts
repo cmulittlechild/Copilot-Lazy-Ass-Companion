@@ -35,6 +35,11 @@ let lastExplicitSelect: { file: string; until: number } | undefined;
  *  只发一次，吞掉即永久丢失（PWA 滞留旧会话）。暂存后于窗口结束补发。 */
 let pendingSuppressedFollow: any;
 let suppressedFollowTimer: NodeJS.Timeout | undefined;
+/** 因零内容被跳过的跟随目标：该会话出现首个用户轮次时补发跟随 */
+let pendingFollowFile: string | undefined;
+// 挂空操作占位；tdir 存在时赋真实现（sessionWatcher 通道先建，引用需提前可解析）
+let reevaluatePendingFollow: () => void = () => {};
+let performSessionFollow: (csFile: string, base: string) => void = () => {};
 
 /** 正文规范化（dedupe 用）：剥 markdown 强调+压空白+截断，与 transcriptWatcher.agentTextKey 同形 */
 function replayTextKey(text: string): string {
@@ -436,7 +441,10 @@ export async function activate(context: vscode.ExtensionContext) {
           const file = typeof msg.file === "string" ? msg.file : "";
           const ok = watcher?.selectSession(file) ?? false;
           // 显式点选开窗：窗口内压制指向别会话的自动跟随（见 SESSION_FOLLOW 处）。
-          if (ok && file) lastExplicitSelect = { file, until: Date.now() + EXPLICIT_SELECT_GUARD_MS };
+          if (ok && file) {
+            lastExplicitSelect = { file, until: Date.now() + EXPLICIT_SELECT_GUARD_MS };
+            pendingFollowFile = undefined;
+          }
           // 记录选中会话：后续 PHONE_MESSAGE 注入必须先切到该会话，
           // 否则 workbench.action.chat.open 只会打到 VS Code 当前活跃会话。
           if (ok && file) setActiveSessionFile(file);
@@ -623,6 +631,11 @@ export async function activate(context: vscode.ExtensionContext) {
         ) {
           return;
         }
+        // chatSessions 通道的 USER 事件同样是 pending-follow 的内容信号——
+        // 空会话首次写盘常只走此通道，不挂这里补发永远不触发。
+        if (pendingFollowFile && ev.type === "USER_MESSAGE") {
+          reevaluatePendingFollow();
+        }
         // Watching session is internal chrome — update artifact only, never phone feed.
         if (
           ev.type === "SYSTEM_MESSAGE" &&
@@ -659,6 +672,77 @@ export async function activate(context: vscode.ExtensionContext) {
         "github.copilot-chat",
         "session-store.db",
       );
+      // 执行一次会话跟随：SESSION_SELECTED（PWA 清 feed+标题）+ db 回填回放。
+      // 供 SESSION_FOLLOW 事件与 pendingFollowFile 补发共用。
+      performSessionFollow = (csFile: string, base: string) => {
+        const hist = watcher?.projectHistory(csFile, 20) ?? [];
+        const sidForDb = base ? base.replace(/\.jsonl$/, "") : "";
+        const dbTurns = transcriptWatcher?.sessionDbRecentTurns(20, sidForDb) ?? [];
+        const histUsers = hist.filter((e) => e?.type === "USER_MESSAGE").length;
+        const dbUsers = dbTurns.filter((t) => t.user_message).length;
+        // 空闲期漂移防护：新建的零内容会话文件曾触发跟随把 PWA 绑走、feed 清空——
+        // 目标会话还没有任何用户轮次时不跟随，记下 pending 待有内容后补发。
+        if (!histUsers && !dbUsers) {
+          qrPanel.addLog(`SESSION_FOLLOW 跳过: 目标会话无用户消息 ${base}`);
+          pendingFollowFile = csFile;
+          return;
+        }
+        pendingFollowFile = undefined;
+        setActiveSessionFile(csFile);
+        watcher?.selectSession(csFile);
+        transcriptWatcher?.seedFromHistory(hist);
+        const title =
+          watcher
+            ?.listSessions(40)
+            .find((s) => s.file === csFile || (base && path.basename(String(s.file || "")) === base))
+            ?.title || undefined;
+        bridge?.broadcast({
+          type: "SESSION_SELECTED",
+          file: csFile,
+          ok: true,
+          title,
+          timestamp: Date.now(),
+        });
+        // 合并 db 补全：chatSessions 尚未写盘的回答（含中间轮次）按用户文位置插回回放
+        const mergedHist = buildReplayWithDbBackfill(hist, dbTurns, sidForDb);
+        transcriptWatcher?.seedFromHistory(
+          mergedHist.filter((e) =>
+            (e as { streamId?: string }).streamId?.startsWith("sessiondb/"),
+          ) as never,
+        );
+        bridge?.replaySession(
+          [
+            ...mergedHist,
+            {
+              type: "SYSTEM_MESSAGE",
+              text: `已切换到会话: ${base}`,
+            },
+          ],
+          csFile,
+        );
+      };
+      // 被跳过的空会话出现首个用户轮次后补跟随：两条事件通道任一到达内容事件即重评估。
+      reevaluatePendingFollow = () => {
+        const pf = pendingFollowFile;
+        if (!pf) return;
+        const pfBase = path.basename(pf).replace(/\.jsonl$/i, "");
+        const pfHist = watcher?.projectHistory(pf, 5) ?? [];
+        const pfDb = transcriptWatcher?.sessionDbRecentTurns(5, pfBase) ?? [];
+        if (
+          !pfHist.some((e) => e?.type === "USER_MESSAGE") &&
+          !pfDb.some((t) => t.user_message)
+        ) {
+          return;
+        }
+        qrPanel.addLog(`SESSION_FOLLOW 补发: ${pfBase} 已有内容`);
+        performSessionFollow(pf, pfBase);
+      };
+      // 兜底轮询：pending 会话的文件若未被任一 watcher tail（如新文件未成为
+      // newest），其写入不产生事件，靠 3s 轮询补发跟随；只在有 pending 时做事。
+      const pendingPoll = setInterval(() => {
+        if (pendingFollowFile) reevaluatePendingFollow();
+      }, 3000);
+      context.subscriptions.push({ dispose: () => clearInterval(pendingPoll) });
       transcriptWatcher = new TranscriptWatcher({
         dir: tdir,
         chatSessionsDir: csdir,
@@ -675,6 +759,17 @@ export async function activate(context: vscode.ExtensionContext) {
             isInjectedEcho((ev as any).text)
           ) {
             return;
+          }
+          // 被跳过的空会话出现真实内容后补跟随：内容事件到达时重评估
+          // （本通道 + sessionWatcher 通道都挂；跳过的写盘不会再发 FOLLOW）。
+          if (
+            pendingFollowFile &&
+            (ev.type === "USER_MESSAGE" ||
+              ev.type === "AGENT_MESSAGE" ||
+              ev.type === "AGENT_STREAM_SET" ||
+              ev.type === "AGENT_STREAM_CHUNK")
+          ) {
+            reevaluatePendingFollow();
           }
           // 桌面切会话跟随：页面完整同步——feed 换目标会话历史 + 标题切换。
           // 先 SESSION_SELECTED（PWA 清 feed + 标题 + 切换态），再 HISTORY_REPLAY。
@@ -731,44 +826,7 @@ export async function activate(context: vscode.ExtensionContext) {
               lastExplicitSelect = undefined;
             }
             if (csFile && fs.existsSync(csFile)) {
-              setActiveSessionFile(csFile);
-              watcher?.selectSession(csFile);
-              const hist = watcher?.projectHistory(csFile, 20) ?? [];
-              transcriptWatcher?.seedFromHistory(hist);
-              const title =
-                watcher
-                  ?.listSessions(40)
-                  .find((s) => s.file === csFile || (base && path.basename(String(s.file || "")) === base))
-                  ?.title || undefined;
-              bridge?.broadcast({
-                type: "SESSION_SELECTED",
-                file: csFile,
-                ok: true,
-                title,
-                timestamp: Date.now(),
-              });
-              // 合并 db 补全：chatSessions 尚未写盘的回答（含中间轮次）按用户文位置插回回放
-              const sidForDb = base ? base.replace(/\.jsonl$/, "") : "";
-              const mergedHist = buildReplayWithDbBackfill(
-                hist,
-                transcriptWatcher?.sessionDbRecentTurns(20, sidForDb),
-                sidForDb,
-              );
-              transcriptWatcher?.seedFromHistory(
-                mergedHist.filter((e) =>
-                  (e as { streamId?: string }).streamId?.startsWith("sessiondb/"),
-                ) as never,
-              );
-              bridge?.replaySession(
-                [
-                  ...mergedHist,
-                  {
-                    type: "SYSTEM_MESSAGE",
-                    text: `已切换到会话: ${base}`,
-                  },
-                ],
-                csFile,
-              );
+              performSessionFollow(csFile, base);
             } else if (bridge?.sendToPhone) {
               // 找不到 chatSessions 对应文件：退化为提示（不替换 feed）
               bridge.sendToPhone({ type: "SYSTEM_MESSAGE", text: String((ev as any).text || "") });
