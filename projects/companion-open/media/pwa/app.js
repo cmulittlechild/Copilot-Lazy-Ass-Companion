@@ -1210,6 +1210,46 @@
       streamingTurns.delete(streamId || 'default');
       return;
     }
+    // 同文流式重投影：回放/别通道已把该轮正文画上屏，这张流式卡是迟到副本。
+    // 流式路径不经 addAgentFinal 的同文去重，收尾时补查——只比最后一条 user
+    // 之下的 agent 泡（同轮判定），跨轮同文回复不受影响。
+    if (entry.markdown && !replaying && !replayingInstant) {
+      const allMsgs = feed.children;
+      let lastUserIdx = -1;
+      for (let i = allMsgs.length - 1; i >= 0; i--) {
+        if (allMsgs[i].classList.contains('user')) { lastUserIdx = i; break; }
+      }
+      let dup = false;
+      if (lastUserIdx >= 0) {
+        for (let i = lastUserIdx + 1; i < allMsgs.length; i++) {
+          const n = allMsgs[i];
+          if (n === entry.element) continue;
+          if (!n.classList.contains('agent') || n.classList.contains('typing-row')) continue;
+          const b = n.querySelector('.body');
+          if (b && b.dataset.raw === entry.markdown) { dup = true; break; }
+        }
+      }
+      if (dup) {
+        try { entry.element.remove(); } catch (_) {}
+        streamingTurns.delete(streamId || 'default');
+        let anyLive = false;
+        for (const e of streamingTurns.values()) {
+          if (e.element && e.element.isConnected && e.element.classList.contains('streaming')) {
+            anyLive = true;
+            break;
+          }
+        }
+        if (!anyLive) {
+          clearTyping();
+          feed.querySelectorAll('.msg.agent .typing-label').forEach((n) => {
+            n.style.display = 'none';
+            n.classList.add('is-done');
+          });
+          setRequestRunning(false);
+        }
+        return;
+      }
+    }
     entry.element.classList.remove('streaming');
     entry.bubble.classList.remove('streaming');
     const dot = entry.element.querySelector('.pulse-dot');
