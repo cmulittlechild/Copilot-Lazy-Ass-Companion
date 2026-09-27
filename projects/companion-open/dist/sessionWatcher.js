@@ -1083,18 +1083,28 @@ class SessionWatcher {
                     const evs = this.projector.projectLine(obj);
                     // kind0 快照会重投整段历史的 USER_MESSAGE（桌面发送后 chatSessions
                     // 落盘的同一条）。只保留时间戳新鲜的最后一条 USER，旧轮不广播。
+                    // kind=2 增量里的 USER 都是本 mutation 新落盘的请求（projector 的
+                    // seenRequestIds 已去重），不套快照门槛——否则无 timestamp 的
+                    // 新请求或同 mutation 里靠前的请求会被整条吞掉。
+                    const isSnapshot = obj.kind === 0;
                     let lastUser = -1;
-                    evs.forEach((e, i) => {
-                        if (e.type === 'USER_MESSAGE')
-                            lastUser = i;
-                    });
+                    if (isSnapshot) {
+                        evs.forEach((e, i) => {
+                            if (e.type === 'USER_MESSAGE')
+                                lastUser = i;
+                        });
+                    }
                     evs.forEach((e, i) => {
                         if (e.type !== 'USER_MESSAGE') {
                             this.opts.onEvent(e);
                             return;
                         }
+                        if (!isSnapshot) {
+                            this.opts.onEvent(e);
+                            return;
+                        }
                         const ets = typeof e.timestamp === 'number' ? e.timestamp : undefined;
-                        if (i === lastUser && ets != null && Date.now() - ets <= USER_FRESH_MS)
+                        if (i === lastUser && (ets == null || Date.now() - ets <= USER_FRESH_MS))
                             this.opts.onEvent(e);
                     });
                 }

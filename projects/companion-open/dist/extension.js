@@ -45,6 +45,7 @@ const sessionWatcher_1 = require("./sessionWatcher");
 const sessionIndex_1 = require("./sessionIndex");
 const transcriptWatcher_1 = require("./transcriptWatcher");
 const inject_1 = require("./inject");
+const pathutil_1 = require("./pathutil");
 const tunnel_1 = require("./tunnel");
 const qrPanel_1 = require("./qrPanel");
 const push_1 = require("./push");
@@ -263,7 +264,25 @@ async function activate(context) {
             }
             if (!file || !fs.existsSync(file))
                 return undefined;
-            const hist = watcher?.projectHistory(file, 40) ?? [];
+            let hist = watcher?.projectHistory(file, 40) ?? [];
+            if (!hist.some((e) => e?.type === "USER_MESSAGE")) {
+                // 冷启动/新建空会话：VS Code 会自动创建一个只有头部的空 chatSessions
+                // 文件并成为全局 newest → watcher.currentFile 绑定到它 → 回放得到
+                // 空历史，feed 只剩激活期/live 缓冲里杂讯（用户泡全丢）。
+                // 回退到最近一条真正有用户轮次的会话。
+                for (const s of watcher?.listSessions(20) ?? []) {
+                    if (!s.file || (0, pathutil_1.samePath)(s.file, file))
+                        continue;
+                    if (s.requestCount === 0)
+                        continue;
+                    const alt = watcher?.projectHistory(s.file, 40) ?? [];
+                    if (alt.some((e) => e?.type === "USER_MESSAGE")) {
+                        file = s.file;
+                        hist = alt;
+                        break;
+                    }
+                }
+            }
             if (!hist.length)
                 return undefined;
             const sid = path.basename(file).replace(/\.jsonl$/i, "");
@@ -840,8 +859,14 @@ async function activate(context) {
                             performSessionFollow(csFile, base);
                         }
                         else if (bridge?.sendToPhone) {
-                            // 找不到 chatSessions 对应文件：退化为提示（不替换 feed）
+                            // 找不到 chatSessions 对应文件：退化为提示（不替换 feed）。
+                            // Windows 实测 transcripts 可比 chatSessions 早 ~30s 落盘——此刻 cs
+                            // 文件尚未出生。跟随意图记为 pending：文件出现且拿到首个用户轮后
+                            // 由 pendingPoll/内容事件补发跟随，不再永久丢失。
                             bridge.sendToPhone({ type: "SYSTEM_MESSAGE", text: String(ev.text || "") });
+                            const cand = csdir && base ? path.join(csdir, base) : undefined;
+                            if (cand)
+                                pendingFollowFile = cand;
                         }
                         return;
                     }
