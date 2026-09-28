@@ -864,6 +864,45 @@
     return false;
   }
 
+  /** 归属 user 泡（与 appendFeedChronological 的 owner 判定一致）：
+      ut 文本键优先（最后一条同文 user），否则最后一个 ts ≤ t 的 user，
+      均无则取末尾 user。 */
+  function ownerUserFor(ut, ts) {
+    const users = feed.querySelectorAll('.msg.user');
+    if (ut) {
+      const want = userTextDedupeKey(String(ut));
+      for (let i = users.length - 1; i >= 0; i--) {
+        if (users[i].dataset.textKey === want) return users[i];
+      }
+    }
+    const t = Number(ts);
+    if (Number.isFinite(t) && t > 0) {
+      for (let i = users.length - 1; i >= 0; i--) {
+        const uts = Number(users[i].dataset.ts);
+        if (Number.isFinite(uts) && uts <= t) return users[i];
+      }
+    }
+    return users.length ? users[users.length - 1] : null;
+  }
+
+  /** 指定 user 泡之下是否已有同文答案（含未收尾的流式卡；thinking/孤儿占位不算） */
+  function answerUnderUser(userEl, text) {
+    if (!userEl) return false;
+    const want = String(text || '').trim();
+    if (!want) return false;
+    for (let n = userEl.nextElementSibling; n && !n.classList.contains('user'); n = n.nextElementSibling) {
+      if (!n.classList.contains('agent') || n.classList.contains('typing-row')) continue;
+      if (n.dataset.orphanPh || n.dataset.utCopy) continue;
+      const b = n.querySelector('.body');
+      if (b && String(b.dataset.raw || '').trim() === want) return true;
+      const sid = n.dataset && n.dataset.streamId;
+      const st = sid ? streamingTurns.get(sid) : null;
+      if (st && String(st.markdown || '').trim() === want) return true;
+    }
+    return false;
+  }
+
+
   /** User message — 官方 chat-row：avatar + "You" + 气泡 */
   function addUser(text, key, opts) {
     const t = String(text || '');
@@ -1150,8 +1189,12 @@
     if (!sid) sid = 'default';
     const entry = streamingTurns.get(sid);
     if (entry && entry.element && entry.element.isConnected) return entry;
-    return startAssistantTurn(sid);
+    return startAssistantTurn(sid, { ut: msg && msg._ut });
   }
+
+  /** 慢通道流式重投压制：同文答案已在该轮（按 ts 归属的 user 泡之下）渲染时，
+      不再创建流式卡——攒着文本等 END 时走 addAgentFinal 统一去重/补画。 */
+  const suppressedStreams = new Map();
 
   /** 流式增量刷新：用 textContent 显示纯文本（快速），rAF 合并同一帧多次 chunk */
   function scheduleStreamFlush(entry) {
@@ -1178,7 +1221,17 @@
 
   /** AGENT_STREAM_SET：整段替换 */
   function setEntryMarkdown(streamId, text, ts, ut) {
-    const entry = startAssistantTurn(streamId, { ts: ts, ut: ut });
+    const sid = streamId || 'default';
+    if (suppressedStreams.has(sid)) {
+      suppressedStreams.set(sid, String(text || ''));
+      return;
+    }
+    if (!streamingTurns.get(sid) && !replaying && !replayingInstant &&
+        answerUnderUser(ownerUserFor(ut, ts), text)) {
+      suppressedStreams.set(sid, String(text || ''));
+      return;
+    }
+    const entry = startAssistantTurn(sid, { ts: ts, ut: ut });
     entry.markdown = String(text || '');
     if (ts != null && entry.element) entry.element.dataset.ts = String(ts);
     renderEntryBody(entry);
@@ -1186,7 +1239,17 @@
 
   /** AGENT_STREAM_CHUNK：增量追加（仅纯文本追加 + rAF 合批，不调 marked.parse） */
   function appendAssistantChunk(streamId, chunk, ts, ut) {
-    const entry = startAssistantTurn(streamId, { ts: ts, ut: ut });
+    const sid = streamId || 'default';
+    if (suppressedStreams.has(sid)) {
+      suppressedStreams.set(sid, (suppressedStreams.get(sid) || '') + String(chunk || ''));
+      return;
+    }
+    if (!streamingTurns.get(sid) && !replaying && !replayingInstant &&
+        answerUnderUser(ownerUserFor(ut, ts), chunk)) {
+      suppressedStreams.set(sid, String(chunk || ''));
+      return;
+    }
+    const entry = startAssistantTurn(sid, { ts: ts, ut: ut });
     if (ts != null && entry.element && !entry.element.dataset.ts) entry.element.dataset.ts = String(ts);
     entry.markdown += String(chunk || '');
     scheduleStreamFlush(entry);
@@ -1224,7 +1287,60 @@
 
   /** AGENT_STREAM_END / AGENT_MESSAGE：去掉 streaming 类（光标停止）；finalText 非空则覆盖 */
   function completeAssistantTurn(streamId, finalText, msg) {
-    const entry = streamingTurns.get(streamId || 'default');
+    const sidKey = streamId || 'default';
+    // 压制流的收尾：攒到的文本交给 addAgentFinal 统一判定（同文已渲则丢）
+    if (suppressedStreams.has(sidKey)) {
+      const acc = suppressedStreams.get(sidKey) || '';
+      suppressedStreams.delete(sidKey);
+      const ft = typeof finalText === 'string' && finalText ? finalText : acc;
+      if (ft) {
+        addAgentFinal(ft, 'agent:' + sidKey, {
+          ts: msg && msg.timestamp,
+          gapFill: !!(msg && msg.gapFill),
+          streamId: sidKey,
+          ut: msg && msg._ut,
+        });
+      }
+      return;
+    }
+    const entry = streamingTurns.get(sidKey);
+    // 同题重问第二答：上游复用首轮响应 → 慢通道把旧轮答案带「最新同文轮」的
+    // _ut 重投（ts 继承首轮）。本 streamId 的卡锚在更早的同文 user 泡下时，
+    // 这条投递属于新一轮——为最新轮补画一份（data-utCopy），旧卡留给自己的
+    // END 收尾，不归位。
+    if (entry && entry.element && entry.element.isConnected && msg && msg._ut &&
+        !(replaying || replayingInstant) && typeof finalText === 'string' && finalText) {
+      let anchor = entry.element;
+      while (anchor && !anchor.classList.contains('user')) anchor = anchor.previousElementSibling;
+      const uk = userTextDedupeKey(String(msg._ut));
+      const users = feed.querySelectorAll('.msg.user');
+      let lastMatch = null;
+      for (let i = users.length - 1; i >= 0; i--) {
+        if (users[i].dataset.textKey === uk) { lastMatch = users[i]; break; }
+      }
+      if (anchor && lastMatch && anchor !== lastMatch) {
+        let hasAnswer = false;
+        for (let n = lastMatch.nextElementSibling; n && !n.classList.contains('user'); n = n.nextElementSibling) {
+          if (!n.classList.contains('agent') || n.classList.contains('typing-row')) continue;
+          if (n.dataset.orphanPh) continue;
+          const b = n.querySelector('.body');
+          if (b && String(b.dataset.raw || '').trim()) { hasAnswer = true; break; }
+          const sid2 = n.dataset && n.dataset.streamId;
+          const st2 = sid2 ? streamingTurns.get(sid2) : null;
+          if (st2 && String(st2.markdown || '').trim()) { hasAnswer = true; break; }
+        }
+        if (!hasAnswer) {
+          const uts = Number(lastMatch.dataset.ts);
+          const copy = addAgentFinal(finalText, null, {
+            ts: Number.isFinite(uts) ? uts + 1 : eventTsNum(msg),
+            gapFill: !!msg.gapFill,
+            ut: msg._ut,
+          });
+          if (copy) copy.dataset.utCopy = '1';
+          return;
+        }
+      }
+    }
     if (!entry || !entry.element || !entry.element.isConnected) {
       if (typeof finalText === 'string' && finalText) {
         addAgentFinal(finalText, streamId ? 'agent:' + streamId : null, {
@@ -1248,19 +1364,16 @@
       return;
     }
     // 同文流式重投影：回放/别通道已把该轮正文画上屏，这张流式卡是迟到副本。
-    // 流式路径不经 addAgentFinal 的同文去重，收尾时补查——只比最后一条 user
-    // 之下的 agent 泡（同轮判定），跨轮同文回复不受影响。
+    // 流式路径不经 addAgentFinal 的同文去重，收尾时补查——按卡片自身锚定的
+    // user 泡扫（不只末尾 user：锚在旧轮的卡收尾时最新轮已换）。
     if (entry.markdown && !replaying && !replayingInstant) {
-      const allMsgs = feed.children;
-      let lastUserIdx = -1;
-      for (let i = allMsgs.length - 1; i >= 0; i--) {
-        if (allMsgs[i].classList.contains('user')) { lastUserIdx = i; break; }
-      }
+      let anchorUser = entry.element;
+      while (anchorUser && !anchorUser.classList.contains('user')) anchorUser = anchorUser.previousElementSibling;
       let dup = false;
-      if (lastUserIdx >= 0) {
-        for (let i = lastUserIdx + 1; i < allMsgs.length; i++) {
-          const n = allMsgs[i];
+      if (anchorUser) {
+        for (let n = anchorUser.nextElementSibling; n && !n.classList.contains('user'); n = n.nextElementSibling) {
           if (n === entry.element) continue;
+          if (n.dataset && (n.dataset.utCopy || n.dataset.orphanPh)) continue;
           if (!n.classList.contains('agent') || n.classList.contains('typing-row')) continue;
           const b = n.querySelector('.body');
           if (b && b.dataset.raw === entry.markdown) { dup = true; break; }
@@ -1357,7 +1470,12 @@
           const node = allMsgs[i];
           if (!node.classList.contains('agent') || node.classList.contains('typing-row')) continue;
           const body = node.querySelector('.body');
-          if (body && body.dataset.raw === text) return null;
+          if (!body) continue;
+          if (body.dataset.raw === text) return null;
+          // CHUNK 流式卡收尾前不写 dataset.raw：取 streamingTurns 的 markdown 比
+          const sid = node.dataset && node.dataset.streamId;
+          const st = sid ? streamingTurns.get(sid) : null;
+          if (st && String(st.markdown || '').trim() === String(text).trim()) return null;
         }
       }
     }
@@ -2022,6 +2140,8 @@
             !!msg._ut && !!lastKey && userTextDedupeKey(String(msg._ut)) === lastKey;
           // d) 事件自带源 ts 早于最新用户泡的发送时刻 >2s → 旧轮经慢通道
           //    迟到的重投影：在途态（requestRunning）不影响判定。
+          //    例外：_ut 自证属于最新轮（同题重问时上游复用首轮响应，答案的
+          //    事件 ts 继承旧轮时刻）——按 _ut 归位而非按 ts 丢弃。
           const lastUserTs = users.length ? Number(users[users.length - 1].dataset.ts) : NaN;
           const evTs = eventTsNum(msg);
           // _ut 命中最新用户泡 = 当前轮真答：豁免 ts 判定——Copilot 源 ts 与客户端
@@ -2030,14 +2150,21 @@
             !utIsLatest &&
             Number.isFinite(evTs) && Number.isFinite(lastUserTs) && evTs < lastUserTs - 2000;
           let oldTurnReproj =
-            isStaleReplayEvent(evTs) || predatesLatestUser || (!requestRunning && !utIsLatest);
+            isStaleReplayEvent(evTs) || (predatesLatestUser && !utIsLatest) || (!requestRunning && !utIsLatest);
           if (!oldTurnReproj && msg._ut) {
             const utKey2 = userTextDedupeKey(String(msg._ut));
             for (let i = users.length - 1; i >= 0; i--) {
               if (users[i].dataset.textKey !== utKey2) continue;
               let sib = users[i].nextElementSibling;
               while (sib && !sib.classList.contains('user')) {
-                if (sib.classList.contains('agent')) { oldTurnReproj = true; break; }
+                // 只算真答案：thinking/孤儿占位等无正文块不算「该轮已答」
+                if (sib.classList.contains('agent') && !sib.dataset.orphanPh) {
+                  const sb = sib.querySelector('.body');
+                  if (sb && String(sb.dataset.raw || '').trim()) { oldTurnReproj = true; break; }
+                  const ssid = sib.dataset && sib.dataset.streamId;
+                  const sst = ssid ? streamingTurns.get(ssid) : null;
+                  if (sst && String(sst.markdown || '').trim()) { oldTurnReproj = true; break; }
+                }
                 sib = sib.nextElementSibling;
               }
               break;
