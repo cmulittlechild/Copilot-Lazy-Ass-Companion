@@ -1614,7 +1614,9 @@ class TranscriptWatcher {
         const keys = [];
         if (ctx?.rid)
             keys.push(`${b}::rid=${ctx.rid}`);
-        if (ctx?.requestIndex != null)
+        // 负数 idx = 未知下标（sessiondb 恒为 -1）：出的键跨轮共享，会把
+        // 「不同问题同答案」误杀（R15：M15B 撞 M15A 的 idx=-1 键被压）。
+        if (ctx?.requestIndex != null && ctx.requestIndex >= 0)
             keys.push(`${b}::idx=${ctx.requestIndex}`);
         if (ctx?.streamId)
             keys.push(`${b}::sid=${ctx.streamId}`);

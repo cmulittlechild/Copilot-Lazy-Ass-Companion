@@ -1586,7 +1586,10 @@ export class TranscriptWatcher {
     const b = sess + base;
     const keys: string[] = [];
     if (ctx?.rid) keys.push(`${b}::rid=${ctx.rid}`);
-    if (ctx?.requestIndex != null) keys.push(`${b}::idx=${ctx.requestIndex}`);
+    // 负数 idx = 未知下标（sessiondb 恒为 -1）：出的键跨轮共享，会把
+    // 「不同问题同答案」误杀（R15：M15B 撞 M15A 的 idx=-1 键被压）。
+    if (ctx?.requestIndex != null && ctx.requestIndex >= 0)
+      keys.push(`${b}::idx=${ctx.requestIndex}`);
     if (ctx?.streamId) keys.push(`${b}::sid=${ctx.streamId}`);
     // 用户文键：同一用户轮次的回复在 transcript 与 chatSessions 双通道下发时互斥，
     // 不同轮次得到同文字回复仍可各显一次（test_gapfill_pending F 段语义）。
