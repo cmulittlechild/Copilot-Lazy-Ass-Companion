@@ -3268,6 +3268,13 @@
         const item = document.createElement('button');
         item.type = 'button';
         item.className = 'session-item';
+        // 标记当前绑定会话——抽屉重开时用户需要一眼看到「我正连着哪个」。
+        if (s.file && currentSessionMeta.file &&
+            baseNameAny(s.file).replace(/\.jsonl$/i, '') ===
+            baseNameAny(currentSessionMeta.file).replace(/\.jsonl$/i, '')) {
+          item.classList.add('bound');
+          item.setAttribute('aria-current', 'true');
+        }
         // 优先显示标题（官方 customTitle / 首条消息截断），无标题才用 UUID
         const label = (s.title && String(s.title).trim()) || s.name || '(未命名)';
         const name = document.createElement('span');

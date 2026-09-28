@@ -976,6 +976,14 @@ body {
   background: var(--vscode-list-activeSelectionBackground);
   border-left-color: var(--vscode-focusBorder);
 }
+.session-item.bound {
+  background: var(--vscode-list-inactiveSelectionBackground, rgba(90, 140, 220, 0.14));
+  border-left-color: var(--vscode-focusBorder);
+}
+.session-item.bound .session-name::after {
+  content: " ·";
+  color: var(--vscode-focusBorder);
+}
 .session-name {
   font-size: 13px;
   font-weight: 600;
