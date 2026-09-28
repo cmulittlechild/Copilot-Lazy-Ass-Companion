@@ -379,6 +379,9 @@ class TranscriptWatcher {
         this.updatePollInterval();
         // 周期 rescan：新会话文件出现时切换（双源：transcripts + chatSessions）
         this.rescanTimer = setInterval(() => this.scanNewestBoth(), RESCAN_MS);
+        // sessiondb 全局轮询独立启动：不依赖任何 transcript 绑定——切到无
+        // transcript 的会话（或切换竞态中）快通道也必须在线，否则整轮静默丢答。
+        this.ensureSessionDbPoll();
     }
     dispose() {
         this.disposed = true;
@@ -517,19 +520,17 @@ class TranscriptWatcher {
         this.lastMtimeMs = st?.mtimeMs ?? 0;
         // 会话基名 + chatSessions 兜底源联动
         this.boundSessionBase = path.basename(file);
-        // session-store.db：换会话时重置 turns 游标到当前末尾（只跟新增）
+        // session-store.db：turns 轮询是全局的（不按绑定 sid 过滤），这里只更新
+        // 「当前会话」归属（回放兜底 sessionDbRecentTurns 的默认 sid）+ 补种在途
+        // 悬挂行。行 id 是全局游标：换会话不再重置水位/已投集合——否则绑定瞬间
+        // 已插入未完成的在途行被水位盖过，答案落库后永远不再投（切换竞态静默丢答）。
         const sid = this.boundSessionBase.replace(/\.jsonl$/, '');
         if (this.sessionDbSessionId !== sid) {
             this.sessionDbSessionId = sid;
-            this.sessionDbLastRow = this.querySessionDbMaxId();
             this.sessionDbPendingRows.clear();
-            this.sessionDbUserEmittedIds.clear();
+            this.seedPendingSessionDbRows();
         }
-        // sessiondb 轮询独立成表：原寄生于 fallbackTimer，chatSessions 文件缺位时
-        // unbindFallback 清掉定时器 → sessiondb 通道整轮静默（R16 观测）。
-        if (!this.sessionDbTimer && this.opts.sessionStoreDb) {
-            this.sessionDbTimer = setInterval(() => this.pollSessionStoreDb(), this.fallbackPollMs);
-        }
+        this.ensureSessionDbPoll();
         if (this.opts.chatSessionsDir) {
             const csFile = path.join(this.opts.chatSessionsDir, this.boundSessionBase);
             if (fs.existsSync(csFile)) {
@@ -932,6 +933,7 @@ class TranscriptWatcher {
     // ---- session-store.db 快速兜底（Copilot 新版：turns 行响应完成即落库）----
     sessionDbSessionId;
     sessionDbLastRow = 0;
+    sessionDbWatermarked = false;
     /** 独立轮询表：不再寄生于 fallbackTimer（chatSessions 缺位会被解绑连带清掉） */
     sessionDbTimer;
     /** 当前正在分发的 transcript 行的事件 ts(ms)：emit() 给未带 timestamp 的事件
@@ -963,18 +965,13 @@ class TranscriptWatcher {
             return null;
         }
     }
-    /** 当前绑定会话在 turns 表里的最大行号（换会话时调用；失败视为 0 从头跟） */
-    querySessionDbMaxId() {
-        const sid = this.sessionDbSessionId;
-        if (!sid)
-            return 0;
+    /** turns 表全局最大行号（首启水位；失败视为 0 从头跟） */
+    querySessionDbGlobalMaxId() {
         const db = this.openSessionDb();
         if (!db)
             return 0;
         try {
-            const row = db
-                .prepare('SELECT MAX(id) AS m FROM turns WHERE session_id = ?')
-                .get(sid);
+            const row = db.prepare('SELECT MAX(id) AS m FROM turns').get();
             return row?.m ?? 0;
         }
         catch {
@@ -984,10 +981,91 @@ class TranscriptWatcher {
             db.close();
         }
     }
+    /** sessiondb 全局轮询启动 + 一次性水位播种（只跟新增行） */
+    ensureSessionDbPoll() {
+        if (!this.opts.sessionStoreDb || this.disposed)
+            return;
+        if (!this.sessionDbWatermarked) {
+            this.sessionDbLastRow = this.querySessionDbGlobalMaxId();
+            this.sessionDbWatermarked = true;
+            this.seedPendingSessionDbRows();
+        }
+        if (!this.sessionDbTimer) {
+            this.sessionDbTimer = setInterval(() => this.pollSessionStoreDb(), this.fallbackPollMs);
+        }
+    }
+    /**
+     * 把「已插入但 assistant_response 仍为空」的近期 turns 行补进悬挂重查：
+     * 轮询靠 `id > 水位` 抓新行，而在水位播种/换会话之前就已存在的在途行
+     * 永远够不到水位 → 答案落库无人察觉 = 静默丢答（R18 BUG-1 根因之一）。
+     */
+    seedPendingSessionDbRows() {
+        if (!this.opts.sessionStoreDb || this.disposed)
+            return;
+        const db = this.openSessionDb();
+        if (!db)
+            return;
+        try {
+            const rows = db
+                .prepare("SELECT id, timestamp FROM turns WHERE assistant_response IS NULL OR TRIM(assistant_response) = '' ORDER BY id DESC LIMIT 64")
+                .all();
+            const now = Date.now();
+            for (const r of rows) {
+                if (typeof r.id !== 'number')
+                    continue;
+                if (this.sessionDbEmittedIds.has(r.id))
+                    continue;
+                const ts = Date.parse(String(r.timestamp || '')) || 0;
+                // 只跟近期在途行：陈旧的空答案行是停止/失败轮的死行，不补种
+                if (!ts || now - ts > 10 * 60_000)
+                    continue;
+                this.sessionDbPendingRows.set(r.id, now);
+            }
+        }
+        catch {
+            /* 库被锁/结构变化：下轮再试 */
+        }
+        finally {
+            db.close();
+        }
+    }
+    /** 无 transcript 可绑定时，让 sessiondb 归属/兜底仍跟随所选会话。 */
+    noteSession(sessionBase) {
+        const sid = String(sessionBase || '').replace(/\.jsonl$/i, '');
+        if (!sid)
+            return;
+        if (this.sessionDbSessionId !== sid) {
+            this.sessionDbSessionId = sid;
+            this.sessionDbPendingRows.clear();
+            this.seedPendingSessionDbRows();
+        }
+        this.ensureSessionDbPoll();
+    }
+    /** 当前双源目录里最新的会话文件路径（跟随压制重放前的有效性校验用）。 */
+    newestSessionFile() {
+        const t = this.newestInDir(this.opts.dir);
+        const cs = this.opts.chatSessionsDir ? this.newestInDir(this.opts.chatSessionsDir) : undefined;
+        let name;
+        let m = -1;
+        if (t && t.mtimeMs > m) {
+            m = t.mtimeMs;
+            name = t.name;
+        }
+        if (cs && cs.mtimeMs > m) {
+            m = cs.mtimeMs;
+            name = cs.name;
+        }
+        if (!name)
+            return undefined;
+        const tf = path.join(this.opts.dir, name);
+        if (fs.existsSync(tf))
+            return tf;
+        const cp = this.opts.chatSessionsDir ? path.join(this.opts.chatSessionsDir, name) : undefined;
+        return cp && fs.existsSync(cp) ? cp : undefined;
+    }
     /** 轮询 turns 新行：响应完成即落库 → 立即 emit AGENT_MESSAGE（ut 键去重 chatSessions 迟到的重复投影） */
     pollSessionStoreDb() {
-        const sid = this.sessionDbSessionId;
-        if (!this.opts.sessionStoreDb || !sid || this.disposed)
+        if (!this.opts.sessionStoreDb || this.disposed)
             return;
         // 目录在激活时可能尚未创建（db 由 Copilot 登录/首会话后才出现）：
         // bindSessionDbWatcher 对缺目录早退且绑定期仅一次 → 这里每次轮询重试挂 watch。
@@ -998,9 +1076,12 @@ class TranscriptWatcher {
         if (!db)
             return;
         try {
+            // 全局轮询（不按 session_id 过滤）：绑定/切换竞态中归属会话可能反复易主，
+            // 按 sid 过滤会把真实会话的新行整段漏掉（R18 BUG-1：切会话后首发零直播帧）。
+            // 事件打 _sess=行.session_id，客户端按展示会话过滤，别会话轮次不误显。
             rows = db
-                .prepare('SELECT id, user_message, assistant_response, timestamp FROM turns WHERE session_id = ? AND id > ? ORDER BY id')
-                .all(sid, this.sessionDbLastRow);
+                .prepare('SELECT id, session_id, user_message, assistant_response, timestamp FROM turns WHERE id > ? ORDER BY id')
+                .all(this.sessionDbLastRow);
             // 悬挂行重查：turns 行可能先只写 user_message（插入）稍后 UPDATE 补
             // assistant_response —— `id >` 游标已越过它，不显示重查这行，
             // 在 transcript/chatSessions 两通道都滞后的场景（Windows 慢盘实测）
@@ -1017,8 +1098,8 @@ class TranscriptWatcher {
                 if (ids.length) {
                     const ph = ids.map(() => '?').join(',');
                     const again = db
-                        .prepare(`SELECT id, user_message, assistant_response, timestamp FROM turns WHERE session_id = ? AND id IN (${ph})`)
-                        .all(sid, ...ids);
+                        .prepare(`SELECT id, session_id, user_message, assistant_response, timestamp FROM turns WHERE id IN (${ph})`)
+                        .all(...ids);
                     if (Array.isArray(again) && again.length)
                         rows.push(...again);
                 }
@@ -1052,7 +1133,12 @@ class TranscriptWatcher {
                     this.userTsByUt.set(utT, rowTs);
                     this.activeUserText = utT;
                 }
-                this.emit({ type: 'USER_MESSAGE', text: uText, timestamp: rowTs });
+                this.emit({
+                    type: 'USER_MESSAGE',
+                    text: uText,
+                    timestamp: rowTs,
+                    _sess: String(r.session_id || ''),
+                });
             }
             const text = String(r.assistant_response || '').trim();
             if (!text) {
@@ -1070,10 +1156,11 @@ class TranscriptWatcher {
                 {
                     type: 'AGENT_MESSAGE',
                     text,
-                    streamId: `sessiondb/${sid}/${r.id}`,
+                    streamId: `sessiondb/${r.session_id}/${r.id}`,
                     requestIndex: -1,
                     timestamp: rowTs,
                     _ut: r.user_message || undefined,
+                    _sess: String(r.session_id || ''),
                 },
             ]);
             // turns 行落库=该轮已完成：补一个 DONE 收尾，否则 typing/••• 占位要等到
@@ -1084,6 +1171,7 @@ class TranscriptWatcher {
                 requestIndex: -1,
                 timestamp: rowTs,
                 _ut: r.user_message || undefined,
+                _sess: String(r.session_id || ''),
             });
         }
     }

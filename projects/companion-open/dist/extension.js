@@ -182,6 +182,9 @@ function rebindTranscriptForSession(file) {
         }
         transcriptActive = false;
         qrPanel.addLog(`会话 ${base} 无 transcripts（${rec?.qualifiedName ?? "未知工作区"}）→ 降级 chatSessions 源`);
+        // 无 transcript 也要让 sessiondb 快通道跟上所选会话：轮询本身是全局的，
+        // 但归属 sid/悬挂行补种需要同步，否则该会话的在途轮直播整段静默。
+        transcriptWatcher?.noteSession(base);
     }
     catch {
         /* transcript rebind best-effort */
@@ -473,7 +476,10 @@ async function activate(context) {
                     if (ok && file) {
                         lastExplicitSelect = { file, until: Date.now() + EXPLICIT_SELECT_GUARD_MS };
                         pendingFollowFile = undefined;
-                        boundSessionActivityAt = 0;
+                        // 点选本身即算绑定会话活跃：inject 驱动桌面切换要 ~20-24s，期间
+                        // 目标会话还无写盘事件，boundSessionActivityAt=0 会让 boundHot 恒假
+                        // → 守卫窗外一条迟到的旧会话跟随就把手机拽回（R18 拉锯×3 根因）。
+                        boundSessionActivityAt = Date.now();
                         boundViaExplicitSelect = true;
                     }
                     // 记录选中会话：后续 PHONE_MESSAGE 注入必须先切到该会话，
@@ -852,8 +858,20 @@ async function activate(context) {
                                         qrPanel.addLog(`SESSION_FOLLOW 续压: 所选会话近期有活动`);
                                         return;
                                     }
-                                    qrPanel.addLog(`SESSION_FOLLOW 补发: 窗口结束重放被压制的跟随`);
-                                    handleTranscriptWatcherEvent(p);
+                                    // 重放前校验目标仍是双源最新：被压制的跟随描述的是发出时刻的
+                                    // 「桌面活跃会话」，窗口结束时桌面可能已搬到别处（含 inject 完成
+                                    // 切到所选会话）——过时跟随直接丢，否则手机会被拽去死会话（R18）。
+                                    const pTarget = String(p.csFile || p.file || "");
+                                    const stillNewest = transcriptWatcher?.newestSessionFile?.();
+                                    if (pTarget &&
+                                        stillNewest &&
+                                        !(0, pathutil_1.samePath)(pTarget, stillNewest)) {
+                                        qrPanel.addLog(`SESSION_FOLLOW 丢弃: 目标已非最新 ${path.basename(pTarget)}`);
+                                    }
+                                    else {
+                                        qrPanel.addLog(`SESSION_FOLLOW 补发: 窗口结束重放被压制的跟随`);
+                                        handleTranscriptWatcherEvent(p);
+                                    }
                                 }, wait);
                             }
                             return;

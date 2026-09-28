@@ -142,3 +142,13 @@ PWA ↔ VS Code bridge。仓库 `~/repos/sidecar_remote/projects/companion-open`
 - **两枚修复都在服务端**（transcriptWatcher.ts pendingGap/asked-unanswered 豁免 + jsonl.ts inlineReference→`文件名`）——**必须 Reload Window**，仅硬刷 PWA 不够（app.js 本轮 hash 未变 691f9714）。
 - **丢答恢复的 wire 签名**：sessiondb END len=0 后 ~40-50s 出现 `AGENT_STREAM_SET`（id=requests/N/response#text#0）= 重投影通道投递正文（走 SET 而非 AGENT_MESSAGE）——判修好的标志就是 SET 到、文本含 `文件名`，而不是"什么也不来"。
 - sessiondb END len=0 本身仍在（快通道竞态没根治），差别只在后续重投影是否补投——复验时别把 len=0 单独当失败证据，要看整轮是否有 SET/AGENT_MESSAGE 收尾。
+
+## R18 取证心得补充（马拉松复跑，installed dist==repo dist@6f0a194）
+- **连接回放是单播**：monitor 只见 select/follow 触发的广播回放；PWA 硬刷后的 feed 重建来自单播回放（wire 不可见）——判"冷连回放有没有发"别盯 monitor，开一次性探针 client（PHONE_CONNECT→PHONE_SESSION_SELECT→dump e.messages）自测，回放数+内容一把梭。
+- **monitor 打点对齐**：`echo "#### <tag> $(date +%T)" >> ~/mon_m18.log` 在 tee 同一文件里写发送时刻，wire 行自带墙钟，事后逐轮算延迟零误差。
+- **会话行↔文件映射**：drawer 不显示 file id，用探针 `PHONE_SESSION_LIST` 拉 file/title/requestCount/mtime 对照后再点行，别凭标题猜。
+- **点选→桌面切换延迟 ~20-24s**（soft-unverified inject 路径）：点选后 ~20-23s 会冒**反向 SESSION_FOLLOW**（watcher 抓到切换前 newest=桌面旧会话）把 feed 拽走——正好是 EXPLICIT_SELECT_GUARD_MS=20s 窗沿外。判「切会话中发送」归属看三点：wire 上 SESSION_SELECTED+REPLAY 对 = follow 签名（select 只广播 REPLAY）；sessiondb turns 行 session_id 是落盘归属铁证；jsonl grep 防漏。
+- **静默丢答新场景**：切会话竞态里在途轮的 live 帧可整段缺席（无 AGENT_MESSAGE/STREAM/DONE/sessiondb 行），答案只经下一次回放的 db 回填到达——对照 sessiondb timestamp（答案生成时刻）与 wire（零帧）可实锤「生成但没广播」。
+- **VS Code 1.139 Chat "Sessions" 视图**：行点击/悬停图标/"Open as Editor"都不保证真的切换活动会话（实测零 SESSION_FOLLOW）；可靠触发桌面会话变更=在桌面 composer 真发一条消息（新会话落盘即 newest→跟随）。桌面发送前把文字打在 PWA 输入框里，跟随落地后可直接 Enter 复用。
+- **sessiondb 行即铁证**：`turns` 表 (session_id,turn_index,user_message,assistant_response,timestamp) 三列对账——归属、答案、生成时刻一次看清；`id=sessiondb/<file>/<row>` 的 STREAM_END 行还给出 db 行号。
+- 桌面"Update"徽标 staged 时勿 Reload/Update VS Code（桥会死）；本次全程无碍。
