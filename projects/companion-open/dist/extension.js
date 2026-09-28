@@ -547,7 +547,10 @@ async function activate(context) {
                                 type: "SYSTEM_MESSAGE",
                                 text: `已切换到会话: ${path.basename(file)}`,
                             },
-                        ], file, selTitle);
+                        ], file, selTitle, 
+                        // 用户显式点选：客户端已清空 feed，回放必须送达——跳过
+                        // replaySession 的 5s 同文件节流（连点切回同会话不得吞掉回放）。
+                        true);
                     }
                     break;
                 }

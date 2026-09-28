@@ -724,6 +724,10 @@ class SessionWatcher {
                                         text,
                                         requestId: rid,
                                         foreign: true,
+                                        // 上行请求的真实时刻必须下发：无 ts 的用户泡到客户端只能
+                                        // appendChild 贴底——迟到投影会错序挂到更新的轮次后面
+                                        // （实测 e8 用户泡排到后发的 e9 之后）。
+                                        timestamp: rts,
                                         // 来源会话标 _sess：否则 PWA 跨会话过滤不认它，外会话泡会漏进当前 feed
                                         _sess: f.replace(/\.jsonl$/i, ''),
                                     });

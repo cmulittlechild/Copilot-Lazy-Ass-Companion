@@ -671,13 +671,15 @@ class BridgeServer {
      * 推 HISTORY_REPLAY（PWA 端清空 feed 并重放）；后续新事件继续累积。
      * 也重置 activeStream/offlineQueue，避免跨会话串流。
      */
-    replaySession(messages, file, title) {
+    replaySession(messages, file, title, force = false) {
         // 重放风暴闸：同一文件 5s 内的重复 replaySession 只放行首发
         // （R90：watchers 多路触发 0.2s 内连续 5 次全量回放）。
+        // force：用户显式点选会话必须放行——节流只防 watcher 风暴，不能吞掉
+        // 用户点选（客户端已清空 feed，回放被吞则停在空 feed）。
         if (file) {
             const now = Date.now();
             const last = this.lastReplayAt.get(file) ?? 0;
-            if (now - last < 5_000)
+            if (!force && now - last < 5_000)
                 return;
             this.lastReplayAt.set(file, now);
             if (this.lastReplayAt.size > 64)
