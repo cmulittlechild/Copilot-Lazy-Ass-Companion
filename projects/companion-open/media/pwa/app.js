@@ -237,6 +237,21 @@
   const OUTBOUND_QUEUE_TTL_MS = 90000;
   /** 请求进行中用户再次输入的消息队列：排队而非停轮（发送键=有文本就排队，空文本才停止） */
   const pendingSendQueue = [];
+  /** 排队消息持久化：页面刷新会把内存里的 pendingSendQueue 连同泡一起蒸发，
+      回放后用 sessionStorage 副本把文本回填输入框（与切会话回填同语义，不自动重发）。 */
+  const QUEUED_SENDS_KEY = 'sidecar.queuedSends';
+  function persistQueuedSends() {
+    try {
+      const arr = [];
+      for (const q of pendingSendQueue) {
+        if (q && typeof q.text === 'string' && q.text.trim()) {
+          arr.push({ text: q.text, at: q.at || Date.now(), sess: q.sess || currentSessionMeta.file || '' });
+        }
+      }
+      if (arr.length) sessionStorage.setItem(QUEUED_SENDS_KEY, JSON.stringify(arr.slice(0, 8)));
+      else sessionStorage.removeItem(QUEUED_SENDS_KEY);
+    } catch (_) {}
+  }
   /** 「已排队」提示元素：出队发走后移除，不再残留（R59 P3）。 */
   let queuedHintEl = null;
   /** 硬释放看门狗：DONE 触发的宽限释放链会被 setRequestRunning(true) 取消
@@ -2659,6 +2674,7 @@
               if (qi && qi.text) lastText = qi.text;
             }
             pendingSendQueue.length = 0;
+            persistQueuedSends();
             if (lastText && !(input.value || '').trim()) input.value = lastText;
             addSys('已切换会话，排队消息已回填输入框');
             if (queuedHintEl) { queuedHintEl.remove(); queuedHintEl = null; }
@@ -2814,6 +2830,45 @@
               if (!(input.value || '').trim()) { input.value = e.text; sendVerifyRestoredText = e.text; }
               sendVerifyMissedAt = Date.now();
               addSys('发送可能未送达（连接中断），文本已回填，请重新发送');
+            }
+            // 排队消息在刷新时随内存蒸发：从持久化副本恢复——入队后更新的
+            // 回放 USER 说明刷新瞬间已出队送达（销账）；否则把最近一条回填
+            // 输入框（不自动重发）。按 ts 判送达：同文重问时老 USER 不算数。
+            const rawQ = sessionStorage.getItem(QUEUED_SENDS_KEY);
+            if (rawQ) {
+              const arrQ = JSON.parse(rawQ);
+              if (Array.isArray(arrQ) && arrQ.length) {
+                const replayedUserTs = new Map();
+                for (const m of list) {
+                  if (m && m.type === 'USER_MESSAGE' && typeof m.text === 'string') {
+                    const k = userTextDedupeKey(m.text);
+                    const t = eventTsNum(m);
+                    replayedUserTs.set(k, Math.max(replayedUserTs.get(k) || 0, Number.isFinite(t) ? t : 0));
+                  }
+                }
+                const nowQ = Date.now();
+                const keepQ = [];
+                for (const q of arrQ) {
+                  if (!q || typeof q.text !== 'string' || !q.text.trim()) continue;
+                  if (nowQ - (q.at || 0) > 5 * 60 * 1000) continue;
+                  const qBase = baseNameAny(q.sess || '').replace(/\.jsonl$/i, '');
+                  if (boundBaseR && qBase && qBase !== boundBaseR) continue;
+                  const rt = replayedUserTs.get(userTextDedupeKey(q.text)) || 0;
+                  if (rt && rt >= (q.at || 0) - 15000) continue;
+                  keepQ.push(q);
+                }
+                if (keepQ.length) {
+                  if (!(input.value || '').trim()) {
+                    const lastQ = keepQ[keepQ.length - 1];
+                    input.value = lastQ.text;
+                    sendVerifyRestoredText = lastQ.text;
+                    addSys('排队消息因页面刷新中断，文本已回填，请重新发送');
+                  }
+                  sessionStorage.setItem(QUEUED_SENDS_KEY, JSON.stringify(keepQ));
+                } else {
+                  sessionStorage.removeItem(QUEUED_SENDS_KEY);
+                }
+              }
             }
           } catch (_) {}
           jumpFeedToBottom();
@@ -3718,7 +3773,8 @@
         const qKey = `user:queued:${Date.now()}:${userTextDedupeKey(queuedText)}`;
         const qEl = addUser(queuedText, qKey, { force: true, ts: Date.now() });
         if (qEl) qEl.classList.add('queued');
-        pendingSendQueue.push({ text: queuedText, mode: modeEl.value || 'agent', el: qEl, key: qKey });
+        pendingSendQueue.push({ text: queuedText, mode: modeEl.value || 'agent', el: qEl, key: qKey, at: Date.now(), sess: currentSessionMeta.file || '' });
+        persistQueuedSends();
         input.value = '';
         input.style.height = 'auto';
         queuedHintEl = addSys('已排队：当前回复结束后自动发送');
@@ -3762,6 +3818,7 @@
     const now = Date.now();
     if (sentAwaitingReply.some((e) => now - (e.at || 0) < AWAIT_REPLY_FLUSH_BLOCK_MS)) return;
     const n = pendingSendQueue.shift();
+    persistQueuedSends();
     if (n) {
       if (n.el && n.el.isConnected) {
         // 复用入队时已渲的泡：去掉排队态，别再画第二个
