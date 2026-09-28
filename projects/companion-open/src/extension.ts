@@ -60,6 +60,11 @@ let performSessionFollow: (csFile: string, base: string) => void = () => {};
 let lastInjectedPhoneText = "";
 let lastInjectedUserSeen = true;
 let deferredPhoneStop: { text: string; at: number } | undefined;
+/** 落盘核验的「活着」旁证：带 _ut 的事件按用户文本记时；任意 AGENT/TOOL/
+ *  THINKING 事件记全局时刻——请求行要轮次完成才写盘（长作文轮全程缺席），
+ *  纯查文件会把在途轮误报成未落盘（s1 实测 +45s 误火）。 */
+const lastAgentUtAt = new Map<string, number>();
+let lastAnyAgentEventAt = 0;
 
 /**
  * 目标 transcript 尾部是否存在「message.text === sentText 且 request.timestamp >= sinceTs」
@@ -463,7 +468,15 @@ export async function activate(context: vscode.ExtensionContext) {
               const sendAt = Date.now() - 15000; // 慢注入窗内的请求 ts 早于此刻一定算旧轮
               setTimeout(() => {
                 try {
-                  if (!transcriptHasRequestSince(targetFile, sentTextNow, sendAt)) {
+                  // 三重门：请求行缺席 AND 该文本无任何 _ut 活动 AND 全局无 agent
+                  // 活动——后两者覆盖「行只在轮末写盘」的在途轮（长答全程行缺席）。
+                  const utSeen = (lastAgentUtAt.get(sentTextNow) || 0) >= sendAt;
+                  const anyAgent = lastAnyAgentEventAt >= sendAt;
+                  if (
+                    !utSeen &&
+                    !anyAgent &&
+                    !transcriptHasRequestSince(targetFile, sentTextNow, sendAt)
+                  ) {
                     qrPanel?.addLog(`inject not persisted: ${sentTextNow.slice(0, 60)}`);
                     bridge?.broadcast({
                       type: "SYSTEM_MESSAGE",
@@ -948,6 +961,14 @@ export async function activate(context: vscode.ExtensionContext) {
         // 返回 sendToPhone 的投递结果：false = 事件在桥端被丢（回声/去重/仲裁），
         // watcher 据此不记「已投」——否则后续通道的同答案会被误判重投影而净丢。
         onEvent: function handleTranscriptWatcherEvent(ev) {
+          // 落盘核验旁证打点（见 lastAgentUtAt 注释）
+          if (/^(AGENT|TOOL|THINKING)/.test(String(ev.type || ""))) {
+            lastAnyAgentEventAt = Date.now();
+          }
+          {
+            const evUt = typeof (ev as any)._ut === "string" ? String((ev as any)._ut).trim() : "";
+            if (evUt) lastAgentUtAt.set(evUt, Date.now());
+          }
           if (ev.type === "USER_MESSAGE" && typeof (ev as any).text === "string") {
             // 各会话用户活动打点（sessiondb 全局轮询的别会话 USER 也带 _sess）：
             // 跨向跟随裁决「用户在桌面是否真去了那会话」的依据。
