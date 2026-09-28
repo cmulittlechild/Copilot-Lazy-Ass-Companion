@@ -518,6 +518,7 @@ export async function activate(context: vscode.ExtensionContext) {
                 },
               ],
               file,
+              selTitle,
             );
           }
           break;
@@ -758,6 +759,7 @@ export async function activate(context: vscode.ExtensionContext) {
             },
           ],
           csFile,
+          title,
         );
       };
       // 被跳过的空会话出现首个用户轮次后补跟随：两条事件通道任一到达内容事件即重评估。

@@ -1353,7 +1353,20 @@
       return;
     }
     if (typeof finalText === 'string' && finalText.length) {
-      entry.markdown = finalText;
+      // 变体重投影：sessiondb/db 通道会发同答案的 markdown 剥壳版
+      // （`file.js`→file.js、**粗体**→粗体），直接覆盖会丢格式。
+      // 归一化（剥 markdown/空白）相同 = 同一份答案，保留更长的原始版。
+      const existing = String(entry.markdown || '');
+      if (existing && existing !== finalText) {
+        const norm = (s) => String(s).replace(/[\s`*_~#>\-]+/g, '');
+        if (norm(existing) === norm(finalText)) {
+          if (finalText.length > existing.length) entry.markdown = finalText;
+        } else {
+          entry.markdown = finalText;
+        }
+      } else if (!existing) {
+        entry.markdown = finalText;
+      }
     }
     // 空壳回合（只有 Copilot 头 + •••，无正文/无 thinking/status）：直接移除，避免多枚空 Copilot 标
     const hasBody = !!(entry.markdown && String(entry.markdown).trim());
@@ -2008,15 +2021,28 @@
         break;
       }
       case 'USER_MESSAGE': {
-        // 发送核验：自己的消息被服务器回声了 = 真送达，撤銷核验计时
-        if (pendingSendCheck && userTextDedupeKey(msg.text || '') === pendingSendCheck.textKey) {
+        // 发送核验：自己的消息被服务器回声了 = 真送达，撤銷核验计时。
+        // 但回声须来自当前绑定会话——绑定/桌面活跃分叉时（P2），别会话里同文
+        // 的迟到的 USER 回声会误清核验，把一次真吞包伪装成已送达。
+        const echoSessOk = (() => {
+          if (!msg._sess) return true;
+          const bound = baseNameAny(currentSessionMeta.file || '').replace(/\.jsonl$/i, '');
+          const mBase = baseNameAny(msg._sess).replace(/\.jsonl$/i, '');
+          return !bound || !mBase || bound === mBase;
+        })();
+        if (
+          pendingSendCheck &&
+          echoSessOk &&
+          userTextDedupeKey(msg.text || '') === pendingSendCheck.textKey
+        ) {
           clearTimeout(pendingSendCheck.timer);
           pendingSendCheck = null;
         }
         // 收到 USER 回声 = 送达确认：若与持久化的待发文本同文，清掉防误回填
+        // （同样须当前会话回声——别会话的同文回声不得清）
         try {
           const raw = sessionStorage.getItem(PENDING_SEND_KEY);
-          if (raw) {
+          if (raw && echoSessOk) {
             const p = JSON.parse(raw);
             if (p && userTextDedupeKey(msg.text || '') === userTextDedupeKey(p.text || '')) {
               sessionStorage.removeItem(PENDING_SEND_KEY);
@@ -2544,8 +2570,18 @@
         // 回放携带 file 时同步会话元数据（滚动记忆 / 后续 PHONE_MESSAGE.file）
         if (typeof msg.file === 'string' && msg.file) {
           try {
-            // 已有标题（SESSION_SELECTED.title）优先——文件名回退会盖掉真实会话名
-            setSessionTitle(currentSessionMeta.title || titleFromSessionFile(msg.file), msg.file);
+            // 标题权威序：回放自带的 msg.title > 本地缓存/列表 titleFromSessionFile。
+            // 旧逻辑把 currentSessionMeta.title（可能还是上个会话的名字）放在最前，
+            // 切回一个会话后标题滞留在上一会话名。
+            // 同一文件的 meta 可信（重连回放同会话）；文件不同说明 meta
+            // 还是旧会话的——它的 title 不得作回退，否则切回后标题滞留。
+            const sameMeta =
+              baseNameAny(currentSessionMeta.file || '') === baseNameAny(msg.file);
+            const t =
+              (typeof msg.title === 'string' && msg.title.trim() && msg.title) ||
+              (sameMeta ? currentSessionMeta.title : '') ||
+              titleFromSessionFile(msg.file);
+            setSessionTitle(t, msg.file);
           } catch (_) {}
         }
         try {
@@ -3831,6 +3867,18 @@
     ) {
       setStatus(false, '连接超时，重连中…');
       forceReconnect();
+      return;
+    }
+    // 排空兜底：消息曾落进 outboundQueue（发送瞬间 socket 半死/未 OPEN），
+    // 之后 socket 恢复但没走 onopen 的 flush 路径时，队列会无声滞留——
+    // 消息不丢全靠重连。这里在连接健康时主动冲掉（TTL 过期判由 flush 内部做）。
+    if (
+      !intentionalClose &&
+      ws &&
+      ws.readyState === WebSocket.OPEN &&
+      outboundQueue.length
+    ) {
+      flushOutboundQueue();
     }
   }, 10000);
 

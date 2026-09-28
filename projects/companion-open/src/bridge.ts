@@ -648,7 +648,7 @@ export class BridgeServer {
    * 推 HISTORY_REPLAY（PWA 端清空 feed 并重放）；后续新事件继续累积。
    * 也重置 activeStream/offlineQueue，避免跨会话串流。
    */
-  replaySession(messages: any[], file?: string) {
+  replaySession(messages: any[], file?: string, title?: string) {
     // 重放风暴闸：同一文件 5s 内的重复 replaySession 只放行首发
     // （R90：watchers 多路触发 0.2s 内连续 5 次全量回放）。
     if (file) {
@@ -707,6 +707,9 @@ export class BridgeServer {
       type: 'HISTORY_REPLAY',
       messages: this.history,
       file: file || undefined,
+      // 标题随回放走：PWA 侧 currentSessionMeta 可能还停在旧会话上，
+      // 没有权威的 msg.title 时它会拿旧会话名做回退 → 切回后标题滞留。
+      title: title || undefined,
       timestamp: Date.now(),
     });
   }
