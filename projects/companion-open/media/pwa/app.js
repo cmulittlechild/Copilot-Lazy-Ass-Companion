@@ -2944,7 +2944,11 @@
               if (!boundBaseR || eBase !== boundBaseR) continue;
               // 上行落盘有 ~1-2s 延迟：发送太新的条目跳过，回放可能先于落盘
               if (Date.now() - (e.at || 0) < 3000) continue;
-              if (lastReplayAgentAt && lastReplayAgentAt >= (e.at || 0)) continue;
+              // 在途证据须「新」：真在途轮持续产帧，lastReplayAgentAt 必然距今很近；
+              // 进程在生成途中被杀的轮，其 agent 证据全部停在过去——陈旧证据不当
+              // 在途判据，否则死轮泡永远干等不报未送达（实测 br1 在途被杀静默悬挂）。
+              if (lastReplayAgentAt && lastReplayAgentAt >= (e.at || 0) &&
+                  Date.now() - lastReplayAgentAt < 90000) continue;
               if (!(lastReplayUserTs && lastReplayUserTs >= (e.at || 0)) &&
                   Date.now() - (e.at || 0) < 45000) continue;
               if (replayedUserKeys.has(userTextDedupeKey(e.text))) continue;
