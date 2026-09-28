@@ -1826,9 +1826,10 @@
   function repaintAwaitingUserBubbles() {
     const boundBase = baseNameAny(currentSessionMeta.file).replace(/\.jsonl$/i, '');
     for (const m of sentAwaitingReply) {
-      // 只补画当前会话的条目：sess 属别会话的不该出现在本 feed（防串泡）
+      // 只补画当前会话的条目：sess 属别会话或 sess 缺失（发送时绑定未定）
+      // 的不该出现在本 feed——缺失也拦，否则在途切会话时残泡复活（R94）。
       const mBase = baseNameAny(m.sess || '').replace(/\.jsonl$/i, '');
-      if (boundBase && mBase && mBase !== boundBase) continue;
+      if (!boundBase || mBase !== boundBase) continue;
       let found = false;
       const nodes = feed.querySelectorAll('.msg.user');
       for (let i = nodes.length - 1; i >= 0; i--) {
@@ -2023,7 +2024,10 @@
           //    迟到的重投影：在途态（requestRunning）不影响判定。
           const lastUserTs = users.length ? Number(users[users.length - 1].dataset.ts) : NaN;
           const evTs = eventTsNum(msg);
+          // _ut 命中最新用户泡 = 当前轮真答：豁免 ts 判定——Copilot 源 ts 与客户端
+          // 泡 ts 不同时钟，真答可能携带早于泡的 request-start ts（R94 误杀）。
           const predatesLatestUser =
+            !utIsLatest &&
             Number.isFinite(evTs) && Number.isFinite(lastUserTs) && evTs < lastUserTs - 2000;
           let oldTurnReproj =
             isStaleReplayEvent(evTs) || predatesLatestUser || (!requestRunning && !utIsLatest);
