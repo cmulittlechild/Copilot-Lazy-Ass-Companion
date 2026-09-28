@@ -2177,7 +2177,10 @@
         const key = msg.requestId
           ? `user:${msg.requestId}`
           : userTextDedupeKey(msg.text || '');
-        addUser(msg.text || '', key, { ts: msg.timestamp });
+        // ts 取 eventTsNum：无 requestId 的回声（soft-unverified 注入路径）只带
+        // 事件级 ts 不带内层 timestamp——不兜底则泡无 dataset.ts，后续按时序插入
+        // 的元素会把无 ts 泡当「尾端」跳过、插到它前面 → 新轮排在在途轮之前。
+        addUser(msg.text || '', key, { ts: eventTsNum(msg) });
         // 回声只证明消息入列，不证明泡仍在 feed（clearFeed 随时可能抹掉）。
         // 待答清单刻意保留到答案落地（AGENT_MESSAGE._ut 匹配或真 DONE）才释放。
         break;
@@ -2372,7 +2375,7 @@
           completeAssistantTurn(msg.streamId, msg.text || '', msg);
         } else {
           addAgentFinal(msg.text || '', null, {
-            ts: msg.timestamp,
+            ts: eventTsNum(msg),
             gapFill: !!msg.gapFill,
             ut: msg._ut,
           });
