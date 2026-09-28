@@ -480,6 +480,11 @@
         requestDoneTimer = setTimeout(graceRelease, 1500);
         return;
       }
+      // rr 在此刻真实落锁 = 客户端已判定本论终结——残余 running 工具卡
+      // 一律收 done：END 的 !any 门跳过、DONE 全被 ack/stale 压制的轮
+      // （实测 Autopilot 工具轮）走到这里才释放，缺这步徽章要干等到
+      // transcript 尾帧 DONE 或下一轮顺带清扫（最差永久挂 running）。
+      markAllToolsDone();
       finishAllAssistantVisuals();
       requestRunning = false;
       paintSendButton();
