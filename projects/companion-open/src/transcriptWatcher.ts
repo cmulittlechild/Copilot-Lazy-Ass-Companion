@@ -212,6 +212,8 @@ export class TranscriptWatcher {
   private gapFilledRequestIds = new Set<string>();
   /** 已经从 transcript 得到完整助手回复的用户文，避免 chatSessions 再 gap */
   private completedGapUserTexts = new Set<string>();
+  /** 本问题开问时 ut 是否已在 completedGapUserTexts（同题重问基线）。 */
+  private utCompletedBeforeTurn = false;
   /**
    * 0.5.26：待补全的用户请求有序队列（FIFO）。
    * 确保多个 in-flight 请求按时间序确定性匹配，取代无序集合迭代。
@@ -403,6 +405,7 @@ export class TranscriptWatcher {
   addPendingPhoneUserText(text: string) {
     const ut = this.normUserText(text);
     if (!ut) return;
+    this.utCompletedBeforeTurn = this.completedGapUserTexts.has(ut);
     this.activeUserText = ut;
     this.pushPendingGap(ut, true);
     this.capCollections();
@@ -1959,7 +1962,11 @@ export class TranscriptWatcher {
     this.endActiveStream(); // 新用户输入：结束上一轮未结束的流
     this.clearTurnGapTimer();
     this.clearTurnHardTimer();
-    this.activeUserText = this.normUserText(content);
+    const newUt = this.normUserText(content);
+    // 快照「本问题开问前是否已答过」：同题重问时 completedGapUserTexts 仍有
+    // 旧答案——本轮的新答不能按「跨通道已答」丢弃；orphan 检查要用这个基线。
+    this.utCompletedBeforeTurn = !!newUt && this.completedGapUserTexts.has(newUt);
+    this.activeUserText = newUt;
     const messageId = asString(data.messageId);
     this.emit({
       type: 'USER_MESSAGE',
@@ -2063,7 +2070,20 @@ export class TranscriptWatcher {
           });
         }
       } else {
-        this.emitAssistantContent(content, messageId, tsMs);
+        // 本 turn 的待答在「开问后」才被其它通道（chatSessions gap-fill 等）
+        // 销账——turn 仍开着但答案已投，此后挂到本 turn 的首段 content 是
+        // 迟到的重投影/孤儿行（test_live_123_789：orphan-789 挂进 turn-123）。
+        // utCompletedBeforeTurn=true 说明这是同题重问：completed 是上一轮的
+        // 旧账，本轮新答照常放行。
+        const turnUt = this.normUserText(this.activeUserText);
+        const answeredElsewhere =
+          !this.turnEmittedVisibleAgent &&
+          !!turnUt &&
+          !this.utCompletedBeforeTurn &&
+          this.completedGapUserTexts.has(turnUt);
+        if (!answeredElsewhere) {
+          this.emitAssistantContent(content, messageId, tsMs);
+        }
       }
     }
 
@@ -2489,6 +2509,7 @@ export class TranscriptWatcher {
       this.gapFilledRequestIds.clear();
       this.pendingGapQueue = [];
       this.completedGapUserTexts.clear();
+      this.utCompletedBeforeTurn = false;
       this.activeUserText = '';
       this.fallbackRequestUserText.clear();
       this.fallbackRequestTs.clear();

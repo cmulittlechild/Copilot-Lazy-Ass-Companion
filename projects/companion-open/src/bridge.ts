@@ -207,6 +207,7 @@ export class BridgeServer {
   /** 统一事件裁决器：三源事件在此归一去重定序后再广播（跨通道重投、
       过期 DONE、注入回执 DONE 都在服务端判死，客户端不再各自猜）。 */
   private arbiter = new TurnArbiter();
+  private lastReplayAt = new Map<string, number>();
   /** 已投最终答案的指纹：(reqIndex|null)|sess|规范化文本 → 时间戳。
       同一答案可能经 sessiondb 整句 + 流路径收尾各投一遍（相距 ~1s），
       第二个按同轮同文压制；requestIndex 不同（同题重问）不压。 */
@@ -648,6 +649,15 @@ export class BridgeServer {
    * 也重置 activeStream/offlineQueue，避免跨会话串流。
    */
   replaySession(messages: any[], file?: string) {
+    // 重放风暴闸：同一文件 5s 内的重复 replaySession 只放行首发
+    // （R90：watchers 多路触发 0.2s 内连续 5 次全量回放）。
+    if (file) {
+      const now = Date.now();
+      const last = this.lastReplayAt.get(file) ?? 0;
+      if (now - last < 5_000) return;
+      this.lastReplayAt.set(file, now);
+      if (this.lastReplayAt.size > 64) this.lastReplayAt.clear();
+    }
     this.history = [];
     this.offlineQueue = [];
     this.activeStreamId = null;

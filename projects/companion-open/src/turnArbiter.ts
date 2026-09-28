@@ -54,6 +54,8 @@ export class TurnArbiter {
   private latestReqIdx = -1;
   private openTurns: TrackedTurn[] = [];
   private emitted = new Map<string, number>();
+  /** 同文不同轮重投影识别：a3 指纹（sess|前缀80）→ 已投递的 _ut。*/
+  private emittedUt = new Map<string, string>();
   /** 已 END 的 streamId → 终结时刻。END 后迟到的 START/CHUNK 服务端丢弃——
       否则客户端流卡已收尾又追加一遍（R64 双渲）且迟到帧会重新置 rr、
       把队列挂到看门狗（~135s 悬挂）。位置型 sid（requests/N/…）每轮唯一，
@@ -67,6 +69,7 @@ export class TurnArbiter {
     this.latestReqIdx = -1;
     // 位置型 streamId（requests/N/…）每个会话文件从 0 重新计数——换会话必须清
     this.endedStreams.clear();
+    this.emittedUt.clear();
     if (sessBase) this.pruneEmitted(0);
   }
 
@@ -217,7 +220,24 @@ export class TurnArbiter {
       case "TOOL_CALL":
       case "AGENT_TOOL_CALL":
       case "AGENT_TOOL_RESULT":
-      case "TOOL_RESULT":
+      case "TOOL_RESULT": {
+        // 上一轮的迟滞重投：ts 早于最新 live USER 10s+ → 该事件属于旧轮，
+        // 丢弃（R90：上轮工具调 ~37s 后漏进下一轮窗口渲成杂散工具卡）。
+        const evTs = TurnArbiter.tsOf(ev);
+        if (
+          evTs != null &&
+          this.latestUserLiveTs > 0 &&
+          evTs < this.latestUserLiveTs - 10_000
+        ) {
+          return null;
+        }
+        const t = this.openTurnForEvent(sessBase, evTs);
+        if (t) {
+          t.sawStream = true;
+          if (!utKey) utKey = t.utKey;
+        }
+        break;
+      }
       case "AGENT_THINKING":
       case "THINKING_START":
       case "THINKING_END":
@@ -322,15 +342,30 @@ export class TurnArbiter {
           ? `a2|${sessBase}|${utKey}|${normText(ev.text).slice(0, 80)}`
           : null;
       const window = type === "AGENT_MESSAGE" ? CONTENT_DEDUPE_MS : TOOL_DEDUPE_MS;
+      // 再配一条「同文不同轮」指纹：旧轮答案经慢通道重投影时被盖上当轮的
+      // _ut（openTurnForEvent 的 ts 门挡不住无 ts 的件），ut 不同但文本同。
+      // 只在事件无法自证属于当前轮时启用（无 requestIndex 或下标落后）——
+      // 否则同题重问拿到的同文新答会被误杀。
+      const evReqIdx =
+        typeof ev.requestIndex === "number" ? ev.requestIndex : null;
+      const unproven = evReqIdx == null || evReqIdx < this.latestReqIdx;
+      const reprojKey =
+        type === "AGENT_MESSAGE" && utKey && unproven
+          ? `a3|${sessBase}|${normText(ev.text).slice(0, 80)}`
+          : null;
+      const reprojUt = reprojKey ? this.emittedUt.get(reprojKey) : undefined;
+      const reprojDup = reprojUt != null && reprojUt !== utKey;
       const isDup =
         (key && (this.emitted.get(key) ?? 0) && now - this.emitted.get(key)! <= window) ||
-        (altKey && (this.emitted.get(altKey) ?? 0) && now - this.emitted.get(altKey)! <= window);
+        (altKey && (this.emitted.get(altKey) ?? 0) && now - this.emitted.get(altKey)! <= window) ||
+        reprojDup;
       if (isDup) return null;
       // 只在「真的会广播」时记名：离线排队/被后续闸丢弃的首发不算已投递，
       // 否则首份被吞、重发又被当重复——净丢一条消息。
       if (markEmitted) {
         if (key) this.emitted.set(key, now);
         if (altKey) this.emitted.set(altKey, now);
+        if (reprojKey && utKey) this.emittedUt.set(reprojKey, utKey);
       }
       if (type === "AGENT_MESSAGE") this.markAnswered(sessBase, utKey);
     }

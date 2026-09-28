@@ -236,6 +236,24 @@
       （迟到流事件重置 rr → 悬挂 ~100s 到僵尸看门狗）。DONE 判 release 时
       独立布一个 15s 检查：rr 仍在且流静默 ≥5s → 强制释放+出队。 */
   let releaseHardTimer = null;
+  /** 看门狗体：rr 仍在且流静默 ≥5s → 强制释放；流还有活动则 15s 后再查
+      （一次性失效会让「挡后新待答入列」的轮次永久卡停止态）。 */
+  function hardReleaseCheck() {
+    releaseHardTimer = null;
+    if (!requestRunning) return;
+    if (Date.now() - lastStreamActivityAt >= 5000) {
+      markAllToolsDone();
+      finishAllAssistantVisuals();
+      requestRunning = false;
+      paintSendButton();
+      if (statusText && !replaying && !replayingInstant) {
+        statusText.textContent = connectedLabel();
+      }
+      flushPendingSendQueue();
+    } else {
+      releaseHardTimer = setTimeout(hardReleaseCheck, 15000);
+    }
+  }
 
   /**
    * 鉴权 token：URL ?token= 优先，其次 localStorage（tunnel 开了 auth 时必须带）。
@@ -2116,6 +2134,11 @@
               setRequestRunning(false, undefined, { deferMs: 1500 });
             }
           }, 8100);
+          // 被挡 DONE 也上硬看门狗：8.1s 复评可能因新待答条目入列而不放，
+          // 之后 rr 再无任何释放触发 → 发送键永久卡「停止」。
+          // 看门狗按 lastStreamActivityAt 判：5s 无活动即强制释放，有活动再续。
+          if (releaseHardTimer) clearTimeout(releaseHardTimer);
+          releaseHardTimer = setTimeout(hardReleaseCheck, 15000);
         }
         if (releaseDone) {
           markAllToolsDone();
@@ -2153,19 +2176,7 @@
           setRequestRunning(false, undefined, doneImmediate ? { force: true } : { deferMs: 3000 });
           // 硬释放兜底：上面 defer 链若被迟到事件重置 rr 而取消，15s 后兜底检查
           if (releaseHardTimer) clearTimeout(releaseHardTimer);
-          releaseHardTimer = setTimeout(() => {
-            releaseHardTimer = null;
-            if (requestRunning && Date.now() - lastStreamActivityAt >= 5000) {
-              markAllToolsDone();
-              finishAllAssistantVisuals();
-              requestRunning = false;
-              paintSendButton();
-              if (statusText && !replaying && !replayingInstant) {
-                statusText.textContent = connectedLabel();
-              }
-              flushPendingSendQueue();
-            }
-          }, 15000);
+          releaseHardTimer = setTimeout(hardReleaseCheck, 15000);
         }
         // live 失败/空轮占位：DONE 归属轮没产出任何 agent 内容时，在该用户泡下
         // 补终态占位（回放侧由服务端 annotateOrphanUserTurns 兜底；live 原来完全
@@ -3511,7 +3522,12 @@
     setTimeout(flushPendingSendQueue, 800);
   }
 
-  sendBtn.addEventListener('click', doSend);
+  sendBtn.addEventListener('click', () => {
+    // 焦点陷阱：按钮点击后持焦，之后按 Space（翻页/惯性）会二次触发 click——
+    // 发送后变「停止」态，Space 误停；点完即失焦。
+    try { sendBtn.blur(); } catch {}
+    doSend();
+  });
 
   // 会话抽屉事件
   btnSessions.addEventListener('click', () => {
