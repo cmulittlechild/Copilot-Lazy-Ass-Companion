@@ -759,6 +759,12 @@ body {
   border: 1px solid color-mix(in srgb, #73c991 45%, transparent);
 }
 .tool-body { background: var(--vscode-editor-background); }
+.tool-pend-hint {
+  padding: 8px 10px;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  border-top: 1px dashed var(--vscode-sideBar-border);
+}
 .tool-section { padding: 8px 10px 10px; }
 .tool-section.border { border-top: 1px solid var(--vscode-sideBar-border); }
 .tool-label {

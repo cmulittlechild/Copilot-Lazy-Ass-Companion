@@ -1789,6 +1789,8 @@
           badge.className = 'tool-badge done';
           badge.innerHTML =
             '<span class="codicon codicon-check" aria-hidden="true"></span>done';
+          const ph = el.querySelector('.tool-pend-hint');
+          if (ph) ph.remove();
           // 单调完成须落 toolDone 标记：transcript 尾帧会在 DONE 之后重投同一
           // TOOL_CALL（isComplete=false），无标记则 upsertTool 把徽章打回
           // running 且再无 DONE 翻回——卡永久停在 running（实测排队轮复现）。
@@ -1865,7 +1867,29 @@
         ? '<span class="codicon codicon-loading" aria-hidden="true"></span>running'
         : '<span class="codicon codicon-check" aria-hidden="true"></span>done';
     badge.className = 'tool-badge ' + (confirmed ? 'confirmed' : running ? 'running' : 'done');
-    if (!running) el.dataset.toolDone = '1';
+    if (!running) {
+      el.dataset.toolDone = '1';
+      const ph = el.querySelector('.tool-pend-hint');
+      if (ph) ph.remove();
+    }
+    // 长时 running 提示：Copilot 0.67 的工具审批「待批准」态在获批前不产生
+    // 任何 transcript/sessiondb 事件——客户端只能看到 run_in_terminal 等卡
+    // 一直 running（实测 Get-Content 挂 ~100s 直到桌面点 Allow）。>20s 未完结
+    // 就标注原因，用户才知道该去 VS Code 端批准。
+    if (el.__pendTimer) { clearTimeout(el.__pendTimer); el.__pendTimer = null; }
+    if (running && !confirmed) {
+      el.__pendTimer = setTimeout(() => {
+        el.__pendTimer = null;
+        const b = el.querySelector('.tool-badge');
+        if (!b || !b.classList.contains('running') || !el.isConnected) return;
+        if (el.querySelector('.tool-pend-hint')) return;
+        const hint = document.createElement('div');
+        hint.className = 'tool-pend-hint';
+        hint.textContent = '仍在运行 · 可能正等待 VS Code 端审批';
+        const body = el.querySelector('.tool-body');
+        if (body) body.appendChild(hint);
+      }, 20000);
+    }
 
     let html = '';
     if (inputStr && inputStr !== '{}' && inputStr !== 'null') {
