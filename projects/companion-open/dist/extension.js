@@ -88,6 +88,61 @@ let performSessionFollow = () => { };
 let lastInjectedPhoneText = "";
 let lastInjectedUserSeen = true;
 let deferredPhoneStop;
+/**
+ * 目标 transcript 尾部是否存在「message.text === sentText 且 request.timestamp >= sinceTs」
+ * 的请求条目（注入落盘核验：inject 宣称送达后定时复查——宣称路径已让手机端
+ * 以为成功，真没落盘时必须事后补一句真话）。读不到文件/结构对不上时返回
+ * true（保守不报警），同文历史请求靠 timestamp 下界区分不误判。
+ */
+function transcriptHasRequestSince(file, sentText, sinceTs) {
+    try {
+        const want = sentText.trim();
+        const needle = JSON.stringify(want).slice(1, -1);
+        if (!needle)
+            return true;
+        const st = fs.statSync(file);
+        const size = Math.min(st.size, 768 * 1024);
+        const fd = fs.openSync(file, "r");
+        let hay;
+        try {
+            const buf = Buffer.alloc(size);
+            fs.readSync(fd, buf, 0, size, Math.max(0, st.size - size));
+            hay = buf.toString("utf8");
+        }
+        finally {
+            fs.closeSync(fd);
+        }
+        for (const line of hay.split("\n")) {
+            if (!line.includes(needle))
+                continue;
+            try {
+                const obj = JSON.parse(line);
+                const reqs = Array.isArray(obj?.v)
+                    ? obj.v
+                    : Array.isArray(obj?.requests)
+                        ? obj.requests
+                        : [];
+                for (const r of reqs) {
+                    const t = r?.message;
+                    const mt = typeof t?.text === "string" ? t.text : typeof t?.content?.[0]?.text === "string" ? t.content[0].text : "";
+                    if (mt.trim() !== want)
+                        continue;
+                    const ts = Number(r?.timestamp || 0);
+                    if (!ts || ts >= sinceTs)
+                        return true;
+                }
+            }
+            catch {
+                // tail 截断的残行 parse 失败——needle 命中即视为已落盘（不报警）
+                return true;
+            }
+        }
+        return false;
+    }
+    catch {
+        return true;
+    }
+}
 /** 正文规范化（dedupe 用）：剥 markdown 强调+压空白+截断，与 transcriptWatcher.agentTextKey 同形 */
 function replayTextKey(text) {
     return String(text || "")
@@ -407,6 +462,38 @@ async function activate(context) {
                             type: "SYSTEM_MESSAGE",
                             text: `警告：目标会话已写入，但另一会话也出现相同文本（${path.basename(String(result.leakFile))}）`,
                         });
+                    }
+                    // 落盘核验：宣称送达后 45s 内目标 transcript 仍未多出该请求 → 注入
+                    // 实际未落盘（window reload 期 chat 管道打空——桥回声已让手机端以为
+                    // 成功，实测消息静默蒸发且无提示）。补一句真话并让手机回填原文。
+                    // 45s 留足重载后的懒写盘余量（实测请求行 +20s 才进文件）。
+                    // clipboard / verified_false 路径已当场告警，不再重复查。
+                    {
+                        const sentTextNow = String(msg.text || "").trim();
+                        const targetFile = typeof msg.file === "string" ? msg.file.trim() : "";
+                        const claimedDelivery = result.via !== "clipboard" && result.verified !== false;
+                        if (sentTextNow && targetFile && claimedDelivery) {
+                            const sendAt = Date.now() - 15000; // 慢注入窗内的请求 ts 早于此刻一定算旧轮
+                            setTimeout(() => {
+                                try {
+                                    if (!transcriptHasRequestSince(targetFile, sentTextNow, sendAt)) {
+                                        qrPanel?.addLog(`inject not persisted: ${sentTextNow.slice(0, 60)}`);
+                                        bridge?.broadcast({
+                                            type: "SYSTEM_MESSAGE",
+                                            text: "发送未落盘到目标会话（可能赶上 VS Code 重载），原文已回填，请重新发送",
+                                            notPersisted: sentTextNow,
+                                        });
+                                        bridge?.broadcast({
+                                            type: "COPILOT_DONE",
+                                            reason: "inject_not_persisted",
+                                        });
+                                    }
+                                }
+                                catch {
+                                    /* best-effort */
+                                }
+                            }, 45000);
+                        }
                     }
                 }
                 else if (msg.type === "PHONE_STOP") {

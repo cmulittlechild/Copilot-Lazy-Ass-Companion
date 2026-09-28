@@ -2098,6 +2098,20 @@
       case 'SYSTEM_MESSAGE': {
         if (msg.visibility === 'internal' || msg.internal === true) break;
         const t = String(msg.text || '');
+        // 服务端落盘核验失败（inject 宣称送达但 transcript 无此轮）→ 销待答
+        // 条目 + 原文回填输入框。泡不删：同文旧轮的泡会误删，让 sys 提示解释。
+        try {
+          if (msg.notPersisted) {
+            const npKey = userTextDedupeKey(String(msg.notPersisted));
+            for (let i = sentAwaitingReply.length - 1; i >= 0; i--) {
+              if (userTextDedupeKey(sentAwaitingReply[i].text) === npKey) sentAwaitingReply.splice(i, 1);
+            }
+            if (!(input.value || '').trim()) {
+              input.value = String(msg.notPersisted);
+              sendVerifyRestoredText = String(msg.notPersisted);
+            }
+          }
+        } catch (_) {}
         // auth failed 曾只关 socket → PWA 无限重连显示 connecting
         if (/auth failed/i.test(t) || /auth required/i.test(t)) {
           onAuthFailed(t);
