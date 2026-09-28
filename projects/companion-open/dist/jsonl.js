@@ -18,7 +18,6 @@ const IGNORE = new Set([
     'mcpServersStarting',
     'undoStop',
     'prepareToolInvocation',
-    'inlineReference',
     'textEditGroup',
     'codeblockUri',
     'codeCitation',
@@ -487,6 +486,19 @@ function renderBlocks(parts) {
         const kind = p.kind ?? '';
         if (IGNORE.has(kind))
             continue;
+        // 文件引用节点：Copilot 把 `file.txt` 写成独立 inlineReference part，
+        // 桌面渲成反引号文件名。整体忽略会让答案丢内容（R14 剥壳变体根源）。
+        if (kind === 'inlineReference') {
+            const ref = p.inlineReference ?? p;
+            const fp = (ref && typeof ref === 'object' && ref.fsPath) ||
+                (ref && typeof ref === 'object' && ref.path) ||
+                (ref && typeof ref === 'object' && ref.name) ||
+                '';
+            const base = String(fp).split(/[\\/]/).pop() || '';
+            if (base)
+                textAcc += '`' + base + '`';
+            continue;
+        }
         // thinking / progressTask* already in IGNORE (Remote parity)
         if (kind === 'toolInvocationSerialized' || kind === 'toolInvocation') {
             flushText();
