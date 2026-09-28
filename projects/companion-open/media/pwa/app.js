@@ -3839,7 +3839,9 @@
         n.el.classList.remove('queued');
         sendTextNow(n.text, n.mode, n.el, n.key, true);
       } else {
-        sendTextNow(n.text, n.mode);
+        // 泡已被回放/跟随重建换掉时走无 el 分支——同样不得清输入框：
+        // 入队时已清过，排队期用户可能打了新草稿（实测泡失联路径草稿被抹）。
+        sendTextNow(n.text, n.mode, undefined, undefined, true);
       }
     }
     if (!pendingSendQueue.length && queuedHintEl) {
