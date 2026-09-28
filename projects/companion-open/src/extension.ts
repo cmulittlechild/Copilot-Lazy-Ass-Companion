@@ -41,6 +41,13 @@ let boundSessionActivityAt = 0;
 /** 当前绑定是否来自手机显式点选——只有点选来的绑定才有「活跃即续压」资格；
  *  桌面跟随绑定的会话若也享有活跃压制权，桌面端主动切会话会被延迟 ~90s */
 let boundViaExplicitSelect = false;
+/** 最近一次显式点选的时刻：跨向跟随须校验目标会话在此之后有真实用户
+ *  活动（R22：被弃会话的在途轮持续写盘一直占 newest，「文件最新」是
+ *  turn 写入假象而非用户回访）。 */
+let lastExplicitSelectAt = 0;
+/** 各会话最近一条 USER_MESSAGE 的时间戳（含别会话——sessiondb 全局轮询
+ *  会投来所有会话的用户文，按 _sess 分记）。 */
+const userActivityBySess = new Map<string, number>();
 /** 因零内容被跳过的跟随目标：该会话出现首个用户轮次时补发跟随 */
 let pendingFollowFile: string | undefined;
 // 挂空操作占位；tdir 存在时赋真实现（sessionWatcher 通道先建，引用需提前可解析）
@@ -489,6 +496,7 @@ export async function activate(context: vscode.ExtensionContext) {
           if (ok && file) {
             lastExplicitSelect = { file, until: Date.now() + EXPLICIT_SELECT_GUARD_MS };
             pendingFollowFile = undefined;
+            lastExplicitSelectAt = Date.now();
             // 点选本身即算绑定会话活跃：inject 驱动桌面切换要 ~20-24s，期间
             // 目标会话还无写盘事件，boundSessionActivityAt=0 会让 boundHot 恒假
             // → 守卫窗外一条迟到的旧会话跟随就把手机拽回（R18 拉锯×3 根因）。
@@ -675,6 +683,15 @@ export async function activate(context: vscode.ExtensionContext) {
       workspaceIndex,
       currentWorkspaceHash,
       onEvent: (ev) => {
+        // 各会话用户活动打点：事件 _sess 优先，无戳用绑定文件（本 watcher
+        // 只 tail 绑定文件，事件必然属于该会话）。
+        if (ev.type === "USER_MESSAGE") {
+          const us = (
+            String((ev as any)._sess || "") ||
+            (watcher?.currentFile ? path.basename(watcher.currentFile) : "")
+          ).replace(/\.jsonl$/i, "");
+          if (us) userActivityBySess.set(us, Date.now());
+        }
         if (
           ev.type === "USER_MESSAGE" &&
           typeof (ev as any).text === "string" &&
@@ -737,6 +754,22 @@ export async function activate(context: vscode.ExtensionContext) {
       // 执行一次会话跟随：SESSION_SELECTED（PWA 清 feed+标题）+ db 回填回放。
       // 供 SESSION_FOLLOW 事件与 pendingFollowFile 补发共用。
       performSessionFollow = (csFile: string, base: string) => {
+        // 跨向跟随的用户活动门（R22 残余拉锯）：点选之后目标会话没有新
+        // USER_MESSAGE = 用户在桌面并未回访它——其 newest 地位只是被弃会话
+        // 在途轮的写盘假象，丢弃而非拽回。同一方向/无点选绑定不设此门。
+        const boundF = lastExplicitSelect?.file || getActiveSessionFile();
+        const boundB = boundF ? path.basename(boundF).replace(/\.jsonl$/i, "") : "";
+        const targetB = base.replace(/\.jsonl$/i, "");
+        if (
+          boundViaExplicitSelect &&
+          boundB &&
+          targetB &&
+          boundB !== targetB &&
+          (userActivityBySess.get(targetB) ?? 0) <= lastExplicitSelectAt
+        ) {
+          qrPanel.addLog(`SESSION_FOLLOW 丢弃: 点选后目标无用户活动 ${targetB}`);
+          return;
+        }
         const hist = watcher?.projectHistory(csFile, 20) ?? [];
         const sidForDb = base ? base.replace(/\.jsonl$/, "") : "";
         const dbTurns = transcriptWatcher?.sessionDbRecentTurns(20, sidForDb) ?? [];
@@ -750,7 +783,11 @@ export async function activate(context: vscode.ExtensionContext) {
           return;
         }
         pendingFollowFile = undefined;
-        boundViaExplicitSelect = false;
+        // 同一方向的跟随（所选会话本身）不得清点选绑定标记——否则 +3s 的
+        // 补发跟随会提前解除 90s boundHot 保护，被弃会话的在途轮随后把
+        // 手机拽走（R22 拉锯根因一）。真换向的跟随照常解除。
+        const boundF2 = lastExplicitSelect?.file || getActiveSessionFile();
+        if (!boundF2 || !samePath(csFile, boundF2)) boundViaExplicitSelect = false;
         setActiveSessionFile(csFile);
         watcher?.selectSession(csFile);
         transcriptWatcher?.seedFromHistory(hist);
@@ -821,6 +858,10 @@ export async function activate(context: vscode.ExtensionContext) {
         // watcher 据此不记「已投」——否则后续通道的同答案会被误判重投影而净丢。
         onEvent: function handleTranscriptWatcherEvent(ev) {
           if (ev.type === "USER_MESSAGE" && typeof (ev as any).text === "string") {
+            // 各会话用户活动打点（sessiondb 全局轮询的别会话 USER 也带 _sess）：
+            // 跨向跟随裁决「用户在桌面是否真去了那会话」的依据。
+            const usBase = String((ev as any)._sess || "").replace(/\.jsonl$/i, "");
+            if (usBase) userActivityBySess.set(usBase, Date.now());
             const utNow = String((ev as any).text).trim();
             if (utNow && utNow === lastInjectedPhoneText) lastInjectedUserSeen = true;
             // 挂起停止兑现：停止先于本 USER 落盘 → 此刻轮才真正开启，补发取消。
@@ -950,6 +991,19 @@ export async function activate(context: vscode.ExtensionContext) {
                 }
                 return;
               }
+            // 跨向跟随的用户活动门（直发路径）：被弃会话的在途轮持续写盘
+            // 会一直占 newest——若点选后目标会话无任何用户活动，这次跟随是
+            // turn 写入的假象，丢掉不拽回（压制重放走同一门：performSessionFollow）。
+            if (
+              boundViaExplicitSelect &&
+              selBase &&
+              followBase &&
+              selBase !== followBase &&
+              (userActivityBySess.get(followBase) ?? 0) <= lastExplicitSelectAt
+            ) {
+              qrPanel.addLog(`SESSION_FOLLOW 丢弃: 点选后目标无用户活动 ${followBase}`);
+              return;
+            }
             // 指向绑定会话本身的跟随：放行并解除显式选择窗口
             if (inWindow) lastExplicitSelect = undefined;
             if (csFile && fs.existsSync(csFile)) {

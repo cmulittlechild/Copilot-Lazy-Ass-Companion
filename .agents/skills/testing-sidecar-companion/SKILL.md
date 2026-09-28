@@ -176,3 +176,11 @@ PWA ↔ VS Code bridge。仓库 `~/repos/sidecar_remote/projects/companion-open`
 - 桌面作曲框坐标：右侧 Chat 面板的输入框在 "Describe what to..." 占位符行，y≈300（不是 335——335 会点到附件胶囊/图标行或 Outline 折叠钮）。直接点击后 `type` 文本比跨 app Cmd+V 可靠。
 - 同文重问判定仍过：M21DUP ×2 得两条 dup21 ok（sessiondb 行 494/495），新 emittedA2 owner-check 未误伤同 ut 重问。排队 ~13s 才 flush 因为首轮 result-DONE 未到（queue 行为正常）。
 - 撞名 grep 陷阱：`grep -l "M21D"` 会误中 "M21DUP"——jsonl 归因验证要用全 token 正则 `M21D[A-Z]*` 并统计实际 token，不能靠子串 grep -l。
+
+## R22 取证心得补充
+- **BUG-2 残余场景确认**：在途轮中点选 + 被弃会话的在途轮仍产生活动 → boundHot(~24s) 过期后 follow 以「最新活动」重校验放行 → 手机被拽回旧会话（本轮 +57s SESSION_SELECTED→旧会话）。处决条件：essay 流式跨越守卫窗 + 点选 inject soft_unverified（桌面面板停在 Sessions 列表视图时 inject 无法驱动）。用户症状=R18 BUG-2，语义上属 newest-activity 设计与显式点选冲突——报告为决策项而非硬 bug。
+- **中途停止的 wire 形态**：双点击 停止（先武装再确认）在途轮中产生 `AGENT_STREAM_START/SET(过渡文)+TOOL_CALL+STREAM_END len=0+COPILOT_DONE` 同刻批次，然后 30s+ 静默；**无 phone_stop 标记帧**（monitor 不显示该类型或本构建不带 reason 标签）。行为判据=轮冻结+无续帧+composer 恢复。
+- **被弃会话的在途轮**：preamble 经 sessiondb 快通道直播（sess=旧会话正确），但流式正文不上 wire——watcher 只盯 bound 文件的 transcript；正文最终经下一次回放整段回填（sessiondb 行存全文 len=1311）。判读要点：sessiondb 行长度证明轮已写完，feed 空缺只是直播盲区非丢答。
+- 第二次 DUP 同文重发答案走了 **transcript 通道**（t7m id）而非 sessiondb——两条投递通道都活。hadOwnUt 门端到端验证：同文 ×2 → 两条答案（sessiondb 行 509/510）。
+- 工具轮 create-file 若文件已存在，模型先 read_file 再覆盖——TOOL_CALL 事件照走但用户提示「create」结果是「replace」；sessiondb 存最终答复。
+- 三击「再次点击停止」武装提示每条 arm 留一条残影（R18 已记，本构建仍在）。
