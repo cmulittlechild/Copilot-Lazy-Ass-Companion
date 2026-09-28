@@ -1449,7 +1449,17 @@ class TranscriptWatcher {
                         }
                     }
                 }
-                this.emit(ev);
+                const delivered = this.emit(ev);
+                // 投递成功的答案销掉其 pendingGap 账：不销的话该 ut 永久挂起，
+                // isStalePendingReplay 用旧账把后续「不同问题同答案」的真答误杀
+                // （R14：M14V2 答案与 M14V 逐字相同，被 V1 的残留 pending 条目压死）。
+                if (delivered !== false &&
+                    evUt &&
+                    (ev.type === 'AGENT_MESSAGE' || ev.type === 'AGENT_STREAM_SET')) {
+                    const q = this.normUserText(String(evUt));
+                    if (this.removePendingGap(q))
+                        this.completedGapUserTexts.add(q);
+                }
             }
             return;
         }
@@ -1617,8 +1627,19 @@ class TranscriptWatcher {
             keys.push(b);
         return keys;
     }
+    /** 该 ut 对应一个「真实问过且尚未答」的轮次：本条文本就是它的正当答案，
+     *  哪怕与别轮答案同文（不同问题得到同答案：R14 M14V2/C2 实测被误杀）
+     *  也不得按重投影压制。 */
+    isLiveUnansweredUt(userText) {
+        if (!userText)
+            return false;
+        const q = this.normUserText(userText);
+        if (!q)
+            return false;
+        return this.userSeqByUt.has(q) && !this.isUtAnswered(q);
+    }
     hasEmittedAgentText(text, ctx) {
-        if (this.isStalePendingReplay(text))
+        if (this.isStalePendingReplay(text) && !this.isLiveUnansweredUt(ctx?.userText))
             return true;
         for (const k of this.dedupeKeys(text, ctx)) {
             if (k.includes('::ut=')) {
@@ -2696,6 +2717,10 @@ class TranscriptWatcher {
         // 按「答案文本」查所有已投键：正文同一问题发出的答案只许出现一次。
         // 对每条匹配键用它自己的 ut 比较 seq——同题重问会抬 userSeqByUt[ut]，放行真重答；
         // 迟到重投影（无论归属到哪个 ut/哪个 sess）统一压制。
+        // 豁免：本条 _ut 指向一个已问未答的轮次 → 这就是该轮的正当答案，
+        // 与别轮同文也不算重投影。
+        if (this.isLiveUnansweredUt(userText))
+            return false;
         const prefix = `${this.agentTextKey(text)}::ut=`;
         if (!prefix || prefix === '::ut=')
             return false;
