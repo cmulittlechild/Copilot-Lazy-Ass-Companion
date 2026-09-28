@@ -399,6 +399,22 @@ class TurnArbiter {
                 : null;
             const window = type === "AGENT_MESSAGE" ? CONTENT_DEDUPE_MS : TOOL_DEDUPE_MS;
             const altPrev = altKey ? this.emittedA2.get(altKey) : undefined;
+            // 幻影重投影纠偏（R20 BUG-4）：上轮答案经变体重投到达时被盖到新开启轮
+            // 的 _ut 下——事件自证不了归属（无 requestIndex 或下标落后于已见最新），
+            // 而同一文本在窗口内已投给别的轮实例。此时 _ut 拨回其真实归属轮：
+            // a2 按轮次实例判重会把迟到的幻影自然吃掉；同题重问的 ut 本就相同，
+            // 拨回不改变归属（altPrev.turn 与 ownerTurn 同 ut 时各自放行）。
+            const evReqIdx = typeof ev.requestIndex === "number" ? ev.requestIndex : null;
+            const unproven = evReqIdx == null || evReqIdx < this.latestReqIdx;
+            if (type === "AGENT_MESSAGE" &&
+                unproven &&
+                altPrev &&
+                altPrev.turn != null &&
+                ownerTurn !== altPrev.turn &&
+                now - altPrev.t <= window) {
+                utKey = altPrev.ut;
+                ownerTurn = altPrev.turn;
+            }
             const altDup = !!altPrev &&
                 now - altPrev.t <= window &&
                 (altPrev.turn === ownerTurn || (altPrev.turn == null && ownerTurn == null && altPrev.ut === utKey));
@@ -406,8 +422,6 @@ class TurnArbiter {
             // _ut（openTurnForEvent 的 ts 门挡不住无 ts 的件），ut 不同但文本同。
             // 只在事件无法自证属于当前轮时启用（无 requestIndex 或下标落后）——
             // 否则同题重问拿到的同文新答会被误杀。
-            const evReqIdx = typeof ev.requestIndex === "number" ? ev.requestIndex : null;
-            const unproven = evReqIdx == null || evReqIdx < this.latestReqIdx;
             // sessiondb 行不查 a3：行即轮次记录、user_message 即本题——同文答案
             // 落到不同行 = 不同轮的真实新答（R17：M17B 撞 M17A 文本指纹被杀，
             // 且 requestIndex 恒 -1 使 unproven 恒真 → 该通道永远无法自证）。

@@ -160,3 +160,11 @@ PWA ↔ VS Code bridge。仓库 `~/repos/sidecar_remote/projects/companion-open`
 - **vsce 打包会 bundle app.js**：vsix 内 `media/pwa/app.js` 是 IIFE 打包产物（md5 ≠ 仓库源文件）；比对装好的包时解 vsix 内部件比，别拿源文件 hash 对。dist/*.js 的「装包 vs 仓库」diff 若只含 HTML 模板串换行差异属无害。
 - **`Reload Window` 只重载窗口**：徽标上的 VS Code update 不会被它应用；重载后桥新 pid（channel.json 更新），monitor 需重连。
 - 判上游倍字（如 "b19 okb19 ok"）：直接查 sessiondb `assistant_response`——本桥只读该表，库里是倍字即上游写的，wire 忠实投递不算 bug。
+
+## R20 取证心得补充（2072b63 复验轮：_sess 权威标签 + 幻影答案）
+- **幻影重投影签名**：`AGENT_STREAM_START id=t1m...` + `AGENT_STREAM_SET "旧答案"` + `<<< AGENT_MESSAGE "旧答案" ut="新开轮的 ut"` ——transcript 变体重投影把**上一轮**的答案盖在新开轮的 `_ut` 上（本轮 "s2 ok" 幻影进 M20E）。识别：同 ut 出现 2 条 AGENT_MESSAGE 且第一条是上一轮答案文本、+1.8s 就到（作文不可能 2s 答完）；sessiondb 行只有真答案 → 幻影是 live-only，回放自愈。dup-per-ut 普查里 ut×2 即此签名。
+- **判幻影 vs 真答**：幻影答案 == 上一轮的 answer text 逐字相同；真答在时间窗内是慢的（作文 ~8-20s）。
+- **2072b63 后 `_sess` 可信**：emit() 只在无 `_sess` 时补 boundSessionBase——sessiondb 行 `r.session_id` 不再被盖；见到 `sess=X` 基本可信（仍用 sessiondb 对账兜底）。
+- **drawer 列表按近度重排**：会话行顺序随最近活动变，每次开抽屉先截图再点行，别背坐标。
+- **作文流 ~20s**：「在途轮排队切换」窗口稍纵即逝——要点选的动作备好再发文，或发更长文（≥250 词）保证切换落在在途窗内。
+- **select 的 replay 也会被在途轮排队**：本轮 4b0f0160 select 的 REPLAY 晚了 ~13s（正常 ~2s）——select 点击到 replay 间隔大不等于没选上，看 wire。
