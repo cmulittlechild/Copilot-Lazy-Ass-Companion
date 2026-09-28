@@ -959,8 +959,10 @@
    * 造成「用户气泡出现在旧助手回复上面/下面错乱」；无 timestamp 则 append。
    * 0.5.22b：回放（HISTORY_REPLAY）期间跳过按序插入——projectHistory 已按轮次
    * 交错排好，按 timestamp 重排反而把 user/agent 拆成两堆。只有 live 事件才需要。
+   * R93：agent/tool 元素可携带 _ut（归属用户文）——同题重问时 ts 会归属错轮
+   * （事件源 ts 与客户端泡 ts 不同时钟），按 ut 文本键锁到最后一条同名用户泡。
    */
-  function appendFeedChronological(el, ts) {
+  function appendFeedChronological(el, ts, ut) {
     if (!el || !feed) return;
     // 回放期间：projectHistory 已排好顺序，直接 append
     if (replaying || replayingInstant) {
@@ -973,7 +975,13 @@
     if (isAgent) {
       const users = feed.querySelectorAll('.msg.user');
       let owner = null;
-      if (Number.isFinite(t) && t > 0) {
+      if (ut) {
+        const want = userTextDedupeKey(String(ut));
+        for (let i = users.length - 1; i >= 0; i--) {
+          if (users[i].dataset.textKey === want) { owner = users[i]; break; }
+        }
+      }
+      if (!owner && Number.isFinite(t) && t > 0) {
         for (let i = users.length - 1; i >= 0; i--) {
           const ut = Number(users[i].dataset.ts);
           if (Number.isFinite(ut) && ut <= t) { owner = users[i]; break; }
@@ -1096,7 +1104,7 @@
     content.append(meta, bubble);
     row.append(avatar, content);
     el.appendChild(row);
-    appendFeedChronological(el, opts && (opts.ts != null ? opts.ts : opts.timestamp));
+    appendFeedChronological(el, opts && (opts.ts != null ? opts.ts : opts.timestamp), opts && opts.ut);
 
     entry = {
       id,
@@ -1169,16 +1177,16 @@
   }
 
   /** AGENT_STREAM_SET：整段替换 */
-  function setEntryMarkdown(streamId, text, ts) {
-    const entry = startAssistantTurn(streamId, { ts: ts });
+  function setEntryMarkdown(streamId, text, ts, ut) {
+    const entry = startAssistantTurn(streamId, { ts: ts, ut: ut });
     entry.markdown = String(text || '');
     if (ts != null && entry.element) entry.element.dataset.ts = String(ts);
     renderEntryBody(entry);
   }
 
   /** AGENT_STREAM_CHUNK：增量追加（仅纯文本追加 + rAF 合批，不调 marked.parse） */
-  function appendAssistantChunk(streamId, chunk, ts) {
-    const entry = startAssistantTurn(streamId, { ts: ts });
+  function appendAssistantChunk(streamId, chunk, ts, ut) {
+    const entry = startAssistantTurn(streamId, { ts: ts, ut: ut });
     if (ts != null && entry.element && !entry.element.dataset.ts) entry.element.dataset.ts = String(ts);
     entry.markdown += String(chunk || '');
     scheduleStreamFlush(entry);
@@ -1223,6 +1231,7 @@
           ts: msg && msg.timestamp,
           gapFill: !!(msg && msg.gapFill),
           streamId: streamId,
+          ut: msg && msg._ut,
         });
       }
       return;
@@ -1381,7 +1390,7 @@
     content.append(meta, bubble);
     row.append(avatar, content);
     el.appendChild(row);
-    appendFeedChronological(el, opts && (opts.ts != null ? opts.ts : opts.timestamp));
+    appendFeedChronological(el, opts && (opts.ts != null ? opts.ts : opts.timestamp), opts && opts.ut);
     // 独立助手消息完成 → 底部操作栏（复制按钮）
     maybeAddFooter(el, text);
     rescindOrphanPlaceholders();
@@ -1935,13 +1944,13 @@
         break;
       case 'AGENT_STREAM_SET':
         lastStreamActivityAt = Date.now();
-        setEntryMarkdown(msg.streamId || 'default', msg.text || '', msg.timestamp);
+        setEntryMarkdown(msg.streamId || 'default', msg.text || '', msg.timestamp, msg._ut);
         if (msg.requestIndex != null) reqToStream.set(msg.requestIndex, msg.streamId || 'default');
         if (!replaying) setRequestRunning(true);
         break;
       case 'AGENT_STREAM_CHUNK':
         lastStreamActivityAt = Date.now();
-        appendAssistantChunk(msg.streamId || 'default', msg.text || '', msg.timestamp);
+        appendAssistantChunk(msg.streamId || 'default', msg.text || '', msg.timestamp, msg._ut);
         if (msg.requestIndex != null) reqToStream.set(msg.requestIndex, msg.streamId || 'default');
         if (!replaying) setRequestRunning(true);
         break;
@@ -2041,6 +2050,7 @@
           addAgentFinal(msg.text || '', null, {
             ts: msg.timestamp,
             gapFill: !!msg.gapFill,
+            ut: msg._ut,
           });
         }
         clearTyping();
@@ -2238,7 +2248,7 @@
               const ph = addAgentFinal(
                 '*（该轮无回复——已停止或请求失败）*',
                 `orphan-live-${want || 'last'}-${Date.now()}`,
-                { ts: Number.isFinite(doneTs) ? doneTs : Date.now() },
+                { ts: Number.isFinite(doneTs) ? doneTs : Date.now(), ut: utTxt || undefined },
               );
               if (ph) ph.dataset.orphanPh = '1';
             }
