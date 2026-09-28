@@ -3494,10 +3494,12 @@
   /** 追加一行终端输出（textContent 保证安全转义） */
   function appendTerminalOutput(text, cls) {
     if (text == null || text === '') return;
-    // 剥 shell-integration OSC（ESC]…BEL 或 ESC]…ESC\，如 PowerShell 633;C）
-    // 与其余 C0 控制符——上屏是乱码；ANSI 颜色/光标序列保留原样。
+    // 剥 shell-integration OSC（ESC]…BEL 或 ESC]…ESC\，如 PowerShell 633;C）、
+    // ANSI CSI 序列（ESC[…letter，颜色/光标——pre 渲不出颜色只留乱码）
+    // 与其余 C0 控制符。
     text = String(text)
       .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
+      .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '')
       .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, '');
     if (!text) return;
     const span = document.createElement('span');
