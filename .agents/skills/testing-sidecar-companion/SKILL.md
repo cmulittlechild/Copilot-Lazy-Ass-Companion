@@ -103,3 +103,13 @@ PWA ↔ VS Code bridge。仓库 `~/repos/sidecar_remote/projects/companion-open`
 - **WS 监控必须带 token**：QR 面板开隧道会铸 sessionToken 并把裸连客户端踢下广播通道（无 token 的 WS 只剩 PING 心跳、广播静默——极易误判成"服务无广播"）。监控端 PHONE_CONNECT 务必带 `token` 字段，或升级后直接从 QR URL 抠。
 - 裸 DONE（无 _ut/closedUt）在「TOOL→DONE→+10s 正文」形态下会早于答案到达——live 占位误判即源于此；判别这类 DONE 是否误报看轮内是否有工具活动在飞。
 - reqerr 轮特征：chatSessions request 的 `result.errorDetails.message`="Sorry, no response was returned."，response 只剩 mcpServersStarting；transcript 只有 turn_start 无 assistant.message/turn_end；sessiondb assistant_response 为空。
+
+## R90 取证心得补充（第12轮马拉松，HEAD 4aa92be 含 endedStreams）
+
+- **token 监控脚本已固化**：`ws_monitor_tok.mjs`（读 channel.json 的 port+token 发 PHONE_CONNECT）。token 启用期间旧 `ws_monitor.mjs` 裸连只剩 PING——一律用 _tok 版。
+- **发送后按钮保焦坑**：点「发送」后按钮翻成「停止」且保留键盘焦点——此时键入文本里的 Space 会激活按钮（空格=点击），连按两次=phone_stop 0.3s 内杀掉新轮。自动化务必先点输入框再打字；桌面浏览器真实用户同样可中招（键盘焦点陷阱）。
+- **发送端按钮滞留判据**：同会话被动 tab 已回「发送」而发送 tab 仍「停止」>10s = 发送端本地 rr 死链（跨 tab 对照是最快判据）；单击一次可释放。风险：滞留期打字再点=进队而非发送，队头无 DONE 可等→形似吞包。
+- **瞬时乱序会自愈**：新发送的 user 泡可能短暂插到旧轮次上方（含 DONE 后），~2min 内无广播自行归位——先复查再报，别在窗口内截图当铁证。
+- **stray 再投影识别**：wire 上 AGENT_STREAM_SET/MESSAGE 携带**上一轮答案原文**且 _ut 盖着新一轮——对照桌面 chat 该轮无此文即可定性（非模型真输出）。
+- **回放风暴**：空闲期 monitor 可见 ×5 同内容 HISTORY_REPLAY（<0.2s 连发）——录制/计数时注意去重。
+- TOOL_CALL 不受 dedup 约束会漏进下一轮窗口（已知）；`requests/0/response#text#0` 式 jsonl-id 空 STREAM_END 尾随 DONE ~36s 属正常骨架合成。
