@@ -2749,10 +2749,13 @@
             setSessionTitle(t, msg.file);
           } catch (_) {}
         }
+        // list 必须在 try 外声明——finally 也引用它；块内 const 会让
+        // finally 里的引用抛 ReferenceError 被静默吞掉（曾导致
+        // replayFloorTs 恒为 0、stale-replay 门整体失效）。
+        const list = Array.isArray(msg.messages) ? msg.messages : [];
         try {
           try { feed.style.scrollBehavior = 'auto'; } catch (_) {}
           clearFeed();
-          const list = Array.isArray(msg.messages) ? msg.messages : [];
           for (const m of list) {
             // 单条失败不阻断整段回放（marked/DOM 偶发错误）
             try {
@@ -2788,6 +2791,31 @@
           } catch (_) {}
           // 「已发未答」的泡也补回（发完即切/跟随重选的交错态不丢泡）
           repaintAwaitingUserBubbles();
+          // 回放权威校验：已确认回声的待答文本若在回放 USER 里完全缺席，
+          // 说明桥端确认后、上游落盘前链路中断（VS Code 被杀等）——
+          // 该轮永远不会有答案，按未送达处理（回填+移出待答），否则泡
+          // 会干等且占住 rr/收割器的在途判断。
+          try {
+            const replayedUserKeys = new Set();
+            for (const m of list) {
+              if (m && m.type === 'USER_MESSAGE' && typeof m.text === 'string') {
+                replayedUserKeys.add(userTextDedupeKey(m.text));
+              }
+            }
+            const boundBaseR = baseNameAny(currentSessionMeta.file).replace(/\.jsonl$/i, '');
+            for (let i = sentAwaitingReply.length - 1; i >= 0; i--) {
+              const e = sentAwaitingReply[i];
+              const eBase = baseNameAny(e.sess || '').replace(/\.jsonl$/i, '');
+              if (!boundBaseR || eBase !== boundBaseR) continue;
+              // 上行落盘有 ~1-2s 延迟：发送太新的条目跳过，回放可能先于落盘
+              if (Date.now() - (e.at || 0) < 3000) continue;
+              if (replayedUserKeys.has(userTextDedupeKey(e.text))) continue;
+              sentAwaitingReply.splice(i, 1);
+              if (!(input.value || '').trim()) { input.value = e.text; sendVerifyRestoredText = e.text; }
+              sendVerifyMissedAt = Date.now();
+              addSys('发送可能未送达（连接中断），文本已回填，请重新发送');
+            }
+          } catch (_) {}
           jumpFeedToBottom();
           // 回放完成后恢复顶部状态文案（SESSION_SELECTED 可能写成「切换会话…」）
           setStatus(true, connectedLabel());

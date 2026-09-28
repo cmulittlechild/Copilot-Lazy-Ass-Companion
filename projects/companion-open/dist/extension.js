@@ -311,7 +311,14 @@ async function activate(context) {
             // （transcript tail、sessiondb 轮询、chatSessions rewrite）会在回放之后
             // 作为 live 事件再投一遍 → feed 尾部出现用户泡/答案堆叠副本。
             transcriptWatcher?.seedFromHistory(merged);
-            return merged;
+            // 把 file/title 一起回传：重连回放若不带 file，客户端
+            // currentSessionMeta.file 一直为空——_sess 过滤、待发补画、
+            // 未送达校验全部失效（实测杀进程重连后发送记录 sess=''，
+            // 泡既不补画也不报未送达，静默消失）。
+            const rTitle = watcher
+                ?.listSessions(40)
+                .find((s) => s.file === file || (s.file && (0, pathutil_1.samePath)(s.file, file)))?.title;
+            return { events: merged, file, title: rTitle };
         };
         push = new push_1.PushManager(context.globalState);
         bridge.setPushManager?.(push);

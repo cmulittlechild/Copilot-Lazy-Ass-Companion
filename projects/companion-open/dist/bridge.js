@@ -255,6 +255,8 @@ class BridgeServer {
      * 连接回放提供者：活积 history 可能缺 USER_MESSAGE（fallback 通道按设计吞用户文
      * 只记 rid→ut 键），此时由扩展回读当前会话文件重建回放（含 sessiondb 补全）。
      */
+    /** 连接回放源：可返回事件数组，或 {events, file, title} 让回放带上
+     *  会话身份（客户端据此回填 currentSessionMeta.file/title） */
     historyProvider;
     onClientCount;
     publicUrl = null;
@@ -553,14 +555,34 @@ class BridgeServer {
                             // 手机发送的几条零星 USER 也会让它"部分缺失"），且 socket 重连会把
                             // 切换前旧会话的 history 重放回来拽回 feed。文件版 USER 数不少于 live 版
                             // 时优先用文件版；只有当刚发出的用户消息尚未落盘时才保留 live 版。
-                            const provided = this.historyProvider?.();
+                            const providedRaw = this.historyProvider?.();
+                            let provided;
+                            let replayFile;
+                            let replayTitle;
+                            if (Array.isArray(providedRaw)) {
+                                provided = providedRaw;
+                            }
+                            else if (providedRaw && Array.isArray(providedRaw.events)) {
+                                provided = providedRaw.events;
+                                replayFile = providedRaw.file;
+                                replayTitle = providedRaw.title;
+                            }
                             if (Array.isArray(provided) && provided.length) {
                                 const liveUsers = replay.filter((e) => e?.type === 'USER_MESSAGE').length;
                                 const provUsers = provided.filter((e) => e?.type === 'USER_MESSAGE').length;
                                 if (provUsers >= liveUsers)
                                     replay = provided;
+                                else {
+                                    replayFile = undefined;
+                                    replayTitle = undefined;
+                                }
                             }
-                            this.send(ws, { type: 'HISTORY_REPLAY', messages: annotateOrphanUserTurns(replay) });
+                            this.send(ws, {
+                                type: 'HISTORY_REPLAY',
+                                messages: annotateOrphanUserTurns(replay),
+                                file: replayFile,
+                                title: replayTitle,
+                            });
                             for (const e of replay) {
                                 const t = Number(e?.timestamp ?? e?.ts ?? 0);
                                 if (Number.isFinite(t) && t > replayMaxTs)
