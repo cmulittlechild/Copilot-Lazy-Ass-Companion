@@ -2201,6 +2201,57 @@
             break;
           }
         }
+        // 变体重投影（内容剥壳版）：归一化不等所以走不到上面的 exact 同文判断，
+        // 但 _ut 归属的用户轮已有答案、且这条文本归一化后是该答案的子集/前缀——
+        // 同答案的残缺重投影，不是新内容 → 丢弃，防孤儿泡（R13 实测 +35s 变体）。
+        let variantReproj = false;
+        if (!(replaying || replayingInstant) && msg._ut) {
+          const strip = (s) => String(s || '').replace(/[\s`*_~#>\-]+/g, '');
+          const incomingNorm = strip(msg.text);
+          if (incomingNorm) {
+            const wantKey = userTextDedupeKey(String(msg._ut));
+            const users2 = feed.querySelectorAll('.msg.user');
+            for (let i = users2.length - 1; i >= 0; i--) {
+              if (users2[i].dataset.textKey !== wantKey) continue;
+              let sib = users2[i].nextElementSibling;
+              while (sib && !sib.classList.contains('user')) {
+                if (sib.classList.contains('agent') && !sib.classList.contains('typing-row')) {
+                  const bd = sib.querySelector('.body');
+                  const haveNorm = strip(bd && (bd.dataset.raw || bd.textContent));
+                  // 来文是已渲染答案的「子序列」= 丢中段内容的剥壳变体
+                  // （`Created \`f.txt\` - done` 剥壳成 `Created - done` 后归一化
+                  // 非连续子串，includes 判不中）。约束：来文足够长且覆盖率 ≥60%，
+                  // 防真新短答（"ok"式）撞子序列误杀。
+                  if (
+                    haveNorm &&
+                    incomingNorm.length >= 6 &&
+                    incomingNorm.length >= haveNorm.length * 0.4 &&
+                    (() => {
+                      let j = 0;
+                      for (
+                        let k = 0;
+                        k < haveNorm.length && j < incomingNorm.length;
+                        k++
+                      ) {
+                        if (haveNorm[k] === incomingNorm[j]) j++;
+                      }
+                      return j === incomingNorm.length;
+                    })()
+                  ) {
+                    variantReproj = true;
+                  }
+                }
+                if (variantReproj) break;
+                sib = sib.nextElementSibling;
+              }
+              break;
+            }
+          }
+        }
+        if (variantReproj) {
+          clearTyping();
+          break;
+        }
         if (msg.streamId) {
           completeAssistantTurn(msg.streamId, msg.text || '', msg);
         } else {
