@@ -1048,13 +1048,16 @@
    */
   function appendFeedChronological(el, ts, ut) {
     if (!el || !feed) return;
+    const t = typeof ts === 'number' && Number.isFinite(ts) ? ts : Number(ts);
+    // ts 戳与插入顺序无关——回放元素也打：全 feed 无 ts 节点时，后续 live 事件
+    // 的按序插入把它们全当「尾端」跳过，迟到件贴尾不归位（实测回放后
+    // sessiondb 迟到对永久挂底）。
+    if (Number.isFinite(t) && t > 0) el.dataset.ts = String(t);
     // 回放期间：projectHistory 已排好顺序，直接 append
     if (replaying || replayingInstant) {
       feed.appendChild(el);
       return;
     }
-    const t = typeof ts === 'number' && Number.isFinite(ts) ? ts : Number(ts);
-    if (Number.isFinite(t) && t > 0) el.dataset.ts = String(t);
     const isAgent = el.classList && (el.classList.contains('agent') || el.classList.contains('tool-card'));
     if (isAgent) {
       const users = feed.querySelectorAll('.msg.user');
@@ -1381,7 +1384,7 @@
       const ft = typeof finalText === 'string' && finalText ? finalText : acc;
       if (ft) {
         addAgentFinal(ft, 'agent:' + sidKey, {
-          ts: msg && msg.timestamp,
+          ts: msg ? eventTsNum(msg) : NaN,
           gapFill: !!(msg && msg.gapFill),
           streamId: sidKey,
           ut: msg && msg._ut,
@@ -1430,7 +1433,7 @@
     if (!entry || !entry.element || !entry.element.isConnected) {
       if (typeof finalText === 'string' && finalText) {
         addAgentFinal(finalText, streamId ? 'agent:' + streamId : null, {
-          ts: msg && msg.timestamp,
+          ts: msg ? eventTsNum(msg) : NaN,
           gapFill: !!(msg && msg.gapFill),
           streamId: streamId,
           ut: msg && msg._ut,
@@ -2050,7 +2053,7 @@
         const body = nodes[i].querySelector('.user-bubble');
         if (body && body.textContent === p.text) { found = true; break; }
       }
-      if (!found) addUser(p.text, p.key || `user:pending:${Date.now()}:${userTextDedupeKey(p.text)}`, { force: true });
+      if (!found) addUser(p.text, p.key || `user:pending:${Date.now()}:${userTextDedupeKey(p.text)}`, { force: true, ts: p.at || Date.now() });
     } catch (_) {}
     repaintAwaitingUserBubbles();
   }
@@ -2068,7 +2071,7 @@
         const body = nodes[i].querySelector('.user-bubble');
         if (body && body.textContent === m.text) { found = true; break; }
       }
-      if (!found) addUser(m.text, m.key, { force: true });
+      if (!found) addUser(m.text, m.key, { force: true, ts: m.at || Date.now() });
     }
   }
 
