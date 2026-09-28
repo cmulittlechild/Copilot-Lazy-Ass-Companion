@@ -501,10 +501,23 @@ class SessionWatcher {
         return out;
     }
     userMsgScanRunning = false;
+    /**
+     * 统一事件出口：给未带 _sess 的事件盖当前绑定文件归属戳。
+     * PWA 按 _sess 做跨会话过滤——无戳事件在任何绑定状态都能上屏，
+     * watcher 换绑领先客户端的窗口期里别会话轮次会渲进当前 feed（ANOM-3）。
+     * 事件自带 _sess（foreign 扫描显式标源会话）不覆盖。
+     */
+    emit(ev) {
+        if (this.disposed)
+            return;
+        if (ev && !ev._sess && this.current) {
+            ev._sess = path.basename(this.current).replace(/\.jsonl$/i, '');
+        }
+        this.opts.onEvent(ev);
+    }
     start() {
         this.projector.setDoneSink((ev) => {
-            if (!this.disposed)
-                this.opts.onEvent(ev);
+            this.emit(ev);
         });
         this.scan();
         this.timer = setInterval(() => this.scan(), this.opts.rescanMs);
@@ -706,7 +719,7 @@ class SessionWatcher {
                                         // 位置在前的历史轮一律丢弃（lastReqCount 兜底跨行追踪）
                                         continue;
                                     }
-                                    this.opts.onEvent({
+                                    this.emit({
                                         type: 'USER_MESSAGE',
                                         text,
                                         requestId: rid,
@@ -887,7 +900,7 @@ class SessionWatcher {
         this.offset = startOffset;
         const mode = this.liveOnly ? 'live-only@EOF' : 'catch-up@0';
         // Tag internal so bridge/PWA can drop chrome noise from the phone feed.
-        this.opts.onEvent({
+        this.emit({
             type: 'SYSTEM_MESSAGE',
             text: `Watching session: ${path.basename(file)} (${mode})`,
             visibility: 'internal',
@@ -963,7 +976,7 @@ class SessionWatcher {
                 // bootstrap 是历史补全：不投 USER_MESSAGE（最新一轮用户气泡由 live 增量/foreign 扫描负责）
                 for (const ev of evs)
                     if (ev.type !== 'USER_MESSAGE')
-                        this.opts.onEvent(ev);
+                        this.emit(ev);
             }
             catch {
                 /* ignore */
@@ -983,12 +996,12 @@ class SessionWatcher {
                 });
                 evs.forEach((e, i) => {
                     if (e.type !== 'USER_MESSAGE') {
-                        this.opts.onEvent(e);
+                        this.emit(e);
                         return;
                     }
                     const ets = typeof e.timestamp === 'number' ? e.timestamp : undefined;
                     if (i === lastUser && ets != null && Date.now() - ets <= USER_FRESH_MS)
-                        this.opts.onEvent(e);
+                        this.emit(e);
                 });
             }
             catch {
@@ -1096,16 +1109,16 @@ class SessionWatcher {
                     }
                     evs.forEach((e, i) => {
                         if (e.type !== 'USER_MESSAGE') {
-                            this.opts.onEvent(e);
+                            this.emit(e);
                             return;
                         }
                         if (!isSnapshot) {
-                            this.opts.onEvent(e);
+                            this.emit(e);
                             return;
                         }
                         const ets = typeof e.timestamp === 'number' ? e.timestamp : undefined;
                         if (i === lastUser && (ets == null || Date.now() - ets <= USER_FRESH_MS))
-                            this.opts.onEvent(e);
+                            this.emit(e);
                     });
                 }
                 catch {
