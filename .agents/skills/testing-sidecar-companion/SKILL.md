@@ -218,3 +218,10 @@ PWA ↔ VS Code bridge。仓库 `~/repos/sidecar_remote/projects/companion-open`
 - **模型切换副作用**：model select 触发会话 jsonl rewrite → watcher tail 重读把最近 USER 当 foreign 重播 → feed 冒同会话内容的「【其他会话】」sys 行（P2 误标，非泄漏）。
 - **模型轮 result-DONE 可缺席**：本轮 deepseek-v4.1-flash 轮答案 DONE 后 >70s 无 [result] DONE，rr 由 ~75s STREAM_STALE 看门狗释放——该窗口内排队消息会滞留 ~75s，判「队列卡死」前先等看门狗。
 - **停止轮自查表**：sessiondb 该 turn 行 assistant_response 为空 + jsonl modelState value=2 = 真停；feed 回放应渲「(该轮无回复—已停止或请求失败)」占位。live 区的假阳性靠「答案+占位共存>5s」判。
+
+## R28 取证心得补充（第十二轮马拉松，vsix 8e2de2d kill-mid-send 复验）
+- **骨架 END 早释新边界（本主题新缺陷家族）**：每个进度块尾部都有 `AGENT_STREAM_END len=0`；实测 ~3s 后客户端在途态即释放（非等 DONE/result-DONE）——后果两连：(a) 静默窗内连发直接逃逸广播（U2 先于 A1 上 wire，无 DONE 触发释放；进度卡+正文渲到下一个 user 泡下方=轮边界错位）；(b) 同窗口内点停止=打空气（发送键已自动回弹「发送」，arm+confirm 落空，无 arm hint 残影、无 phone_stop、轮跑到底）。判据：wire 上 U2 broadcast < 该轮 AGENT_MESSAGE 且期间零 DONE；feed 里上轮答案正文出现在新发 user 泡下方。复现配方：发长文 → 等任意 len=0 END 后 ~5s 静默 → 连发/双击停止。
+- **kill-mid-send 复现（macOS 版）**：tee 缓冲 ~1.5s 太慢——用独立 WS watcher 直连 3010、见到 `USER_MESSAGE` 含标记词即 `pkill -9 -f "Visual Studio Code"`（脚本已存 skill 目录 killwatch.mjs）。判定前置条件：echo 上 wire 后 ~60ms 杀 = 桥回声已收、上游未落盘；`grep -l` 全部 chatSessions 无文本 + sessiondb 0 行 = pre-persist 实锤。重开后 PWA 自动重连即触发 8e2de2d 回放校验（入口前提：回放带 file —— monitor 的 CONNECTED 行 `HISTORY_REPLAY n=? file=<file>` 即 wire 证据）。
+- **未送达 notice 存活性缺口**：回填+剪除生效（input.value 回填、awaiting 泡移除、pendingSend=null 证明走的是新路径非 pendingSend），但「发送可能未送达…」sys 行终态缺席——同块代码里 addSys 必执行过 ⇒ 元素被后续二次重建清掉（重连期 socket flap/第二次 unicast replay 或 addSys 内异常被 catch 吞）。判读：回填文本在 input 里 = 修复生效；sys 行缺失 = 通知瞬态化残留问题，用户走神即无感知。查第二回放：broadcast 通道 select/follow 可见，unicast 不可见——只能由 DOM 终态反推。
+- **sessiondb 归属裁决仍是铁证**：切后立即发（~10s 后）的 R28F 落 caec5d61 turn4——wire `sess=` 标签 + db 行 session_id 双证；本次零 SESSION_SELECTED = 无拽回。
+- **dup-per-ut 正例**：同 ut 两条 AGENT_MESSAGE ≠ 双投——进度卡("draft is 405 words")与正文同 ut 属合法成对，按文本判重。

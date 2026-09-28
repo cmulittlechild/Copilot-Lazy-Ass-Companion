@@ -2205,16 +2205,13 @@
               n.classList.add('is-done');
             });
             markAllToolsDone();
-            if (!replaying) setRequestRunning(false, undefined, { force: true });
-            // 无 DONE 收尾的轮（DONE 被判死丢弃）在这里释放——同样出队排队消息
-            setTimeout(flushPendingSendQueue, 800);
-            setStatus(true, connectedLabel());
-          } else if (!replaying) {
-            // 位置型 streamId（requests/N/…）的 END 只对得上自己那条流——其他
-            // 残卡仍在 streaming → any=true 不放行。END 本身是终止信号，排一个
-            // 宽限释放复查：残卡只是残影时静默 ≥5s 即释（治 R61 悬挂）。
-            setRequestRunning(false, undefined, { deferMs: 3000 });
           }
+          // END 只是「某条流」的终止帧——骨架/进度块的 END len=0 会在轮中途来，
+          // 立即释放会让在途态在静默窗内提前落回「发送」（连发逃逸+停止落空，
+          // R28 实测）。统一走宽限复查：真轮终必经历 ≥5s 静默才释放；
+          // DONE 被判死丢弃的轮也由这里兜底（静默后同样释放+出队）。
+          if (!replaying) setRequestRunning(false, undefined, { deferMs: 3000 });
+          if (!any) setStatus(true, connectedLabel());
         }
         break;
       case 'AGENT_MESSAGE': {
