@@ -2626,10 +2626,27 @@
               // 裸 DONE 可能早于在途答案（TOOL→DONE→+13s 正文形态实测）：
               // 延迟复核——到时该泡若已有答案就不画，真孤儿轮才补占位。
               // want 锁的是这条用户泡本身，期间新发的消息不影响归属。
-              setTimeout(() => {
+              // 裸 DONE 无法自证终止的是这个轮（无 _ut/closedUt）——上游慢推理轮
+              // 实测 ~5min 才出答，期间任何杂散 DONE（elapsedMs 清理、通道终标）
+              // 若在「尚无答案」下就画占位 = 误报（dr2 实测 ~30s 误画）。复核前看
+              // 该轮待答条目龄：未过陈旧阈说明还可能活着，续查不画；条目被真 DONE
+              // 归属裁掉/熬到陈旧，才按孤儿画占位。
+              const recheckOrphan = () => {
                 if (!ownerEl.isConnected) return;
+                const entry = sentAwaitingReply.find(
+                  (e) => want && userTextDedupeKey(e.text) === want,
+                );
+                if (
+                  !doneImmediate &&
+                  entry &&
+                  Date.now() - (entry.at || 0) < STREAM_STALE_AWAIT_MS
+                ) {
+                  setTimeout(recheckOrphan, 15000);
+                  return;
+                }
                 drawOrphanPlaceholder();
-              }, 15000);
+              };
+              setTimeout(recheckOrphan, 15000);
             } else {
               drawOrphanPlaceholder();
             }
