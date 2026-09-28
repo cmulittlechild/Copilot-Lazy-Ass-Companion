@@ -1004,8 +1004,14 @@ export async function activate(context: vscode.ExtensionContext) {
               qrPanel.addLog(`SESSION_FOLLOW 丢弃: 点选后目标无用户活动 ${followBase}`);
               return;
             }
-            // 指向绑定会话本身的跟随：放行并解除显式选择窗口
+            // 指向绑定会话本身的跟随：放行并解除显式选择窗口——但不再回放。
+            // 同一会话的重放是纯消耗：feed 被清空重渲（实测空窗 ~75s），还会
+            // 清掉输入框里的草稿。live 事件流已经在补增量，无需重放。
             if (inWindow) lastExplicitSelect = undefined;
+            if (selBase && followBase && selBase === followBase) {
+              qrPanel.addLog(`SESSION_FOLLOW 跳过: 跟随目标即绑定会话 ${followBase}`);
+              return;
+            }
             if (csFile && fs.existsSync(csFile)) {
               performSessionFollow(csFile, base);
             } else if (bridge?.sendToPhone) {

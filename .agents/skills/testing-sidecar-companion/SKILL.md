@@ -184,3 +184,13 @@ PWA ↔ VS Code bridge。仓库 `~/repos/sidecar_remote/projects/companion-open`
 - 第二次 DUP 同文重发答案走了 **transcript 通道**（t7m id）而非 sessiondb——两条投递通道都活。hadOwnUt 门端到端验证：同文 ×2 → 两条答案（sessiondb 行 509/510）。
 - 工具轮 create-file 若文件已存在，模型先 read_file 再覆盖——TOOL_CALL 事件照走但用户提示「create」结果是「replace」；sessiondb 存最终答复。
 - 三击「再次点击停止」武装提示每条 arm 留一条残影（R18 已记，本构建仍在）。
+
+## R23 取证心得补充（第十二轮马拉松，HEAD 00736c0 含 endedStreams+stale-ts+排队泡）
+- **装包与激活**：`code --install-extension <vsix> --force` 后必须 Reload Window——channel.json `pid` 变化即激活证据（本轮 1201→2092）。装目录 dist/media 与 vsix zip 内文件 md5 逐一对哈希即可判是否最新构建。
+- **抽屉行坐标**：会话行 pitch≈32px、首行 title y≈175（不是 229——229 落在次行 氪/硒 边界会误选上一行）。点错行的信号=回放 file/title 与目标不符，**先看 wire file= 再判定**，别按行名猜。
+- **打字落空风险**：composer 未聚焦时 `type` 的按键会喂给文档层——本轮疑触发会话行 typeahead/激活，造成同会话重选+REPLAY n=9 且 feed 清空后 ~75s 不重渲（ANOM-1 空 feed，手动重选恢复；input 文本被清）。自动化每发前先截图确认 focus ring 再 type。
+- **停止轮迟答**：DONE[phone_stop] 后被停轮的真实答案 +30s 经 requests/N jsonl 重投通道整段补到（sessiondb 该行 assistant_response 为空——两源对停止轮分叉）。feed 出现「答案正文+该轮无回复占位」**自相矛盾对**（ANOM-2）；归属 _ut 仍是本论（stale-ts 没盖错）、单渲无双渲。判读：矛盾点在占位未撤，非重投影本身。
+- **排队泡口径（e780955 复验通过）**：requestRunning 时带文点发送→泡即渲（opacity.6+italic .queued）+「已排队」hint；turn 尾 DONE→U2 广播 Δ≈3.0s；同一 DOM 元素去 .queued 不画第二泡；feed 序 U1A1U2A2。终判据=泡出现时刻+Δ(U2,DONE1)+单泡。
+- **桌面发信→手机不拽**：显式点选后桌面在他会话实发一轮，wire 广播其 USER/AGENT（sess=他会话）但手机 feed 不跟随也不渲（>106s 零 SESSION_FOLLOW）——userActivity 门按码应放行（activity>select 时刻），实际未发=要么上游压制要么「显式绑定粘性」设计。报告为语义确认项，非铁证 bug。
+- **停止点击窗**：flash 系模型 ~10-13s 整文单泡到——截图+点击链路 ~4-6s 吃窗，双击停要「发送→等~3s→点→点（<1.5s）」无截图连击才打得中（本轮前两次失败均因确认点落在 DONE 后/rr 释放后空文 no-op）。已停轮 arm hint 残影永久留 feed（sys 消息不撤）。
+- **requests/N 骨架**:len=0 END 随每轮 +15~45s 尾随，属正常收尾骨架；endedStreams 修复后未见同 sid 的 SET/START 迟帧复投。

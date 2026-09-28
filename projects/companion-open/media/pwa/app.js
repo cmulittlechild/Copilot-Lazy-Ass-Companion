@@ -1571,18 +1571,30 @@
     return el;
   }
 
-  /** 孤儿占位自清：误判画出的「该轮无回复」下，真答案后到就把占位撤掉 */
+  /** 孤儿占位自清：误判画出的「该轮无回复」下，真答案后到就把占位撤掉。
+      双向扫：迟到答案按源 ts 时序插入，可能落在占位【之前】（同一用户泡下、
+      占位上方）——只向后扫会漏，形成「答案+无回复占位」同框矛盾。 */
   function rescindOrphanPlaceholders() {
     const phs = feed.querySelectorAll('.msg.agent[data-orphan-ph]');
     if (!phs.length) return;
+    const hasAnswer = (sib) =>
+      sib.classList &&
+      sib.classList.contains('agent') &&
+      !sib.classList.contains('typing-row') &&
+      !sib.dataset.orphanPh &&
+      (() => {
+        const bd = sib.querySelector('.body');
+        return bd && String(bd.dataset.raw || '').trim();
+      })();
+    const isUser = (sib) => sib.classList && sib.classList.contains('user');
     phs.forEach((ph) => {
       for (let n = ph.nextSibling; n; n = n.nextSibling) {
-        if (n.classList && n.classList.contains('user')) break;
-        if (!n.classList || n.dataset.orphanPh) continue;
-        if (n.classList.contains('agent') && !n.classList.contains('typing-row')) {
-          const bd = n.querySelector('.body');
-          if (bd && String(bd.dataset.raw || '').trim()) { ph.remove(); break; }
-        }
+        if (isUser(n)) break;
+        if (hasAnswer(n)) { ph.remove(); return; }
+      }
+      for (let n = ph.previousSibling; n; n = n.previousSibling) {
+        if (isUser(n)) break;
+        if (hasAnswer(n)) { ph.remove(); return; }
       }
     });
   }
