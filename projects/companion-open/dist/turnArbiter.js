@@ -408,7 +408,12 @@ class TurnArbiter {
             // 否则同题重问拿到的同文新答会被误杀。
             const evReqIdx = typeof ev.requestIndex === "number" ? ev.requestIndex : null;
             const unproven = evReqIdx == null || evReqIdx < this.latestReqIdx;
-            const reprojKey = type === "AGENT_MESSAGE" && utKey && unproven
+            // sessiondb 行不查 a3：行即轮次记录、user_message 即本题——同文答案
+            // 落到不同行 = 不同轮的真实新答（R17：M17B 撞 M17A 文本指纹被杀，
+            // 且 requestIndex 恒 -1 使 unproven 恒真 → 该通道永远无法自证）。
+            // sessionDbEmittedIds + a|sid 键已挡同行重投，a3 对它只有误伤。
+            const isSessionDb = String(ev.streamId || "").startsWith("sessiondb/");
+            const reprojKey = type === "AGENT_MESSAGE" && utKey && unproven && !isSessionDb
                 ? `a3|${sessBase}|${normText(ev.text).slice(0, 80)}`
                 : null;
             const reprojUt = reprojKey ? this.emittedUt.get(reprojKey) : undefined;

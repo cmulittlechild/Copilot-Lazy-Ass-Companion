@@ -123,3 +123,22 @@ PWA ↔ VS Code bridge。仓库 `~/repos/sidecar_remote/projects/companion-open`
 - **result-DONE 滞后 ~30-45s**：answer-DONE 与 [result] DONE 间距约 30s+；连发队列憋到 [result] 才 flush（实测 enqueue→wire 44s，触发后 3s）。判「吞包/卡队列」前先等 [result] DONE。
 - **MODEL_LIST 三连发**：select/重连时同 ms 内 ×3 广播（多 subscriber），杂讯类，非风暴。
 - **杂散 frame 家族（均已被吸收、无可见重渲）**：`AGENT_STREAM_END len=0 id=requests/0/response#text#N`（END 后 ~30s 迟壳）、`id=sessiondb/<sess>/<idx>` 标记、parked-turn USER/AGENT 整批重投（own ut，客户端 dedupe）。
+
+## R13 取证心得补充（f6d19c8 复验轮）
+- **装包双验证**：`code --install-extension vsix --force` 后，装目录 `~/.vscode/extensions/local-dev.copilot-sidecar-companion-*/` 的 dist/media 与仓库对哈希确认一致；但**必须再 Reload Window**（Cmd+Shift+P）才激活——extensionHost pid 不变说明没生效。同理 PWA 硬刷 Cmd+Shift+R 加载新 app.js（旧页面跑的是旧 JS，replay 时的表象会骗人）。
+- **脚本化边界点击**：手动打 ~1s 收尾窗口打不中。可靠做法：预先在输入框打好第二条消息保持聚焦，`tail -n0 -f mon.log | grep --line-buffered -m1 'AGENT_STREAM_END len=0' && osascript -e 'tell app "System Events" to key code 36'`——Enter 即发送（输入框聚焦时 Enter=发送已验证）。tee 写盘有 ~1.5s 缓冲延迟，若追求同秒命中可再压。
+- **requestRunning 长尾**：DONE[result] 后 requests/N 重投影通道还会拖 ~35-55s 才收 `AGENT_STREAM_END len=0` 骨架；此窗口内发送会走已排队路径（泡+提示可见），骨架 END 或 10s watchdog 到来时排空送达。判别吞包 vs 排队：泡/hint 是否出现 + 计数 wire 上 `<<< USER_MESSAGE` 与实际点击数。
+- **变体重投影残留泡特征**：variant AGENT_MESSAGE（同 ut、内容被剥壳）+35s 左右到；修后原卡片格式保住，但被剥掉真实内容（如文件名整条被吃）时归一化判等失败 → 额外渲染一条无 Copilot 标签的 orphan 泡（agent-continued）。wire 上两条广播 ut 相同是识别特征。
+- **伪装弹窗/权限**：osascript 弹"允许控制"会阻塞脚本——screenshot 先确认无弹窗再跑长命令；窗口管理用 osascript visible/activate（macOS，勿用 wmctrl）。
+- browser_console 工具在此环境拒连（报 Chrome not foreground）；DOM 取证改用截图 zoom + 代码比对。
+
+## R14 取证心得补充（651328b 复验轮）
+- **静默丢答识别特征（新 P1 类缺陷）**：wire 上该轮只见 `AGENT_STREAM_END len=0 id=sessiondb/<file>/<row>` + `requests/N` END len=0 + DONE[result]，无 AGENT_MESSAGE、无 SET/CHUNK——sessiondb 行明明有答案却没广播。PWA 表现 = 光秃 user 泡或「该轮无回复」占位。恢复途径只有切会话回放（回放条目本身可能是 transcript 剥壳变体，如文件名 inlineReference 掉光）。本轮 2/7 轮全丢 + 1 轮 +28s 迟到（迟到件搭 requests/N 重投影通道到）。
+- **变体来源实锤**：chatSessions jsonl `response[]` 里文件名是 `inlineReference` 节点（`Created ` + ref + ` - **done**`），剥壳序列化即得 "Created  - **done**" 双空格变体；sessiondb turns 表存的是完整文本。两源不一致=所有"变体重投影"类 bug 的总根因。
+- **排队泡 dequeue 重挂**：连发泡 flush 时可能 re-append 到底部——若其上方刚生成了空占位卡，DOM 顺序会变成 占位→user泡（看着像占位串位）。判归属别看位置，看它夹在哪两条 turn 边界之间。
+- 触发变体的可靠配方：让回答引用**已存在**的工作区文件（echo 复读「Found `file.txt` - **ok**」最稳；纯 create+reply 不稳）。
+
+## R15 取证心得补充（cda409c+8d87f01 复验轮）
+- **两枚修复都在服务端**（transcriptWatcher.ts pendingGap/asked-unanswered 豁免 + jsonl.ts inlineReference→`文件名`）——**必须 Reload Window**，仅硬刷 PWA 不够（app.js 本轮 hash 未变 691f9714）。
+- **丢答恢复的 wire 签名**：sessiondb END len=0 后 ~40-50s 出现 `AGENT_STREAM_SET`（id=requests/N/response#text#0）= 重投影通道投递正文（走 SET 而非 AGENT_MESSAGE）——判修好的标志就是 SET 到、文本含 `文件名`，而不是"什么也不来"。
+- sessiondb END len=0 本身仍在（快通道竞态没根治），差别只在后续重投影是否补投——复验时别把 len=0 单独当失败证据，要看整轮是否有 SET/AGENT_MESSAGE 收尾。
