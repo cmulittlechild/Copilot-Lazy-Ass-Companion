@@ -2458,7 +2458,12 @@
               const match = dUtKey2
                 ? (owner && owner.dataset.textKey === dUtKey2)
                 : (owner && owner === lastU);
-              if (match) { e.turnDone = true; doneStreams.add(sid); }
+              // 广义收尾：归属轮已有真答案的流卡一并判 done——requests/N 流
+              // sid 跨轮复用且常无 END（僵尸卡），错锚到其他泡下的尾帧此前
+              // 漏标仍能源源重武装 rr（实测排队被顶 ~57s）。turnHasOtherAnswer
+              // 排除自产答案在写的卡，在途轮不误标。
+              const sweep = owner && turnHasOtherAnswer(owner, sid);
+              if (match || sweep) { e.turnDone = true; doneStreams.add(sid); }
             }
           }
           setRequestRunning(false, undefined, doneImmediate ? { force: true } : { deferMs: 3000 });
