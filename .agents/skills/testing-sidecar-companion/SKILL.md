@@ -194,3 +194,14 @@ PWA ↔ VS Code bridge。仓库 `~/repos/sidecar_remote/projects/companion-open`
 - **桌面发信→手机不拽**：显式点选后桌面在他会话实发一轮，wire 广播其 USER/AGENT（sess=他会话）但手机 feed 不跟随也不渲（>106s 零 SESSION_FOLLOW）——userActivity 门按码应放行（activity>select 时刻），实际未发=要么上游压制要么「显式绑定粘性」设计。报告为语义确认项，非铁证 bug。
 - **停止点击窗**：flash 系模型 ~10-13s 整文单泡到——截图+点击链路 ~4-6s 吃窗，双击停要「发送→等~3s→点→点（<1.5s）」无截图连击才打得中（本轮前两次失败均因确认点落在 DONE 后/rr 释放后空文 no-op）。已停轮 arm hint 残影永久留 feed（sys 消息不撤）。
 - **requests/N 骨架**:len=0 END 随每轮 +15~45s 尾随，属正常收尾骨架；endedStreams 修复后未见同 sid 的 SET/START 迟帧复投。
+
+## R24 取证心得补充（第十三轮，5567505 同会话跟随跳过+孤儿占位双向扫）
+- **孤儿占位有两种元素**：live DONE 路径画的是 `data-orphan-ph` 标记元素（rescindOrphanPlaceholders 的扫描对象）；**回放渲染的孤儿占位是普通 .msg.agent 无标记**（带复制键的斜体文案）——DOM 取证查占位必须按 data-orphan-ph 区分，querySelector('.msg.agent') 会把两者混为一谈。
+- **回放孤儿判定需后随 user 轮**：文件尾部的孤儿 request 不画占位（视作在途豁免）；要造占位须在其后再跟一条 request 把它界住。
+- **jsonl 尾注入的 wire 规律**：新 requestId 行 → 只播 USER_MESSAGE（即便带完整 response 也不播 AGENT——迟答广播只发给桥**亲自派发过**的 requestId）；同 requestId 再追加同容/异容行 → 第二次起全量静默（已见过）；薄克隆（缺 result/responseId）会重复播 USER。结论：**「停止轮迟答」无法用文件注入伪造**，只能靠真停止轮碰运气。
+- **快停可造真迟答**：发送后 ~1-1.5s 内完成 arm+confirm 双连击 → phone_stop 打在生成完成前 → 真答案 +10.6s 经迟投通道 AGENT_MESSAGE 到达（本轮 R24X 首次稳定复现 R23 M23S3 机制；此前 ~5s/8.5s 两档均只得到答案先到）。真迟答到达时 live 占位要么没画（延迟复核窗口内答案先到）要么画在**其它孤儿轮**上（本轮落在先前注入的孤儿泡下——bareDone 归属取「最末无答用户泡」，hint/sys 行不计答案会扰归属）。
+- **占位撤销 in-vivo 验证配方**：DOM 注入假答案兄节点（`.msg.agent>.body[data-raw≠'']`）插到真 `data-orphan-ph` 元素**上方**，再发一条真消息——其 addAgentFinal 触发全 feed 扫描→占位被撤（双向扫的反向半支即此验证）。
+- **jsonl 整文件重写副作用**：truncate+write 会让 watcher 从 tail offset 重读——把偏移附近的真行再播一遍（本轮 R24X USER 回声）；客户端 dedupe 吸收，但监控会记一条"幽灵"USER。
+- **drawer 排序随活动重排**：任何文件/会话活动后行序即变（本轮 M23A 从第2行升第1行）——开抽屉必须先截图再点，背坐标必误点。
+- **browser_console 前景检测失灵**：Chrome 窗已在最前仍报 "not in the foreground"——改用 Cmd+Alt+J DevTools 控制台 + GUI 键入执行 JS（录屏也更透明）。
+- **草稿存活性**：composer 未发送草稿经受**跨会话**跟随回放+同会话重选回放均未丢——R23「草稿被清」疑似绑定在 ANOM-1 的空 feed 路径，本轮无自发回放无法复验该特定清空路径。
