@@ -1275,6 +1275,9 @@
   function frameRearms(msg) {
     const sid = (msg && msg.streamId) || 'default';
     if (doneStreams.has(sid)) return false;
+    // 判重抑制流（transcript requests/N 通道晚于 sessiondb 答案到达被整流
+    // 吞掉）——帧不渲也不该算流活动：尾部 END/碎片实测把发送键多卡 ~75s。
+    if (suppressedStreams.has(sid)) return false;
     if (msg && msg._ut && turnHasOtherAnswer(ownerUserFor(msg._ut, msg.timestamp), sid)) return false;
     return true;
   }
