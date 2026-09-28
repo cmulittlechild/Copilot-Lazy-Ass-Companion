@@ -203,6 +203,20 @@
   }
   /** 已发出但未收到回答的用户消息（清屏/重放后重画用）；回声到达或回答完成即移除 */
   const sentAwaitingReply = [];
+  /** 待答清单持久化：页面刷新把内存清单连同「发后落盘窗口」上下文一起蒸发——
+      transcript 请求行只在轮次完成时写盘，发送后 ~1s 刷新的回放里该轮 USER 缺席，
+      补画与未送达校验都无凭据 → 答案裸挂上一轮。快照进 sessionStorage，回放末段按
+      「5min 内 + 本会话 + 回放 USER 缺席」恢复（已在回放里的说明轮已落盘无需跟踪）。 */
+  const SENT_AWAITING_KEY = 'sidecar.sentAwaiting';
+  function persistSentAwaiting() {
+    try {
+      const arr = sentAwaitingReply
+        .filter((e) => e && typeof e.text === 'string' && e.text.trim())
+        .map((e) => ({ text: e.text, key: e.key || '', sess: e.sess || '', at: e.at || Date.now() }));
+      if (arr.length) sessionStorage.setItem(SENT_AWAITING_KEY, JSON.stringify(arr.slice(-8)));
+      else sessionStorage.removeItem(SENT_AWAITING_KEY);
+    } catch (_) {}
+  }
   /** 回放渲染过的用户文 textKey→ts：跟随/重连回放后迟到的同文 live USER 回声据此吞掉 */
   const recentReplayedUserText = new Map();
   function clearPendingSend() {
@@ -2819,6 +2833,37 @@
               }
             }
           } catch (_) {}
+          // 刷新把内存待答清单蒸发了：从持久化快照恢复——回放 USER 已含的行说明
+          // 轮次已落盘（无需跟踪/补画），只有「桥已确认、transcript 懒写盘窗口内刷新」
+          // 的条目存活，让待答匹配与未送达校验在重载后仍能工作。
+          try {
+            const rawA = sessionStorage.getItem(SENT_AWAITING_KEY);
+            if (rawA) {
+              const arrA = JSON.parse(rawA);
+              const boundBaseA = baseNameAny(currentSessionMeta.file).replace(/\.jsonl$/i, '');
+              const replayedA = new Set();
+              for (const m of list) {
+                if (m && m.type === 'USER_MESSAGE' && typeof m.text === 'string') {
+                  replayedA.add(userTextDedupeKey(m.text));
+                }
+              }
+              const nowA = Date.now();
+              const keptA = [];
+              for (const a of Array.isArray(arrA) ? arrA : []) {
+                if (!a || typeof a.text !== 'string' || !a.text.trim()) continue;
+                if (nowA - (a.at || 0) > 5 * 60 * 1000) continue;
+                const aBase = baseNameAny(a.sess || '').replace(/\.jsonl$/i, '');
+                if (!boundBaseA || aBase !== boundBaseA) continue;
+                if (replayedA.has(userTextDedupeKey(a.text))) continue;
+                keptA.push(a);
+                if (!sentAwaitingReply.some((e) => userTextDedupeKey(e.text) === userTextDedupeKey(a.text))) {
+                  sentAwaitingReply.push({ text: a.text, key: a.key || `user:restored:${nowA}:${userTextDedupeKey(a.text)}`, sess: a.sess, at: a.at || nowA });
+                }
+              }
+              if (keptA.length) sessionStorage.setItem(SENT_AWAITING_KEY, JSON.stringify(keptA));
+              else sessionStorage.removeItem(SENT_AWAITING_KEY);
+            }
+          } catch (_) {}
           // 「已发未答」的泡也补回（发完即切/跟随重选的交错态不丢泡）
           repaintAwaitingUserBubbles();
           // 回放权威校验：已确认回声的待答文本若在回放 USER 里完全缺席，
@@ -2833,12 +2878,35 @@
               }
             }
             const boundBaseR = baseNameAny(currentSessionMeta.file).replace(/\.jsonl$/i, '');
+            // 懒写盘在途证据：回放里 send 之后仍有 agent 活动（AGENT/TOOL/THINKING 帧 ts）
+            // 说明管道活着——USER 行要轮次完成才写盘，在途轮缺席不等于丢失，
+            // 误报未送达会把仍在生成的条目回填+移出待答（答案随后裸挂上一轮）。
+            let lastReplayAgentAt = 0;
+            for (const m of list) {
+              if (m && /^(AGENT|TOOL|THINKING)/.test(String(m.type || ''))) {
+                const t = eventTsNum(m);
+                if (Number.isFinite(t) && t > lastReplayAgentAt) lastReplayAgentAt = t;
+              }
+            }
+            // 「落盘已过此点」判据：transcript 按轮次完成顺序追加，回放里任何 ts 晚于
+            // 该 send 的 USER 行都证明本轮若已落盘必然在场——缺席才是真丢失；
+            // 否则条目仍可能在途（USER 行要轮完才写），除非已越过服务端 45s 核验窗。
+            let lastReplayUserTs = 0;
+            for (const m of list) {
+              if (m && m.type === 'USER_MESSAGE' && typeof m.text === 'string') {
+                const t = eventTsNum(m);
+                if (Number.isFinite(t) && t > lastReplayUserTs) lastReplayUserTs = t;
+              }
+            }
             for (let i = sentAwaitingReply.length - 1; i >= 0; i--) {
               const e = sentAwaitingReply[i];
               const eBase = baseNameAny(e.sess || '').replace(/\.jsonl$/i, '');
               if (!boundBaseR || eBase !== boundBaseR) continue;
               // 上行落盘有 ~1-2s 延迟：发送太新的条目跳过，回放可能先于落盘
               if (Date.now() - (e.at || 0) < 3000) continue;
+              if (lastReplayAgentAt && lastReplayAgentAt >= (e.at || 0)) continue;
+              if (!(lastReplayUserTs && lastReplayUserTs >= (e.at || 0)) &&
+                  Date.now() - (e.at || 0) < 45000) continue;
               if (replayedUserKeys.has(userTextDedupeKey(e.text))) continue;
               sentAwaitingReply.splice(i, 1);
               if (!(input.value || '').trim()) { input.value = e.text; sendVerifyRestoredText = e.text; }
@@ -3909,6 +3977,7 @@
     if (sentAwaitingReply.length >= 8) sentAwaitingReply.shift();
     // sess 标发送时的会话文件：SESSION_SELECTED 切换后丢别会话残留，防跨会话误重画
     sentAwaitingReply.push({ text, key: localKey, sess: currentSessionMeta.file, at: Date.now() });
+    persistSentAwaiting();
     const sentTextKey = userTextDedupeKey(text);
     pendingSendCheck = {
       textKey: sentTextKey,
