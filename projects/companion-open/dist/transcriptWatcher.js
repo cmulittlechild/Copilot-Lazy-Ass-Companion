@@ -396,6 +396,9 @@ class TranscriptWatcher {
         // 兜底源清理：解绑 + 清投影器内部 debounce 定时器
         this.unbindFallback();
         this.fallbackProjector.dispose();
+        if (this.sessionDbTimer)
+            clearInterval(this.sessionDbTimer);
+        this.sessionDbTimer = undefined;
         this.closeWatchers();
         this.closeSessionDbWatcher();
     }
@@ -521,6 +524,11 @@ class TranscriptWatcher {
             this.sessionDbLastRow = this.querySessionDbMaxId();
             this.sessionDbPendingRows.clear();
             this.sessionDbUserEmittedIds.clear();
+        }
+        // sessiondb 轮询独立成表：原寄生于 fallbackTimer，chatSessions 文件缺位时
+        // unbindFallback 清掉定时器 → sessiondb 通道整轮静默（R16 观测）。
+        if (!this.sessionDbTimer && this.opts.sessionStoreDb) {
+            this.sessionDbTimer = setInterval(() => this.pollSessionStoreDb(), this.fallbackPollMs);
         }
         if (this.opts.chatSessionsDir) {
             const csFile = path.join(this.opts.chatSessionsDir, this.boundSessionBase);
@@ -924,6 +932,8 @@ class TranscriptWatcher {
     // ---- session-store.db 快速兜底（Copilot 新版：turns 行响应完成即落库）----
     sessionDbSessionId;
     sessionDbLastRow = 0;
+    /** 独立轮询表：不再寄生于 fallbackTimer（chatSessions 缺位会被解绑连带清掉） */
+    sessionDbTimer;
     /** 当前正在分发的 transcript 行的事件 ts(ms)：emit() 给未带 timestamp 的事件
      *  盖上真实记录时刻，PWA 的按 ts 排序才有意义（否则全塌成到达序）。
      *  仅 handleEvent 内有效，分发结束即清——定时器/轮询通道的事件必须自带 ts。 */
