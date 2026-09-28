@@ -1519,7 +1519,10 @@
           n.style.display = 'none';
           n.classList.add('is-done');
         });
-        setRequestRunning(false);
+        // 与 END 处理同锚：流卡收尾只是「这条流」结束，不是轮终——轮中途
+        // 的骨架/进度块 END 会走到这里。无条件即释会让在途态在静默窗内
+        // 提前回弹（R29 实测连发仍逃逸）。统一宽限复查：≥5s 无活动才放。
+        setRequestRunning(false, undefined, { deferMs: 3000 });
       }
     }
   }
@@ -3834,7 +3837,7 @@
       if (n.el && n.el.isConnected) {
         // 复用入队时已渲的泡：去掉排队态，别再画第二个
         n.el.classList.remove('queued');
-        sendTextNow(n.text, n.mode, n.el, n.key);
+        sendTextNow(n.text, n.mode, n.el, n.key, true);
       } else {
         sendTextNow(n.text, n.mode);
       }
@@ -3845,7 +3848,7 @@
     }
   }
 
-  function sendTextNow(text, mode, existingEl, existingKey) {
+  function sendTextNow(text, mode, existingEl, existingKey, keepDraft) {
     Haptics.tap();
     // 0.5.19+：手机发送 force 上屏，避免短文案「1」被历史同文去重吞掉
     // existingEl：排队期已渲的泡——复用，不再重复画（localKey 沿用入队时的 key）。
@@ -3890,8 +3893,12 @@
     }
     setRequestRunning(true, 'Copilot 正在输入…');
     showTyping();
-    input.value = '';
-    input.style.height = 'auto';
+    // 出队发送不清输入框：入队时已清空，此后用户可能又打了新草稿——
+    // 出队抹掉它是静默丢稿（R29-X1）。直连发送照常清空。
+    if (!keepDraft) {
+      input.value = '';
+      input.style.height = 'auto';
+    }
     sendVerifyRestoredText = null; // 新发送即抛弃旧回填标记
     // 半死 socket 防御：N 秒内服务器没回声这条消息就判丢，回填文本让用户重发。
     // 同时写 sessionStorage——半死 socket 报错可能刷新页面杀死计时器，刷新后启动时回填。
