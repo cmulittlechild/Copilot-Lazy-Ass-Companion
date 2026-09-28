@@ -152,3 +152,11 @@ PWA ↔ VS Code bridge。仓库 `~/repos/sidecar_remote/projects/companion-open`
 - **VS Code 1.139 Chat "Sessions" 视图**：行点击/悬停图标/"Open as Editor"都不保证真的切换活动会话（实测零 SESSION_FOLLOW）；可靠触发桌面会话变更=在桌面 composer 真发一条消息（新会话落盘即 newest→跟随）。桌面发送前把文字打在 PWA 输入框里，跟随落地后可直接 Enter 复用。
 - **sessiondb 行即铁证**：`turns` 表 (session_id,turn_index,user_message,assistant_response,timestamp) 三列对账——归属、答案、生成时刻一次看清；`id=sessiondb/<file>/<row>` 的 STREAM_END 行还给出 db 行号。
 - 桌面"Update"徽标 staged 时勿 Reload/Update VS Code（桥会死）；本次全程无碍。
+
+## R19 取证心得补充（a27de87 复验轮：全局 sessiondb 轮询 + _sess 过滤）
+- **`_sess` 错标签名**：live AGENT_MESSAGE 的 `sess=` 与 sessiondb 行 session_id 不一致时，以 **sessiondb 行为准**——本次见到答案 `sess=83b72c09` 但行/jsonl 都证明轮跑在 9c6e9dd0：是 transcript/arbiter 通道按 boundSessionBase 打标，而点选后 rebind 要等 inject 驱动桌面切换落地（本次 ~52s，被在途轮排队拖慢）。客户端 _sess 过滤会**正确丢弃错标事件**→feed 卡 typing ~19s 直至下一次回放回填。取证：wire 错标 + sqlite `turns` 行 session_id + chatSessions jsonl grep 三方对账。
+- **点选≠立即换绑**：PHONE_SESSION_SELECT 只立刻广播 replay；watcher 换绑要等桌面切换完成（含被在途轮排队的情形）——期间 transcript 通道事件全按旧会话打 _sess。判「跟随还是点选」依旧看 wire 有没有 `SESSION_SELECTED`（select 只播 REPLAY；follow 播 SESSION_SELECTED+REPLAY 对）。
+- **全局轮询后 wire 噪音预期**：monitor 会见到 `sess=` 非当前会话的 U/A 帧——是设计行为（客户端 app.js:2040 过滤）；断言在 feed（渲染层）不在 wire（广播层）。
+- **vsce 打包会 bundle app.js**：vsix 内 `media/pwa/app.js` 是 IIFE 打包产物（md5 ≠ 仓库源文件）；比对装好的包时解 vsix 内部件比，别拿源文件 hash 对。dist/*.js 的「装包 vs 仓库」diff 若只含 HTML 模板串换行差异属无害。
+- **`Reload Window` 只重载窗口**：徽标上的 VS Code update 不会被它应用；重载后桥新 pid（channel.json 更新），monitor 需重连。
+- 判上游倍字（如 "b19 okb19 ok"）：直接查 sessiondb `assistant_response`——本桥只读该表，库里是倍字即上游写的，wire 忠实投递不算 bug。

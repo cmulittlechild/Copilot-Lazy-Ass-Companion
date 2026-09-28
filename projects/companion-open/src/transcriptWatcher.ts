@@ -1426,6 +1426,16 @@ export class TranscriptWatcher {
    * 不再因全局 transcriptHadGap 重扫整文件把旧回复贴到新气泡。
    */
   private emitAgentSide(evs: PhoneEvent[]) {
+    // fallback 通道事件按其源文件会话打标：fallbackFile 与 boundSessionBase 在
+    // 换绑窗口内可能不是同一会话，投影自哪个文件就属于哪个会话。
+    const fbSess = this.fallbackFile
+      ? path.basename(this.fallbackFile).replace(/\.jsonl$/i, '')
+      : '';
+    if (fbSess) {
+      for (const ev of evs) {
+        if (ev && !(ev as any)._sess) (ev as any)._sess = fbSess;
+      }
+    }
     // sessiondb 行是「完成才入库」的新轮次，不是 catch-up 洪水，不走 suppress/pending 门槛
     const forceLive = evs.some(
       (e) => typeof (e as any)?.streamId === 'string' && (e as any).streamId.startsWith('sessiondb/'),
@@ -2654,8 +2664,10 @@ export class TranscriptWatcher {
     if (ev && (ev as any).timestamp === undefined && Number.isFinite(this.evTsMs)) {
       (ev as any).timestamp = this.evTsMs;
     }
-    // 会话标签：客户端按绑定会话过滤，任何通道的跨会话事件不得投影到当前 feed
-    if (ev && this.boundSessionBase) {
+    // 会话标签：客户端按绑定会话过滤，任何通道的跨会话事件不得投影到当前 feed。
+    // 事件自带 _sess（sessiondb 行 session_id 等权威来源）优先——换绑滞后期间
+    // boundSessionBase 还是旧会话，无条件覆盖会把别会话真答案错标被滤掉（R19）。
+    if (ev && !(ev as any)._sess && this.boundSessionBase) {
       (ev as any)._sess = this.boundSessionBase.replace(/\.jsonl$/, '');
     }
     if (ev && ev.type === 'USER_MESSAGE') {
