@@ -2047,6 +2047,12 @@
     // 穿过过滤冒充当前会话的发言，看起来像本会话的轮次（实测漏泡根因）。
     if (msg.type === 'USER_MESSAGE' && msg.foreign === true) {
       const sid = String(msg._sess || '');
+      // 本会话文件被 foreign 扫描误投（模型切换重写文件触发尾部重读）：
+      // live 通道已渲过同一条，静默丢——不能渲成【其他会话】系统行冒充别会话发言。
+      const bound0 = currentSessionMeta.file
+        ? baseNameAny(currentSessionMeta.file).replace(/\.jsonl$/i, '')
+        : '';
+      if (bound0 && sid === bound0) return;
       const want = sid + '.jsonl';
       let label = '其他会话';
       const cache = window.__sessionTitleCache || {};

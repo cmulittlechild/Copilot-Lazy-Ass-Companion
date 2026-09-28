@@ -922,8 +922,12 @@ export class BridgeServer {
       if (url) this.setPublicUrl(url);
       return;
     }
-    // 与 sendToPhone 同走裁决器：注入回执 DONE/过期 DONE 在此打 stale/ack 标记
-    const arbitrated = this.arbiter.accept(ev);
+    // 与 sendToPhone 同走裁决器：注入回执 DONE/过期 DONE 在此打 stale/ack 标记。
+    // markEmitted 同样按真实上公网记名——否则同一条 TOOL_CALL/AGENT_MESSAGE 经
+    // 本路径先过（不记名）再经 sendToPhone 投一遍，wire 双发（R26 TOOL 双投）。
+    const arbitrated = this.arbiter.accept(ev, {
+      markEmitted: this.authorizedClientCount() !== 0,
+    });
     if (!arbitrated) return;
     if (arbitrated?.type === 'AGENT_CONFIRM') this.pendingConfirm = arbitrated;
     this.trackStreamState(arbitrated);

@@ -205,3 +205,16 @@ PWA ↔ VS Code bridge。仓库 `~/repos/sidecar_remote/projects/companion-open`
 - **drawer 排序随活动重排**：任何文件/会话活动后行序即变（本轮 M23A 从第2行升第1行）——开抽屉必须先截图再点，背坐标必误点。
 - **browser_console 前景检测失灵**：Chrome 窗已在最前仍报 "not in the foreground"——改用 Cmd+Alt+J DevTools 控制台 + GUI 键入执行 JS（录屏也更透明）。
 - **草稿存活性**：composer 未发送草稿经受**跨会话**跟随回放+同会话重选回放均未丢——R23「草稿被清」疑似绑定在 ANOM-1 的空 feed 路径，本轮无自发回放无法复验该特定清空路径。
+
+## R26 取证心得补充（深层检查轮，vsix 8f1ab3f endedStreams）
+- **发送打点别再 `echo >> mon.log`**：tee 用自有文件偏移写盘（非 O_APPEND），后续写入会覆盖你追加的 `####` 行——marker 写独立文件 `~/mon_rXX.marks`，靠 wire 行自带墙钟对齐。
+- **macOS Sonoma+「点击桌面壁纸显示桌面」**：computer click 落到 wallpaper 会瞬间隐藏全部窗口，且 type 会落到 Finder（type-select，无害但废动作）。恢复=Dock 图标点回各 app。窗口并排布局用 `osascript -e 'tell process "Google Chrome" to set position of window 1 to {0,25}' -e '…set size of window 1 to {755,743}'`（勿全屏——会盖住监控终端；PWA 是窄移动 UI，左 75% 足够）。
+- **确定性断线 flap**：`kill -STOP <ext host pid>`（channel.json 的 pid）冻结服务端 ≥ SOCKET_STALE_MS(30s) → PWA linkWatchdog 判半死 → `forceReconnect` 升级请求挂起 → `kill -CONT` 后握手完成自动恢复（wire 出现广播 REPLAY=reannounce 证据）。比 DevTools Offline 可靠（Offline 不杀已建 WS）。
+- **模型真生效判据**：chatSessions jsonl 每个 request 存 `modelId`(选中 id) 与 `result.resolvedModel`——grep 最新 request 即铁证，无需靠答风猜。
+- **queue-escape 判据公式**：排队 U2 的 wire USER 时刻 tU2 与前轮答案 tA1——tU2<tA1 即逃逸（本例 interim TOOL_CALL DONE 提前释放队列；上游 Copilot 串行化兜底所以答案仍对，但机制已破）。
+- **TOOL 双投核查**：wire `TOOL_CALL` 同 ts ×N 配对 jsonl `response[]` 里 `kind==toolInvocationSerialized` 计数——1 实调 N 广播=双投；DOM 表现为同调用双 step-group（一张卡常滞留「正在运行」）。
+- **endedStreams 盲区**：8f1ab3f 只挡「其 streamId 已 END 后到达」的帧——无 START 记录的孤儿 `AGENT_STREAM_CHUNK`（jsonl 投影通道 `requests/N/response#text#K`）仍能进来，~55s 迟帧可复活一张 .streaming 幽灵卡；DOM 取证 `#feed .streaming` 计数。
+- **DOM 取证通道**：read_dom/browser_console 会误报「Chrome not foreground」——DevTools Cmd+Alt+J 控制台跑 JS dump `#feed > *` 的 className+text 前缀最稳（自证 .streaming/queued/data-orphan-ph/移位块）。
+- **模型切换副作用**：model select 触发会话 jsonl rewrite → watcher tail 重读把最近 USER 当 foreign 重播 → feed 冒同会话内容的「【其他会话】」sys 行（P2 误标，非泄漏）。
+- **模型轮 result-DONE 可缺席**：本轮 deepseek-v4.1-flash 轮答案 DONE 后 >70s 无 [result] DONE，rr 由 ~75s STREAM_STALE 看门狗释放——该窗口内排队消息会滞留 ~75s，判「队列卡死」前先等看门狗。
+- **停止轮自查表**：sessiondb 该 turn 行 assistant_response 为空 + jsonl modelState value=2 = 真停；feed 回放应渲「(该轮无回复—已停止或请求失败)」占位。live 区的假阳性靠「答案+占位共存>5s」判。

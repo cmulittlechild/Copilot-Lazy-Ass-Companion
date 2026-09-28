@@ -659,6 +659,10 @@ export class SessionWatcher {
                   if (!text) continue;
                   // 手机端已 pin 某会话时，禁止把「其他会话」的桌面消息灌进当前 feed
                   if (this.pinnedFile) continue;
+                  // 当前绑定文件不是「其他会话」——它的用户消息走 live 通道。
+                  // 绑定靠 follow 而非 pin 时（模型切换重写文件触发尾部重读），
+                  // 本会话 USER 曾被当 foreign 重投成【其他会话】系统行（R26）。
+                  if (samePath(full, this.current)) continue;
                   // kind0 快照含整段历史：只投时间戳足够新的用户消息（dump 防御）。
                   // lastReqCount 兜底：无 timestamp 的老版本数据退化为按追加位置过滤
                   const rts = typeof r?.timestamp === 'number' ? r.timestamp : undefined;

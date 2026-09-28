@@ -211,7 +211,20 @@ class TurnArbiter {
                 const endedAt = sid ? this.endedStreams.get(sid) : undefined;
                 if (endedAt != null && now - endedAt < 60_000)
                     return null;
-                const t = this.openTurnForEvent(sessBase, TurnArbiter.tsOf(ev));
+                const evTs = TurnArbiter.tsOf(ev);
+                const t = this.openTurnForEvent(sessBase, evTs);
+                if (!t) {
+                    // 孤儿流帧：归属不到任何开启轮。CHUNK 在「全轮已答」后到达 =
+                    // 已收尾轮的迟到重投影——客户端会为它新建永不收尾的 ghost 卡
+                    // （requests/N 投影在答案落线 ~55s 后补帧实测）。ts 早于开启轮
+                    // 的 START/SET 同理是旧轮迟到件。openTurns 全空不可判——放行，
+                    // 以免吞掉 USER 尚未登记的桌面新轮。
+                    const staleVsOpen = evTs != null && this.newestOpenTurn(sessBase) != null;
+                    const noOpenButKnown = this.newestOpenTurn(sessBase) == null &&
+                        this.openTurns.length > 0;
+                    if (type === "AGENT_STREAM_CHUNK" ? staleVsOpen || noOpenButKnown : staleVsOpen)
+                        return null;
+                }
                 if (t) {
                     t.sawStream = true;
                     if (!utKey)
@@ -325,6 +338,19 @@ class TurnArbiter {
                     !doneTurn.sawStream &&
                     now - doneTurn.ts < INJECT_ACK_WINDOW_MS) {
                     ev.ack = true;
+                }
+                // 中间 DONE：归属轮仍在流式产出（见过流、未判答）时到达的 DONE 是
+                // 工具步/子轮边界件而非本请求收尾——放行会让客户端拿它提前释放
+                // 发送队列（R26：queued 消息在答案落线前 ~18s 逃逸上链），同时
+                // markAnswered 会把轮错关、放走后续同类 DONE。直接丢。
+                // reason==='result' 是请求级权威收尾，豁免；从未见过流的轮
+                // （无流模型）其 turnSeq DONE 是唯一收尾件，也豁免。
+                if (!immediate &&
+                    ev.reason !== "result" &&
+                    doneTurn &&
+                    doneTurn.sawStream === true) {
+                    ev.interim = true;
+                    return null;
                 }
                 // 停止类 DONE：终止最新未答轮，记 closedUt 让客户端精确清条目
                 const newest = this.newestOpenTurn(sessBase);
