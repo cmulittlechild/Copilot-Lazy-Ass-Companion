@@ -74,6 +74,13 @@ let pendingFollowFile;
 // 挂空操作占位；tdir 存在时赋真实现（sessionWatcher 通道先建，引用需提前可解析）
 let reevaluatePendingFollow = () => { };
 let performSessionFollow = () => { };
+/** PHONE_STOP 可能比注入请求的 USER 落盘还早（取消打在未开启的轮上=空操作，
+ * 该轮照样跑完——实测 stop 比 USER 早 0.8s，答案仍全文到达）。
+ * 若停止时最近注入文本的 USER 尚未注册上游，挂起停止；其 USER_MESSAGE 在
+ * transcript 出现时（轮真正开启）补发一次取消。45s TTL。 */
+let lastInjectedPhoneText = "";
+let lastInjectedUserSeen = true;
+let deferredPhoneStop;
 /** 正文规范化（dedupe 用）：剥 markdown 强调+压空白+截断，与 transcriptWatcher.agentTextKey 同形 */
 function replayTextKey(text) {
     return String(text || "")
@@ -323,6 +330,10 @@ async function activate(context) {
                     if (transcriptWatcher && typeof msg.text === "string") {
                         transcriptWatcher.addPendingPhoneUserText(msg.text);
                     }
+                    // 新发即解除挂起停止：用户重新提问表示想要这个轮（同文重问亦然）
+                    lastInjectedPhoneText = String(msg.text).trim();
+                    lastInjectedUserSeen = false;
+                    deferredPhoneStop = undefined;
                     // noteInjectedText is called inside injectMessage; bridge also remembers
                     // PHONE_MESSAGE text so sendToPhone can drop JSONL USER_MESSAGE echo.
                     // USER_MESSAGE 已由 bridge.acceptPhoneUserMessage 广播；这里只推 typing 态。
@@ -395,6 +406,12 @@ async function activate(context) {
                     else {
                         // 本地立即收尾 typing；transcript 随后的 turn_end 还会再发 COPILOT_DONE
                         bridge?.broadcast({ type: "COPILOT_DONE", reason: "phone_stop" });
+                        // 停止早于注入 USER 落盘：请求还在注入管道里、取消打空——挂起，
+                        // 该文本的 USER_MESSAGE 出现时补发取消（见 handleTranscriptWatcherEvent）。
+                        if (!lastInjectedUserSeen && lastInjectedPhoneText) {
+                            deferredPhoneStop = { text: lastInjectedPhoneText, at: Date.now() };
+                            qrPanel.addLog(`deferred stop armed: ${lastInjectedPhoneText.slice(0, 50)}`);
+                        }
                     }
                 }
                 else if (msg.type === "PHONE_CONFIRM") {
@@ -782,6 +799,24 @@ async function activate(context) {
                 // 返回 sendToPhone 的投递结果：false = 事件在桥端被丢（回声/去重/仲裁），
                 // watcher 据此不记「已投」——否则后续通道的同答案会被误判重投影而净丢。
                 onEvent: function handleTranscriptWatcherEvent(ev) {
+                    if (ev.type === "USER_MESSAGE" && typeof ev.text === "string") {
+                        const utNow = String(ev.text).trim();
+                        if (utNow && utNow === lastInjectedPhoneText)
+                            lastInjectedUserSeen = true;
+                        // 挂起停止兑现：停止先于本 USER 落盘 → 此刻轮才真正开启，补发取消。
+                        // 只匹配「停止时还没见到 USER」的那次注入文本；晚到的同文事件不误杀
+                        // （45s TTL + 一次性消费）。
+                        if (deferredPhoneStop && deferredPhoneStop.text === utNow) {
+                            const armed = deferredPhoneStop;
+                            deferredPhoneStop = undefined;
+                            if (Date.now() - armed.at < 45000) {
+                                qrPanel.addLog(`deferred stop fired on turn start: ${utNow.slice(0, 50)}`);
+                                setTimeout(() => {
+                                    (0, inject_1.cancelChatRequest)().catch(() => undefined);
+                                }, 800);
+                            }
+                        }
+                    }
                     if (ev.type === "USER_MESSAGE" &&
                         typeof ev.text === "string" &&
                         (0, inject_1.isInjectedEcho)(ev.text)) {
