@@ -168,3 +168,11 @@ PWA ↔ VS Code bridge。仓库 `~/repos/sidecar_remote/projects/companion-open`
 - **drawer 列表按近度重排**：会话行顺序随最近活动变，每次开抽屉先截图再点行，别背坐标。
 - **作文流 ~20s**：「在途轮排队切换」窗口稍纵即逝——要点选的动作备好再发文，或发更长文（≥250 词）保证切换落在在途窗内。
 - **select 的 replay 也会被在途轮排队**：本轮 4b0f0160 select 的 REPLAY 晚了 ~13s（正常 ~2s）——select 点击到 replay 间隔大不等于没选上，看 wire。
+
+## R21 取证心得补充
+- BUG-4（幻影重投影盖新轮 ut）**不可稳定复现**：变体重投影是 sporadic 上游事件，本轮 3 个触发窗（纯文本答案 ~89s、单引号文件引用 ~115s、标准 backtick+bold 文件引用 ~95s）全部零重投影——连「同文 re-emission 带旧 ut」都没出现，无法动态验证 owner-ut 重指派生效。结论只能写「未复现 + 无幻影」而不是「已修复」。若后续要验证，需要在变体确实发射的轮次上碰运气；统计上每轮能等 ~90s 窗都算一次尝试。
+- 全量判据有用：`grep "<<< AGENT_MESSAGE" mon.log | grep -v "sess="` —— 裸（无 sess）AGENT_MESSAGE 即 transcript 投影通道事件，幻影特征。本轮全量=0 行，说明 transcript 投影管线整体静默，所有答案全走 sessiondb 快通道（_sess=行.session_id）。
+- 跟随机制澄清（回应 R20 遗留问题）：SESSION_FOLLOW 对**有内容**会话正常——点选 4b0f0160 后 +8s 同向 SESSION_SELECTED（inject 驱动桌面切换落地），桌面作曲框发 M21D → +10s SESSION_SELECTED→34adae78 + REPLAY n=6 + 19s 直播答案。R20 的 SESSION_SELECTED=0 是 pending-content 设计（新会话无内容不跟随），非回归。
+- 桌面作曲框坐标：右侧 Chat 面板的输入框在 "Describe what to..." 占位符行，y≈300（不是 335——335 会点到附件胶囊/图标行或 Outline 折叠钮）。直接点击后 `type` 文本比跨 app Cmd+V 可靠。
+- 同文重问判定仍过：M21DUP ×2 得两条 dup21 ok（sessiondb 行 494/495），新 emittedA2 owner-check 未误伤同 ut 重问。排队 ~13s 才 flush 因为首轮 result-DONE 未到（queue 行为正常）。
+- 撞名 grep 陷阱：`grep -l "M21D"` 会误中 "M21DUP"——jsonl 归因验证要用全 token 正则 `M21D[A-Z]*` 并统计实际 token，不能靠子串 grep -l。

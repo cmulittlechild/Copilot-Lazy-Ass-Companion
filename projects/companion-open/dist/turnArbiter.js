@@ -402,12 +402,15 @@ class TurnArbiter {
             // 幻影重投影纠偏（R20 BUG-4）：上轮答案经变体重投到达时被盖到新开启轮
             // 的 _ut 下——事件自证不了归属（无 requestIndex 或下标落后于已见最新），
             // 而同一文本在窗口内已投给别的轮实例。此时 _ut 拨回其真实归属轮：
-            // a2 按轮次实例判重会把迟到的幻影自然吃掉；同题重问的 ut 本就相同，
-            // 拨回不改变归属（altPrev.turn 与 ownerTurn 同 ut 时各自放行）。
+            // a2 按轮次实例判重会把迟到的幻影自然吃掉。
+            // 前提：事件自己没有权威 _ut（sessiondb 行带 r.user_message 是自证归属——
+            // 同题重问的第二答_ut 相同但轮实例不同，拨回旧轮会把它误杀）。
             const evReqIdx = typeof ev.requestIndex === "number" ? ev.requestIndex : null;
             const unproven = evReqIdx == null || evReqIdx < this.latestReqIdx;
+            const hadOwnUt = typeof ev._ut === "string" && normText(ev._ut) !== "";
             if (type === "AGENT_MESSAGE" &&
                 unproven &&
+                !hadOwnUt &&
                 altPrev &&
                 altPrev.turn != null &&
                 ownerTurn !== altPrev.turn &&
