@@ -1214,7 +1214,19 @@
     if (!sid) sid = 'default';
     const entry = streamingTurns.get(sid);
     if (entry && entry.element && entry.element.isConnected) return entry;
-    return startAssistantTurn(sid, { ut: msg && msg._ut });
+    // 直播期无活卡时：事件 ts 早于最新用户泡 >2s = 旧轮经慢通道迟到的
+    // 思考/进度帧（归属轮已收尾，sid 常是已被复用的位置型僵尸 id）——为它
+    // 新建流卡只会 appendChild 贴到 feed 底部挂进最新轮下。丢弃；活轮的
+    // 早到思考帧 ts 是新鲜值不受影响。回放期豁免：历史思考帧必须照常渲染，
+    // 它们靠 ts 锚定回自己那轮。
+    const evTs = eventTsNum(msg);
+    if (!replaying && !replayingInstant && Number.isFinite(evTs)) {
+      const users = feed.querySelectorAll('.msg.user');
+      const lastU = users.length ? users[users.length - 1] : null;
+      const luTs = lastU ? Number(lastU.dataset.ts) : NaN;
+      if (lastU && Number.isFinite(luTs) && evTs + 2000 < luTs) return null;
+    }
+    return startAssistantTurn(sid, { ut: msg && msg._ut, ts: evTs });
   }
 
   /** 慢通道流式重投压制：同文答案已在该轮（按 ts 归属的 user 泡之下）渲染时，

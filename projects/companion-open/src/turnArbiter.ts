@@ -270,6 +270,21 @@ export class TurnArbiter {
         }
         break;
       }
+      case "THINKING_STEP":
+      case "PROGRESS_STEP": {
+        const evTs = TurnArbiter.tsOf(ev);
+        const t = this.openTurnForEvent(sessBase, evTs);
+        if (t) {
+          t.sawStream = true;
+          if (!utKey) utKey = t.utKey;
+        } else if (evTs != null && this.newestOpenTurn(sessBase)) {
+          // 存在开启轮但事件 ts 早于其开启 >2s：上一轮经慢通道迟到的
+          // 思考/进度帧——归属轮已收尾，放出去客户端只会为它新建流卡并
+          // 贴到 feed 底部（实测两枚旧轮 thinking 泡串进新轮下）。
+          return null;
+        }
+        break;
+      }
       case "AGENT_MESSAGE": {
         const t = this.openTurnForEvent(sessBase, TurnArbiter.tsOf(ev));
         if (t) {
