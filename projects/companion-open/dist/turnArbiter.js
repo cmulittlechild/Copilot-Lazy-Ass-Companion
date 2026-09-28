@@ -17,6 +17,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.TurnArbiter = void 0;
 const CONTENT_DEDUPE_MS = 120_000;
 const TOOL_DEDUPE_MS = 3_000;
+/** toolId 级长记忆：parked/重投的工具帧 5min 内只许向终态推进。 */
+const TOOL_REPROJ_MS = 300_000;
 const STALE_DONE_SKEW_MS = 2_000;
 const INJECT_ACK_WINDOW_MS = 8_000;
 /** AGENT_MESSAGE 先行判答后，本轮自己的收尾 DONE 仍须放行（客户端拿它
@@ -44,6 +46,8 @@ class TurnArbiter {
     emitted = new Map();
     /** 同文不同轮重投影识别：a3 指纹（sess|前缀80）→ 已投递的 _ut。*/
     emittedUt = new Map();
+    /** toolId → {t, done}：跨轮工具重投影压制（session 域内）。 */
+    emittedTools = new Map();
     /** 已 END 的 streamId → 终结时刻。END 后迟到的 START/CHUNK 服务端丢弃——
         否则客户端流卡已收尾又追加一遍（R64 双渲）且迟到帧会重新置 rr、
         把队列挂到看门狗（~135s 悬挂）。位置型 sid（requests/N/…）每轮唯一，
@@ -57,6 +61,7 @@ class TurnArbiter {
         // 位置型 streamId（requests/N/…）每个会话文件从 0 重新计数——换会话必须清
         this.endedStreams.clear();
         this.emittedUt.clear();
+        this.emittedTools.clear();
         if (sessBase)
             this.pruneEmitted(0);
     }
@@ -327,6 +332,39 @@ class TurnArbiter {
         }
         // 跨通道去重：AGENT_MESSAGE 与 TOOL_* 事件按指纹在窗口内只放行首发。
         // （USER 另有 recentUserEmits 文本窗去重——同题重问是合法行为，这里不拦。）
+        const isTool = type.endsWith("TOOL_CALL") || type.endsWith("TOOL_RESULT");
+        if (isTool) {
+            // parked 轮（桌面确认挂起的工具）会被慢通道以 fresh ts 重投——
+            // stale-ts 门拦不住 → 工具卡串进新轮 feed。toolId 级 5min 记忆：
+            // 同 id 再投仅放行「向终态推进」的更新（isComplete/done），
+            // 重复 running 帧直接丢。
+            const tid = String(ev.toolId || ev.callId || ev.toolCallId || ev.id || "");
+            if (tid) {
+                const prev = this.emittedTools.get(`${sessBase}|${tid}`);
+                if (prev) {
+                    const advancing = (ev.isComplete === true || ev.status === "done" || ev.status === "completed") &&
+                        !prev.done;
+                    if (!advancing && now - prev.t < TOOL_REPROJ_MS)
+                        return null;
+                    if (advancing) {
+                        prev.done = true;
+                        prev.t = now;
+                    }
+                }
+                if (!prev && markEmitted) {
+                    this.emittedTools.set(`${sessBase}|${tid}`, {
+                        t: now,
+                        done: ev.isComplete === true || ev.status === "done" || ev.status === "completed",
+                    });
+                    if (this.emittedTools.size > 256) {
+                        const cutoff = now - TOOL_REPROJ_MS;
+                        for (const [k, v] of this.emittedTools)
+                            if (v.t < cutoff)
+                                this.emittedTools.delete(k);
+                    }
+                }
+            }
+        }
         if (type === "AGENT_MESSAGE" || type.endsWith("TOOL_CALL") || type.endsWith("TOOL_RESULT")) {
             const key = this.contentKey(ev, sessBase, utKey);
             // AGENT_MESSAGE 再配一条「轮次+前缀」副指纹：sessiondb 位置型 streamId

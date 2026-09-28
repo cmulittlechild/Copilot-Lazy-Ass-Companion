@@ -192,7 +192,14 @@
   /** 待发核验持久化 key：页面被半死 socket 刷新杀死内存计时器时，刷新后从这里回填 */
   const PENDING_SEND_KEY = 'sidecar.pendingSend';
   function persistPendingSend(text, key) {
-    try { sessionStorage.setItem(PENDING_SEND_KEY, JSON.stringify({ text, key: key || '', at: Date.now() })); } catch {}
+    try { sessionStorage.setItem(PENDING_SEND_KEY, JSON.stringify({ text, key: key || '', at: Date.now(), sess: currentSessionMeta.file || '' })); } catch {}
+  }
+  /** pendingSend 属于发送时的会话：切到别会话后补画会造成跨会话残泡（R91）。 */
+  function pendingSendSessOk(p) {
+    if (!p || !p.sess) return true; // 旧记录无 sess 无法判定，按本会话处理
+    const pBase = baseNameAny(p.sess).replace(/\.jsonl$/i, '');
+    const boundBase = baseNameAny(currentSessionMeta.file).replace(/\.jsonl$/i, '');
+    return !pBase || !boundBase || pBase === boundBase;
   }
   /** 已发出但未收到回答的用户消息（清屏/重放后重画用）；回声到达或回答完成即移除 */
   const sentAwaitingReply = [];
@@ -1795,6 +1802,7 @@
       if (!raw) return;
       const p = JSON.parse(raw);
       if (!p || typeof p.text !== 'string' || !p.text.trim()) return;
+      if (!pendingSendSessOk(p)) return;
       let found = false;
       const nodes = feed.querySelectorAll('.msg.user');
       for (let i = nodes.length - 1; i >= 0; i--) {
@@ -2431,7 +2439,7 @@
             const raw = sessionStorage.getItem(PENDING_SEND_KEY);
             if (raw) {
               const p = JSON.parse(raw);
-              if (p && typeof p.text === 'string' && p.text.trim()) {
+              if (p && typeof p.text === 'string' && p.text.trim() && pendingSendSessOk(p)) {
                 addUser(p.text, p.key || `user:pending:${Date.now()}:${userTextDedupeKey(p.text)}`, { force: true, ts: p.at || Date.now() });
               }
             }

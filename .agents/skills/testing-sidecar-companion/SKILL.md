@@ -113,3 +113,13 @@ PWA ↔ VS Code bridge。仓库 `~/repos/sidecar_remote/projects/companion-open`
 - **stray 再投影识别**：wire 上 AGENT_STREAM_SET/MESSAGE 携带**上一轮答案原文**且 _ut 盖着新一轮——对照桌面 chat 该轮无此文即可定性（非模型真输出）。
 - **回放风暴**：空闲期 monitor 可见 ×5 同内容 HISTORY_REPLAY（<0.2s 连发）——录制/计数时注意去重。
 - TOOL_CALL 不受 dedup 约束会漏进下一轮窗口（已知）；`requests/0/response#text#0` 式 jsonl-id 空 STREAM_END 尾随 DONE ~36s 属正常骨架合成。
+
+## R91 取证心得补充
+
+- **跨会话残泡（cross-session residue）判据**：切到空会话后 feed 出现上会话泡 → 立刻核对目标 session 的 jsonl (`grep -c <text> chatSessions/<file>.jsonl`) 与 sessiondb (`select ... where session_id like '<prefix>%'`)。jsonl/db 均无 → 实锤残泡（重放/清屏后「已发未答」补画或未清 DOM），非该会话真实内容。
+- **stale-TOOL 门可被 fresh-ts 绕过**：parked turn（如 confirmation 暂停的 run_in_terminal）在其后续轮窗口内重投影时携带**新 ts**，`ts >10s vs latestUserLiveTs` 检查失效。排查迟到 TOOL_CALL 时对照该 tool 首次出现时间 vs 重投时间。
+- **变体文本 duplicate 滑过 same-text dedupe**：同一 ut 的 AGENT_MESSAGE 可二次到达但 markdown 被改写（如 `[file](file)`→`file`，链接 target 丢失）→ 文本不同 dedupe 不拦；客户端按 ut 合并只渲一泡，wire 上可见。查 dup 时按 ut 聚合计数而非文本。
+- **停止路径时序**：send→(arm 一次点击)→confirm → DONE[phone_stop] ~2s → 按钮 ≤5s 回「发送」+ 孤儿占位「该轮无回复」。R91S2 实测干净。注意若轮撞上 confirmation 边界会先释放（停止点击落在已释放键上无效）——测 stop 选不受 confirmation 影响的短轮。
+- **result-DONE 滞后 ~30-45s**：answer-DONE 与 [result] DONE 间距约 30s+；连发队列憋到 [result] 才 flush（实测 enqueue→wire 44s，触发后 3s）。判「吞包/卡队列」前先等 [result] DONE。
+- **MODEL_LIST 三连发**：select/重连时同 ms 内 ×3 广播（多 subscriber），杂讯类，非风暴。
+- **杂散 frame 家族（均已被吸收、无可见重渲）**：`AGENT_STREAM_END len=0 id=requests/0/response#text#N`（END 后 ~30s 迟壳）、`id=sessiondb/<sess>/<idx>` 标记、parked-turn USER/AGENT 整批重投（own ut，客户端 dedupe）。
