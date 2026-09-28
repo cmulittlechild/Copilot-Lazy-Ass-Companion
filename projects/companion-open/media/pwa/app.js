@@ -1357,17 +1357,31 @@
       '<span class="codicon codicon-copy" aria-hidden="true"></span>' +
       '<span class="footer-label">复制</span>';
     copyBtn.addEventListener('click', async () => {
+      const label = copyBtn.querySelector('.footer-label');
+      let ok = false;
       try {
         await navigator.clipboard.writeText(text);
-        const label = copyBtn.querySelector('.footer-label');
-        if (label) {
-          label.textContent = '已复制';
-          setTimeout(() => {
-            label.textContent = '复制';
-          }, 1200);
-        }
+        ok = true;
       } catch {
-        /* 剪贴板不可用 */
+        // clipboard.writeText 在页面未聚焦/无权限时抛错——execCommand 兜底
+        try {
+          const ta = document.createElement('textarea');
+          ta.value = text;
+          ta.style.position = 'fixed';
+          ta.style.opacity = '0';
+          document.body.appendChild(ta);
+          ta.select();
+          ok = document.execCommand('copy');
+          ta.remove();
+        } catch {
+          ok = false;
+        }
+      }
+      if (label) {
+        label.textContent = ok ? '已复制' : '复制失败';
+        setTimeout(() => {
+          label.textContent = '复制';
+        }, 1200);
       }
     });
     footer.appendChild(copyBtn);
