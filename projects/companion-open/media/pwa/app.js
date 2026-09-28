@@ -1784,6 +1784,10 @@
           badge.className = 'tool-badge done';
           badge.innerHTML =
             '<span class="codicon codicon-check" aria-hidden="true"></span>done';
+          // 单调完成须落 toolDone 标记：transcript 尾帧会在 DONE 之后重投同一
+          // TOOL_CALL（isComplete=false），无标记则 upsertTool 把徽章打回
+          // running 且再无 DONE 翻回——卡永久停在 running（实测排队轮复现）。
+          el.dataset.toolDone = '1';
         }
         const details = el.querySelector('details.tool-details');
         if (details) details.open = false;
