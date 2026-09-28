@@ -3088,6 +3088,9 @@
   function openDrawer() {
     drawerOverlay.classList.remove('hidden');
     sessionDrawer.classList.add('open');
+    // 每次开抽屉重置搜索：残留过滤让用户看不到其余会话（实测开过搜索
+    // 后只剩命中项），重头列全量更符合抽屉语义。
+    if (sessionSearch) sessionSearch.value = '';
     // 打开瞬间拍下当前排序，之后刷新不再位移行
     sessionRowFreeze = new Map();
     lastSessions.forEach((s, i) => {
