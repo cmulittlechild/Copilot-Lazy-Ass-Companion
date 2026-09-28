@@ -885,6 +885,22 @@
     return users.length ? users[users.length - 1] : null;
   }
 
+  /** 归属 user 泡下是否已有真答案——排除 selfSid 自身在产的卡（自产答案的
+      流不应被判尾帧）。thinking/孤儿占位/utCopy 补画不算。 */
+  function turnHasOtherAnswer(userEl, selfSid) {
+    if (!userEl) return false;
+    for (let n = userEl.nextElementSibling; n && !n.classList.contains('user'); n = n.nextElementSibling) {
+      if (!n.classList.contains('agent') || n.classList.contains('typing-row')) continue;
+      if (n.dataset.orphanPh || n.dataset.utCopy) continue;
+      const b = n.querySelector('.body');
+      if (b && String(b.dataset.raw || '').trim() && n.dataset.streamId !== selfSid) return true;
+      const sid = n.dataset && n.dataset.streamId;
+      const st = sid && sid !== selfSid ? streamingTurns.get(sid) : null;
+      if (st && String(st.markdown || '').trim()) return true;
+    }
+    return false;
+  }
+
   /** 指定 user 泡之下是否已有同文答案（含未收尾的流式卡；thinking/孤儿占位不算） */
   function answerUnderUser(userEl, text) {
     if (!userEl) return false;
@@ -1159,7 +1175,16 @@
     };
     streamingTurns.set(id, entry);
     lastActiveStreamId = id;
-    if (!replaying) setRequestRunning(true);
+    // 已答轮尾帧不撑起 rr（与 frameRearms 同判据）：doneStreams 成员，或
+    // _ut 归属轮已有非本流真答案的迟到流。
+    const armOk =
+      !doneStreams.has(id) &&
+      !(opts && opts.ut &&
+        turnHasOtherAnswer(
+          ownerUserFor(opts.ut, opts.ts != null ? opts.ts : opts.timestamp),
+          id,
+        ));
+    if (!replaying && armOk) setRequestRunning(true);
     scrollFeed();
     return entry;
   }
@@ -1195,6 +1220,23 @@
   /** 慢通道流式重投压制：同文答案已在该轮（按 ts 归属的 user 泡之下）渲染时，
       不再创建流式卡——攒着文本等 END 时走 addAgentFinal 统一去重/补画。 */
   const suppressedStreams = new Map();
+
+  /** 已答轮的残留流：DONE 放行轮次后归属流卡标记进本集合——其尾帧照常渲染/收尾，
+      但不再计流活动（lastStreamActivityAt）、不再撑起 rr。否则 transcript 尾流
+      把发送队列顶到 75s 收割窗才放出（实测 ~78s），目标 ~7s 出队。 */
+  const doneStreams = new Set();
+
+  /** 流帧是否应撑起 rr/计流活动。豁免两种尾帧：
+      a) doneStreams 成员（DONE 已判其轮终）；
+      b) 归属轮已有「非本流」真答案的迟到帧（transcript 尾流/跨通道重投影——
+         内容照渲染，但不许再续命发送队列）。
+      同题重问安全：_ut 归属取最新同文泡，未答新轮照常撑起。 */
+  function frameRearms(msg) {
+    const sid = (msg && msg.streamId) || 'default';
+    if (doneStreams.has(sid)) return false;
+    if (msg && msg._ut && turnHasOtherAnswer(ownerUserFor(msg._ut, msg.timestamp), sid)) return false;
+    return true;
+  }
 
   /** 流式增量刷新：用 textContent 显示纯文本（快速），rAF 合并同一帧多次 chunk */
   function scheduleStreamFlush(entry) {
@@ -2076,31 +2118,32 @@
         flushOutboundQueue();
         break;
       case 'AGENT_STREAM_START':
-        lastStreamActivityAt = Date.now();
+        if (frameRearms(msg)) lastStreamActivityAt = Date.now();
         ensurePendingUserBubble();
         // 不立刻 startAssistantTurn：否则 tool-only / 空 turn 会留下「Copilot •••」空壳。
         // 真正正文在 CHUNK/SET/MESSAGE 时再创建行；这里只进入 running + 顶部 typing。
         if (msg.requestIndex != null) reqToStream.set(msg.requestIndex, msg.streamId || 'default');
         if (msg.streamId) lastActiveStreamId = msg.streamId;
-        if (!replaying) {
+        if (!replaying && frameRearms(msg)) {
           setRequestRunning(true);
           showTyping();
         }
         break;
       case 'AGENT_STREAM_SET':
-        lastStreamActivityAt = Date.now();
+        if (frameRearms(msg)) lastStreamActivityAt = Date.now();
         setEntryMarkdown(msg.streamId || 'default', msg.text || '', msg.timestamp, msg._ut);
         if (msg.requestIndex != null) reqToStream.set(msg.requestIndex, msg.streamId || 'default');
-        if (!replaying) setRequestRunning(true);
+        if (!replaying && frameRearms(msg)) setRequestRunning(true);
         break;
       case 'AGENT_STREAM_CHUNK':
-        lastStreamActivityAt = Date.now();
+        if (frameRearms(msg)) lastStreamActivityAt = Date.now();
         appendAssistantChunk(msg.streamId || 'default', msg.text || '', msg.timestamp, msg._ut);
         if (msg.requestIndex != null) reqToStream.set(msg.requestIndex, msg.streamId || 'default');
-        if (!replaying) setRequestRunning(true);
+        if (!replaying && frameRearms(msg)) setRequestRunning(true);
         break;
       case 'AGENT_STREAM_END':
-        lastStreamActivityAt = Date.now();
+        if (frameRearms(msg)) lastStreamActivityAt = Date.now();
+        doneStreams.delete(msg.streamId || 'default');
         completeAssistantTurn(msg.streamId || 'default');
         clearTyping();
         // 若已无 streaming 行，立即藏掉残余 ••• 并恢复发送键（不等 COPILOT_DONE）
@@ -2275,9 +2318,12 @@
         break;
       }
       case 'THINKING_STEP': {
-        // 思考步骤也算在途活动：给 DONE 的延迟释放续命，防 thinking 间隙释放发送键
-        lastStreamActivityAt = Date.now();
-        if (!replaying && requestRunning) setRequestRunning(true);
+        // 思考步骤也算在途活动：给 DONE 的延迟释放续命，防 thinking 间隙释放发送键。
+        // 已答轮（doneStreams/归属轮已有答案）的尾帧不再续命——否则轮尾 thinking 顶满队列。
+        if (frameRearms(msg)) {
+          lastStreamActivityAt = Date.now();
+          if (!replaying && requestRunning) setRequestRunning(true);
+        }
         const tEntry = resolveEntryFor(msg);
         if (tEntry) appendThinking(tEntry, msg.text || '');
         break;
@@ -2399,6 +2445,22 @@
         // 真正结束——立即释放会让发送键提前变回「发送」，长轮几乎停不掉。
         // 3s 宽限释放：期间任何新流活动自动取消；用户主动停/取消仍立即释放。
         if (!replaying && releaseDone) {
+          // DONE 判本轮已答：归属轮的活流卡标 doneStreams——尾帧照渲染收尾，
+          // 但不再计流活动撑起 rr（transcript 尾流顶队列 ~78s 的根治）。
+          // _ut 缺失时只标锚在最新 user 泡下的卡（当前轮），不碰旧轮残流。
+          {
+            const dUtKey2 = msg._ut ? userTextDedupeKey(String(msg._ut)) : '';
+            const allU = feed.querySelectorAll('.msg.user');
+            const lastU = allU.length ? allU[allU.length - 1] : null;
+            for (const [sid, e] of streamingTurns) {
+              let owner = e && e.element;
+              while (owner && !owner.classList.contains('user')) owner = owner.previousElementSibling;
+              const match = dUtKey2
+                ? (owner && owner.dataset.textKey === dUtKey2)
+                : (owner && owner === lastU);
+              if (match) { e.turnDone = true; doneStreams.add(sid); }
+            }
+          }
           setRequestRunning(false, undefined, doneImmediate ? { force: true } : { deferMs: 3000 });
           // 硬释放兜底：上面 defer 链若被迟到事件重置 rr 而取消，15s 后兜底检查
           if (releaseHardTimer) clearTimeout(releaseHardTimer);
@@ -2453,12 +2515,29 @@
               }
             }
             if (!hasContent) {
+              const ob2 = ownerEl.querySelector('.user-bubble');
               const ph = addAgentFinal(
                 '*（该轮无回复——已停止或请求失败）*',
                 `orphan-live-${want || 'last'}-${Date.now()}`,
-                { ts: Number.isFinite(doneTs) ? doneTs : Date.now(), ut: utTxt || undefined },
+                {
+                  ts: Number.isFinite(doneTs) ? doneTs : Date.now(),
+                  ut: utTxt || (ob2 && ob2.textContent) || undefined,
+                },
               );
-              if (ph) ph.dataset.orphanPh = '1';
+              if (ph) {
+                ph.dataset.orphanPh = '1';
+                // 裸 DONE（phone_stop 等无 _ut）时 addAgentFinal 的 ts 归属会把
+                // 占位落到最新 user 泡下——以已判定的 ownerEl 为准，插回其回合
+                // 区末尾（下一个 user 泡之前），别跑到别人轮子里。
+                let at = ownerEl;
+                for (let n = ownerEl.nextSibling; n; n = n.nextSibling) {
+                  if (n.classList && n.classList.contains('user')) break;
+                  if (n === ph) continue;
+                  at = n;
+                }
+                if (at.nextSibling) feed.insertBefore(ph, at.nextSibling);
+                else feed.appendChild(ph);
+              }
             }
           };
           if (ownerEl) {
