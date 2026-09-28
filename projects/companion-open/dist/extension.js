@@ -516,7 +516,7 @@ async function activate(context) {
                                 type: "SYSTEM_MESSAGE",
                                 text: `已切换到会话: ${path.basename(file)}`,
                             },
-                        ], file);
+                        ], file, selTitle);
                     }
                     break;
                 }
@@ -739,7 +739,7 @@ async function activate(context) {
                         type: "SYSTEM_MESSAGE",
                         text: `已切换到会话: ${base}`,
                     },
-                ], csFile);
+                ], csFile, title);
             };
             // 被跳过的空会话出现首个用户轮次后补跟随：两条事件通道任一到达内容事件即重评估。
             reevaluatePendingFollow = () => {
