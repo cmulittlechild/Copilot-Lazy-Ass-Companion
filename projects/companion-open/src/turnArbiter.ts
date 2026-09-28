@@ -60,6 +60,8 @@ export class TurnArbiter {
   private emittedUt = new Map<string, string>();
   /** toolId → {t, done}：跨轮工具重投影压制（session 域内）。 */
   private emittedTools = new Map<string, { t: number; done: boolean }>();
+  /** a2 指纹（sess|前缀80）→ {t, 归属轮, ut}：轮次实例级同文去重。 */
+  private emittedA2 = new Map<string, { t: number; turn: TrackedTurn | undefined; ut: string }>();
   /** 已 END 的 streamId → 终结时刻。END 后迟到的 START/CHUNK 服务端丢弃——
       否则客户端流卡已收尾又追加一遍（R64 双渲）且迟到帧会重新置 rr、
       把队列挂到看门狗（~135s 悬挂）。位置型 sid（requests/N/…）每轮唯一，
@@ -75,6 +77,7 @@ export class TurnArbiter {
     this.endedStreams.clear();
     this.emittedUt.clear();
     this.emittedTools.clear();
+    this.emittedA2.clear();
     if (sessBase) this.pruneEmitted(0);
   }
 
@@ -133,6 +136,18 @@ export class TurnArbiter {
     return undefined;
   }
 
+  /** 按 _ut 反查轮次（含已答轮）：取最近一个该用户文的轮实例。
+      同题重问的迟到重投影会归到最新同 ut 轮——与 a2 记录的归属轮一致即可判重。 */
+  private lastTurnWithUt(sessBase: string, utKey: string): TrackedTurn | undefined {
+    if (!utKey) return undefined;
+    for (let i = this.openTurns.length - 1; i >= 0; i--) {
+      const t = this.openTurns[i];
+      if (sessBase && (t as any).sess && (t as any).sess !== sessBase) continue;
+      if (t.utKey === utKey) return t;
+    }
+    return undefined;
+  }
+
   /** 归属判定用：事件自带源时间戳且早于最新未答轮的开启时刻 >2s → 上一轮
       经慢通道迟到的重投影，不归本轮（否则盖错 _ut，客户端把旧答案当本轮
       答案渲染出串位泡）。无 ts 的事件照常归属（只能靠到达序）。 */
@@ -177,6 +192,7 @@ export class TurnArbiter {
 
     // 轮次归属键：服务端下发的 _ut 优先；否则归到最新未答轮
     let utKey = typeof ev._ut === "string" ? normText(ev._ut) : "";
+    let ownerTurn: TrackedTurn | undefined;
 
     switch (type) {
       case "USER_MESSAGE": {
@@ -260,6 +276,9 @@ export class TurnArbiter {
           t.sawStream = true;
           if (!utKey) utKey = t.utKey;
         }
+        // 去重归属：_ut 自证优先（已答轮也能反查回自己的实例）；
+        // 无 _ut 的才落到到达序最新未答轮。
+        ownerTurn = utKey ? this.lastTurnWithUt(sessBase, utKey) ?? t : t;
         break;
       }
       case "COPILOT_DONE": {
@@ -373,11 +392,19 @@ export class TurnArbiter {
       // AGENT_MESSAGE 再配一条「轮次+前缀」副指纹：sessiondb 位置型 streamId
       // （requests/N/）与实时流 id 不同，同一答文经异构 sid 双通道到会各渲一
       // 张卡片（R58 长答双渲）。同轮同前缀即重复，无论 sid 形态。
+      // 副指纹按「轮次实例」判重而非 ut 文本：同一条答案经双通道重投，
+      // 两副本都归同一个 TrackedTurn → 压；同题重问产生新轮，同文新答的
+      // ownerTurn 不同 → 放行（R92：ut 键会把第二答当重投影吞掉）。
       const altKey =
-        type === "AGENT_MESSAGE" && utKey
-          ? `a2|${sessBase}|${utKey}|${normText(ev.text).slice(0, 80)}`
+        type === "AGENT_MESSAGE"
+          ? `a2|${sessBase}|${normText(ev.text).slice(0, 80)}`
           : null;
       const window = type === "AGENT_MESSAGE" ? CONTENT_DEDUPE_MS : TOOL_DEDUPE_MS;
+      const altPrev = altKey ? this.emittedA2.get(altKey) : undefined;
+      const altDup =
+        !!altPrev &&
+        now - altPrev.t <= window &&
+        (altPrev.turn === ownerTurn || (altPrev.turn == null && ownerTurn == null && altPrev.ut === utKey));
       // 再配一条「同文不同轮」指纹：旧轮答案经慢通道重投影时被盖上当轮的
       // _ut（openTurnForEvent 的 ts 门挡不住无 ts 的件），ut 不同但文本同。
       // 只在事件无法自证属于当前轮时启用（无 requestIndex 或下标落后）——
@@ -393,14 +420,14 @@ export class TurnArbiter {
       const reprojDup = reprojUt != null && reprojUt !== utKey;
       const isDup =
         (key && (this.emitted.get(key) ?? 0) && now - this.emitted.get(key)! <= window) ||
-        (altKey && (this.emitted.get(altKey) ?? 0) && now - this.emitted.get(altKey)! <= window) ||
+        altDup ||
         reprojDup;
       if (isDup) return null;
       // 只在「真的会广播」时记名：离线排队/被后续闸丢弃的首发不算已投递，
       // 否则首份被吞、重发又被当重复——净丢一条消息。
       if (markEmitted) {
         if (key) this.emitted.set(key, now);
-        if (altKey) this.emitted.set(altKey, now);
+        if (altKey) this.emittedA2.set(altKey, { t: now, turn: ownerTurn, ut: utKey });
         if (reprojKey && utKey) this.emittedUt.set(reprojKey, utKey);
       }
       if (type === "AGENT_MESSAGE") this.markAnswered(sessBase, utKey);
