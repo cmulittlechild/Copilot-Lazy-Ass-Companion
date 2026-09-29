@@ -1320,8 +1320,13 @@
       suppressedStreams.set(sid, String(text || ''));
       return;
     }
+    // 归属判定双径：_ut/ts 归属轮下有同文答案，或无 _ut 自证但全 feed 已有
+    // 同文——后者兜住「归属泡是未答排队泡」的盲区：旧轮帧按 ts 归到最新未答
+    // 泡下，owner 轮无答案 → 漏压制 → 旧答案建成新卡（实测僵尸流双渲+重挂
+    // rr 顶队列 ~80s）。带 _ut 的帧照旧只查归属轮，同题重问的新轮不误杀。
     if (!streamingTurns.get(sid) && !replaying && !replayingInstant &&
-        answerUnderUser(ownerUserFor(ut, ts), text)) {
+        (answerUnderUser(ownerUserFor(ut, ts), text) ||
+         (!ut && agentTextRendered(String(text || '').trim())))) {
       suppressedStreams.set(sid, String(text || ''));
       return;
     }
@@ -1339,7 +1344,8 @@
       return;
     }
     if (!streamingTurns.get(sid) && !replaying && !replayingInstant &&
-        answerUnderUser(ownerUserFor(ut, ts), chunk)) {
+        (answerUnderUser(ownerUserFor(ut, ts), chunk) ||
+         (!ut && agentTextRendered(String(chunk || '').trim())))) {
       suppressedStreams.set(sid, String(chunk || ''));
       return;
     }
