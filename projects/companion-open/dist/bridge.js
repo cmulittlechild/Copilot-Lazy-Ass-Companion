@@ -202,7 +202,26 @@ class BridgeServer {
     requestHandlers = [];
     history = [];
     offlineQueue = [];
-    pendingConfirm = null;
+    /** 按会话分桶的待审批卡：AGENT_CONFIRM 是瞬态事件不进回放历史，
+        切会话/重连后必须按会话重投，否则手机端永远无法批准（R45 B2）。
+        桌面侧批准无事件源——DONE（轮次收尾/被取代）和 TTL 负责收尸。 */
+    pendingConfirms = new Map();
+    static CONFIRM_TTL_MS = 30 * 60 * 1000;
+    confirmSessKey(v) {
+        const f = typeof v === 'string' ? v : String(v?._sess || v?.file || v?.sessionFile || '');
+        if (!f)
+            return '*';
+        const b = f.split(/[\\/]/).pop() || '';
+        return b.replace(/\.jsonl$/i, '');
+    }
+    liveConfirmFor(sessKey) {
+        const pc = this.pendingConfirms.get(sessKey) ?? this.pendingConfirms.get('*');
+        if (!pc)
+            return null;
+        if (Date.now() - pc.at > BridgeServer.CONFIRM_TTL_MS)
+            return null;
+        return pc.ev;
+    }
     push = null;
     heartbeatTimer = null;
     pendingChunk = null;
@@ -548,6 +567,7 @@ class BridgeServer {
                         // Single HISTORY_REPLAY per socket — PWA replaces feed, does not append.
                         let replayMaxTs = 0;
                         const replayKeys = new Set();
+                        let replayFile;
                         if (!historyReplayed) {
                             historyReplayed = true;
                             let replay = this.history.slice(-HISTORY_MAX);
@@ -557,7 +577,6 @@ class BridgeServer {
                             // 时优先用文件版；只有当刚发出的用户消息尚未落盘时才保留 live 版。
                             const providedRaw = this.historyProvider?.();
                             let provided;
-                            let replayFile;
                             let replayTitle;
                             if (Array.isArray(providedRaw)) {
                                 provided = providedRaw;
@@ -630,8 +649,9 @@ class BridgeServer {
                                 continue;
                             this.send(ws, ev);
                         }
-                        if (this.pendingConfirm)
-                            this.send(ws, this.pendingConfirm);
+                        const pcEv = this.liveConfirmFor(replayFile ? this.confirmSessKey(replayFile) : '*');
+                        if (pcEv)
+                            this.send(ws, pcEv);
                         // Do NOT re-send TUNNEL_URL here — already sent on socket open if set.
                         return;
                     }
@@ -642,7 +662,7 @@ class BridgeServer {
                         return;
                     }
                     if (msg.type === 'PHONE_CONFIRM') {
-                        this.pendingConfirm = null;
+                        this.pendingConfirms.clear();
                         this.broadcast({ type: 'AGENT_CONFIRM_RESOLVED', button: msg.button });
                     }
                     await this.dispatchPhoneHandlers(msg);
@@ -711,7 +731,7 @@ class BridgeServer {
         this.offlineQueue = [];
         this.activeStreamId = null;
         this.activeStreamAccum = '';
-        this.pendingConfirm = null;
+        // pendingConfirms 保留：别会话的审批卡继续停着，切回时按会话重投。
         // 裁决器轮次状态按会话分——切会话后 openTurns/latestUserLiveTs 属于旧会话，
         // 不重置会让新会话的 DONE 被判成旧轮迟到件（stale）或吞掉注入回执门。
         this.arbiter.resetForSession(file ? path.basename(file).replace(/\.jsonl$/i, '') : undefined);
@@ -765,6 +785,11 @@ class BridgeServer {
             title: title || undefined,
             timestamp: Date.now(),
         });
+        // 回放清空了 feed：该会话挂起的审批卡随回放重投（瞬态事件不在历史里）。
+        // 走 broadcastRaw 绕过裁决器——重投同文确认卡会被内容去重当重复件吞掉。
+        const pcReplay = file ? this.liveConfirmFor(this.confirmSessKey(file)) : null;
+        if (pcReplay)
+            this.broadcastRaw(pcReplay);
     }
     /**
      * Preferred path for session/projector events (RE sendToPhone).
@@ -823,8 +848,21 @@ class BridgeServer {
         };
         this.trackStreamState(stamped);
         this.pushHistory(stamped);
-        if (stamped.type === 'AGENT_CONFIRM')
-            this.pendingConfirm = stamped;
+        if (stamped.type === 'AGENT_CONFIRM') {
+            this.pendingConfirms.set(this.confirmSessKey(stamped), { ev: stamped, at: Date.now() });
+        }
+        else if (stamped.type === 'COPILOT_DONE' || stamped.type === 'AGENT_CONFIRM_RESOLVED') {
+            // 轮次收尾/被取代（桌面侧批准无事件源，DONE 是唯一可观测的收尸信号）→
+            // 同会话同轮的挂起审批失效；_ut 不匹配（旧轮迟到 DONE）不连坐。
+            const key = this.confirmSessKey(stamped);
+            const pc = this.pendingConfirms.get(key);
+            const doneUt = typeof stamped._ut === 'string' ? stamped._ut : '';
+            const pcUt = typeof pc?.ev?._ut === 'string' ? pc.ev._ut : '';
+            if (pc && (!pcUt || !doneUt || pcUt === doneUt))
+                this.pendingConfirms.delete(key);
+            if (stamped.type === 'AGENT_CONFIRM_RESOLVED')
+                this.pendingConfirms.clear();
+        }
         const skipOffline = stamped.type === 'COPILOT_TYPING' ||
             stamped.type === 'COPILOT_DONE' ||
             stamped.type === 'TUNNEL_URL' ||
@@ -976,8 +1014,9 @@ class BridgeServer {
         });
         if (!arbitrated)
             return;
-        if (arbitrated?.type === 'AGENT_CONFIRM')
-            this.pendingConfirm = arbitrated;
+        if (arbitrated?.type === 'AGENT_CONFIRM') {
+            this.pendingConfirms.set(this.confirmSessKey(arbitrated), { ev: arbitrated, at: Date.now() });
+        }
         this.trackStreamState(arbitrated);
         this.pushHistory(arbitrated);
         this.broadcastRaw(arbitrated);

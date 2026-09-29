@@ -145,7 +145,8 @@ function buildReplayWithDbBackfill(
       .map((e) => replayTextKey(String((e as { text?: string }).text || ""))),
   );
   const tail: Array<Record<string, unknown>> = [];
-  for (const r of dbTurns) {
+  for (let ri = 0; ri < dbTurns.length; ri++) {
+    const r = dbTurns[ri];
     const ans = String(r.assistant_response || "").trim();
     if (!ans) continue;
     if (seen.has(replayTextKey(ans))) continue;
@@ -195,14 +196,42 @@ function buildReplayWithDbBackfill(
       }
     }
     if (!inserted) {
+      const pair: Array<Record<string, unknown>> = [];
       if (uKey) {
-        tail.push({
+        pair.push({
           type: "USER_MESSAGE",
           text: String(r.user_message || ""),
           timestamp: Date.now(),
         });
       }
-      tail.push(ev);
+      pair.push(ev);
+      // 序数兜底定位：user_message 文本键没匹配上（被取代/异常轮的
+      // sessiondb 文本常与投影异构）就按轮次序插位——sessiondb 的先后即
+      // 真实次序。数 r 之后还有几条带用户文的轮 → 插到 out 倒数第 k 条
+      // USER_MESSAGE 之前；k 超出投影窗口 = 这轮在窗口之前 → 放最前。
+      // 直接甩尾会把旧轮渲到最新轮之后（R45 B1 feed 序腐坏）。
+      const laterUsers = dbTurns
+        .slice(ri + 1)
+        .filter((x) => String(x?.user_message || "").trim()).length;
+      if (laterUsers === 0) {
+        tail.push(...pair);
+      } else {
+        let pos = -1;
+        let seenUsers = 0;
+        for (let i = out.length - 1; i >= 0; i--) {
+          if (out[i]?.type === "USER_MESSAGE" && ++seenUsers === laterUsers) {
+            pos = i;
+            break;
+          }
+        }
+        // 插入位置贴邻位时间戳：Date.now() 会顶高客户端 replayFloorTs，
+        // 把之后真实迟到的 live 事件误判成回放前旧件丢掉。
+        const anchorTs =
+          Number((out[pos >= 0 ? pos : 0] as { timestamp?: unknown })?.timestamp) || Date.now();
+        for (const p of pair) p.timestamp = anchorTs - 1;
+        if (pos >= 0) out.splice(pos, 0, ...pair);
+        else out.splice(0, 0, ...pair);
+      }
     }
     seen.add(replayTextKey(ans));
   }
