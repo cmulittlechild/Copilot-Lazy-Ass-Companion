@@ -2729,6 +2729,18 @@
               want = ob ? userTextDedupeKey(ob.textContent || '') : '';
             }
           }
+          // 该轮区内还有没有 running 工具卡：待批期间 DONE[result] 先到，
+          // 但 run_in_terminal 仍挂着等桌面批准——此时画孤儿占位是误报。
+          const hasRunningToolAfter = (el) => {
+            for (let n = el && el.nextSibling; n; n = n.nextSibling) {
+              if (n.classList && n.classList.contains('user')) break;
+              if (n.classList && n.classList.contains('tool-card')) {
+                const b = n.querySelector('.tool-badge');
+                if (b && b.classList.contains('running')) return true;
+              }
+            }
+            return false;
+          };
           const drawOrphanPlaceholder = () => {
             if (!ownerEl || !ownerEl.isConnected) return;
             let hasContent = false;
@@ -2777,6 +2789,10 @@
               // 归属裁掉/熬到陈旧，才按孤儿画占位。
               const recheckOrphan = () => {
                 if (!ownerEl.isConnected) return;
+                if (hasRunningToolAfter(ownerEl)) {
+                  setTimeout(recheckOrphan, 15000);
+                  return;
+                }
                 const entry = sentAwaitingReply.find(
                   (e) => want && userTextDedupeKey(e.text) === want,
                 );
@@ -2791,8 +2807,10 @@
                 drawOrphanPlaceholder();
               };
               setTimeout(recheckOrphan, 15000);
-            } else {
+            } else if (!hasRunningToolAfter(ownerEl)) {
               drawOrphanPlaceholder();
+            } else {
+              setTimeout(recheckOrphan, 15000);
             }
           }
         }
