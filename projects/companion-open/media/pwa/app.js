@@ -2310,6 +2310,7 @@
         break;
       case 'AGENT_STREAM_END':
         if (frameRearms(msg)) lastStreamActivityAt = Date.now();
+        const endEntry = streamingTurns.get(msg.streamId || 'default');
         doneStreams.delete(msg.streamId || 'default');
         completeAssistantTurn(msg.streamId || 'default');
         clearTyping();
@@ -2328,11 +2329,13 @@
             });
             markAllToolsDone();
           }
-          // END 只是「某条流」的终止帧——骨架/进度块的 END len=0 会在轮中途来，
-          // 立即释放会让在途态在静默窗内提前落回「发送」（连发逃逸+停止落空，
-          // R28 实测）。统一走宽限复查：真轮终必经历 ≥5s 静默才释放；
-          // DONE 被判死丢弃的轮也由这里兜底（静默后同样释放+出队）。
-          if (!replaying) setRequestRunning(false, undefined, { deferMs: 3000 });
+          // END 只是「某条流」的终止帧——骨架/进度块的 END（该流从未产出正文）
+          // 会在轮中途来，把它当终止帧释放会让在途态在静默窗内提前落回「发送」：
+          // 连发排队消息 ~6s 后即逃逸插队（R33/R34 实测 U2 在 A1 前 19s 广播）。
+          // 只有「所关流产过正文」的 END 才算轮终止征兆走宽限复查；
+          // 无 DONE 收尾的真轮由 releaseHardTimer（15s 硬看门狗）兜底释放。
+          const endHadText = !!(endEntry && (endEntry.markdown || '').trim());
+          if (!replaying && endHadText) setRequestRunning(false, undefined, { deferMs: 3000 });
           if (!any) setStatus(true, connectedLabel());
         }
         break;
