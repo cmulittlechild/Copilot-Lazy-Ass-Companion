@@ -211,7 +211,11 @@ class TurnArbiter {
                 const endedAt = sid ? this.endedStreams.get(sid) : undefined;
                 if (endedAt != null && now - endedAt < 60_000)
                     return null;
+                // 整帧迟到的流事件（源 ts 老于 30s）：已结束轮次的慢通道重投影，
+                // 广播出去会重新武装 rr 并渲第二份答文——直接丢（R64/R33 同族）。
                 const evTs = TurnArbiter.tsOf(ev);
+                if (evTs != null && now - evTs > 30_000)
+                    return null;
                 const t = this.openTurnForEvent(sessBase, evTs);
                 if (!t) {
                     // 孤儿流帧：归属不到任何开启轮。CHUNK 在「全轮已答」后到达 =
