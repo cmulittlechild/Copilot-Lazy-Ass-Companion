@@ -191,6 +191,19 @@
     if ((input.value || '') === sendVerifyRestoredText) input.value = '';
     sendVerifyRestoredText = null;
   }
+  /** 释放链路调试环缓冲：release/flush/DONE 判定决策留痕，sessionStorage 300 条上限。
+      排查「队列滞留/释放过晚」时用 __dbg() 导出复盘。 */
+  const DBG_KEY = 'sidecar.dbg';
+  function DBG(tag, data) {
+    try {
+      const raw = sessionStorage.getItem(DBG_KEY);
+      const arr = raw ? JSON.parse(raw) : [];
+      arr.push({ t: Date.now(), tag, ...(data || {}) });
+      if (arr.length > 300) arr.splice(0, arr.length - 300);
+      sessionStorage.setItem(DBG_KEY, JSON.stringify(arr));
+    } catch (_) {}
+  }
+  try { window.__dbg = () => sessionStorage.getItem(DBG_KEY) || '[]'; } catch (_) {}
   /** 待发核验持久化 key：页面被半死 socket 刷新杀死内存计时器时，刷新后从这里回填 */
   const PENDING_SEND_KEY = 'sidecar.pendingSend';
   function persistPendingSend(text, key) {
@@ -279,7 +292,9 @@
   function hardReleaseCheck() {
     releaseHardTimer = null;
     if (!requestRunning) return;
-    if (Date.now() - lastStreamActivityAt >= 5000) {
+    const hrcSil = Date.now() - lastStreamActivityAt;
+    if (hrcSil >= 5000) {
+      DBG('hrc', { act: 'release', sil: hrcSil });
       markAllToolsDone();
       finishAllAssistantVisuals();
       requestRunning = false;
@@ -289,6 +304,7 @@
       }
       flushPendingSendQueue();
     } else {
+      DBG('hrc', { act: 'rearm', sil: hrcSil });
       releaseHardTimer = setTimeout(hardReleaseCheck, 15000);
     }
   }
@@ -426,6 +442,7 @@
 
   function setRequestRunning(on, statusLabel, opts) {
     const force = !!(opts && opts.force);
+    DBG('rr', { on: !!on, force, defer: opts && opts.deferMs, src: String((new Error().stack || '').split('\n')[2] || '').trim().slice(0, 80) });
     if (on) {
       if (requestDoneTimer) {
         clearTimeout(requestDoneTimer);
@@ -479,9 +496,11 @@
       // .streaming 元素——中途 DONE/回执 DONE 后流仍在走，此时释放会让排队
       // 消息赶在 A1 前插队（U1U2A1A2 残余逃逸）。真轮终后必经历 5s 静默。
       if (Date.now() - lastStreamActivityAt < 5000) {
+        DBG('grace', { act: 'rearm', sil: Date.now() - lastStreamActivityAt });
         requestDoneTimer = setTimeout(graceRelease, 1500);
         return;
       }
+      DBG('grace', { act: 'release', sil: Date.now() - lastStreamActivityAt });
       // rr 在此刻真实落锁 = 客户端已判定本论终结——残余 running 工具卡
       // 一律收 done：END 的 !any 门跳过、DONE 全被 ack/stale 压制的轮
       // （实测 Autopilot 工具轮）走到这里才释放，缺这步徽章要干等到
@@ -509,6 +528,7 @@
       return;
     }
     // 仍有 streaming：短宽限等下一 turn
+    DBG('grace', { act: 'stream-wait' });
     requestDoneTimer = setTimeout(graceRelease, REQUEST_DONE_GRACE_MS);
   }
 
@@ -2097,6 +2117,7 @@
       lastStreamActivityAt &&
       Date.now() - lastStreamActivityAt > STREAM_STALE_MS
     ) {
+      DBG('watchdog', { sil: Date.now() - lastStreamActivityAt });
       forceFinishDeadStream();
     }
   }, 10 * 1000);
@@ -2550,7 +2571,9 @@
         // requestIndex 之外加时间戳兜底：sessiondb/兜底通道的 DONE 常不带
         // requestIndex，但其 ts 是轮完成时刻——早于最近 live USER 发送时刻
         // 就是旧轮迟到件，不得释放当前在途轮的发送键/队列。
-        const doneIdx = typeof msg.requestIndex === 'number' ? msg.requestIndex : null;
+        // requestIndex 负数是无归属哨兵（裸答案 DONE 实测带 -1）：按无索引处理，
+        // 否则 -1 < latestLiveReqIdx 误 stale → 释放丢、队列干等 75s 看门狗。
+        const doneIdx = typeof msg.requestIndex === 'number' && msg.requestIndex >= 0 ? msg.requestIndex : null;
         const doneTs = eventTsNum(msg);
         // 服务端裁决器（turnArbiter）已按轮次状态判过 stale/ack——直接采信，
         // 本地判定留作兜底（旧版扩展无标记时仍生效）。
@@ -2572,6 +2595,8 @@
           msg.ack === true ||
           (!doneImmediate && youngestAwaitAt > 0 && now0 - youngestAwaitAt < 8000);
         const releaseDone = !staleDone && !injectAckDone;
+        DBG('done', { stale: !!staleDone, ack: !!injectAckDone, rel: releaseDone, imm: !!doneImmediate, reason: msg.reason || '', ut: !!msg._ut, cut: !!msg.closedUt, idx: doneIdx, dts: doneTs });
+
         if (injectAckDone) {
           // 被挡的 DONE 不会重发——若它其实是真轮终（无 _ut 的收尾通道），
           // 8s 窗口到期后补一次释放评估，否则 rr 要靠 75s 看门狗才放得掉。
@@ -4062,15 +4087,17 @@
     // 僵尸 rr：DONE 丢失/被去重吞掉时 rr 卡死，flush 全靠 10s 看门狗兜底，
     // 实测排队消息滞留 40-55s。这里就地收尸（内部会再调本函数重试）。
     if (requestRunning && lastStreamActivityAt && Date.now() - lastStreamActivityAt > STREAM_STALE_MS) {
+      DBG('flush', { gate: 'dead' });
       forceFinishDeadStream();
       return;
     }
-    if (requestRunning) return;
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    if (requestRunning) { DBG('flush', { gate: 'rr', n: pendingSendQueue.length }); return; }
+    if (!ws || ws.readyState !== WebSocket.OPEN) { DBG('flush', { gate: 'ws' }); return; }
     // 刚发未答的条目挡队列：0.67 无流路径上 DONE+宽限不等于真轮终，
     // 此时放行会让下一条插队成 U1U2A1A2。超龄条目（死轮/孤儿）不挡队列。
     const now = Date.now();
-    if (sentAwaitingReply.some((e) => now - (e.at || 0) < AWAIT_REPLY_FLUSH_BLOCK_MS)) return;
+    if (sentAwaitingReply.some((e) => now - (e.at || 0) < AWAIT_REPLY_FLUSH_BLOCK_MS)) { DBG('flush', { gate: 'await', n: pendingSendQueue.length }); return; }
+    DBG('flush', { gate: 'ok', n: pendingSendQueue.length });
     const n = pendingSendQueue.shift();
     persistQueuedSends();
     if (n) {
@@ -4178,6 +4205,7 @@
 
   /** 僵尸流收尸：清 streaming 视觉态 + 释放发送键（不发 phone_stop——流本就死了） */
   function forceFinishDeadStream() {
+    DBG('deadstream', {});
     for (const entry of streamingTurns.values()) {
       if (entry.element) entry.element.classList.remove('streaming');
       if (entry.bubble) entry.bubble.classList.remove('streaming');

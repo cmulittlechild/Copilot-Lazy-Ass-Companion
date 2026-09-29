@@ -315,8 +315,12 @@ export class TurnArbiter {
         break;
       }
       case "COPILOT_DONE": {
+        // requestIndex 负数是 Copilot 的「无归属」哨兵（裸答案 DONE 实测带 -1）——
+        // 按无索引处理：否则 -1 < latestReqIdx 被误判陈旧 DONE，该轮释放信号整条丢。
         const reqIdx =
-          typeof ev.requestIndex === "number" ? ev.requestIndex : null;
+          typeof ev.requestIndex === "number" && ev.requestIndex >= 0
+            ? ev.requestIndex
+            : null;
         const doneTs =
           typeof ev.ts === "number" ? ev.ts : typeof ev.timestamp === "number" ? ev.timestamp : now;
         const immediate =
