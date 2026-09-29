@@ -441,6 +441,10 @@ async function activate(context) {
                         const reason = String(result.injectPath || "clipboard");
                         bridge?.broadcast({
                             type: "SYSTEM_MESSAGE",
+                            // injectFailed：终态注入失败（该会话绝不会再产出本轮内容）——
+                            // 客户端据此销掉待答条目并回填原文。DONE 走裁决器会被判
+                            // inject-ack 丢弃，终态信号只能搭 SYSTEM_MESSAGE。
+                            injectFailed: String(msg.text || ""),
                             text: reason.includes("cross-session-leak")
                                 ? "注入未确认目标会话（检测到可能串台），消息已复制到剪贴板，请在正确 Chat 粘贴"
                                 : reason.includes("unverified")
@@ -457,6 +461,9 @@ async function activate(context) {
                         // soft-unverified/leak-warning 已在上方链给过提示；避免同一次注入既「已提交」又「警告」。
                         bridge?.broadcast({
                             type: "SYSTEM_MESSAGE",
+                            // 与 clipboard 同：verified=false = 未确认写入目标会话，本会话
+                            // 绝不会再产出本轮——客户端销待答条目并回填。
+                            injectFailed: String(msg.text || ""),
                             text: "警告：注入未通过目标会话校验，请核对桌面 Chat 是否为手机所选会话",
                         });
                         // 0.5.27：结束手机 typing，避免发送失败后一直显示“正在输入”
