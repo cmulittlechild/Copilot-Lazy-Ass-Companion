@@ -2978,7 +2978,11 @@
           // 说明桥端确认后、上游落盘前链路中断（VS Code 被杀等）——
           // 该轮永远不会有答案，按未送达处理（回填+移出待答），否则泡
           // 会干等且占住 rr/收割器的在途判断。
-          try {
+          // R31：跳过理由（<3s 落盘窗 / 在途证据 / <45s 核验窗）都会过期——
+          // 跳过时布延期复查，否则进程被杀的消息静默丢失永不再查。
+          const runUndeliveredAudit = () => {
+            try { let minRetryMs = 0;
+              const deferAudit = (ms) => { if (ms > 0 && (!minRetryMs || ms < minRetryMs)) minRetryMs = ms; };
             const replayedUserKeys = new Set();
             for (const m of list) {
               if (m && m.type === 'USER_MESSAGE' && typeof m.text === 'string') {
@@ -3006,28 +3010,39 @@
                 if (Number.isFinite(t) && t > lastReplayUserTs) lastReplayUserTs = t;
               }
             }
-            for (let i = sentAwaitingReply.length - 1; i >= 0; i--) {
-              const e = sentAwaitingReply[i];
-              const eBase = baseNameAny(e.sess || '').replace(/\.jsonl$/i, '');
-              if (!boundBaseR || eBase !== boundBaseR) continue;
-              // 上行落盘有 ~1-2s 延迟：发送太新的条目跳过，回放可能先于落盘
-              if (Date.now() - (e.at || 0) < 3000) continue;
-              // 在途证据须「新」：真在途轮持续产帧，lastReplayAgentAt 必然距今很近；
-              // 进程在生成途中被杀的轮，其 agent 证据全部停在过去——陈旧证据不当
-              // 在途判据，否则死轮泡永远干等不报未送达（实测 br1 在途被杀静默悬挂）。
-              if (lastReplayAgentAt && lastReplayAgentAt >= (e.at || 0) &&
-                  Date.now() - lastReplayAgentAt < 90000) continue;
-              if (!(lastReplayUserTs && lastReplayUserTs >= (e.at || 0)) &&
-                  Date.now() - (e.at || 0) < 45000) continue;
-              if (replayedUserKeys.has(userTextDedupeKey(e.text))) continue;
-              sentAwaitingReply.splice(i, 1);
-              if (!(input.value || '').trim()) { input.value = e.text; sendVerifyRestoredText = e.text; }
-              sendVerifyMissedAt = Date.now();
-              addSys('发送可能未送达（连接中断），文本已回填，请重新发送');
-            }
-            // 排队消息在刷新时随内存蒸发：从持久化副本恢复——入队后更新的
-            // 回放 USER 说明刷新瞬间已出队送达（销账）；否则把最近一条回填
-            // 输入框（不自动重发）。按 ts 判送达：同文重问时老 USER 不算数。
+              for (let i = sentAwaitingReply.length - 1; i >= 0; i--) {
+                const e = sentAwaitingReply[i];
+                const eBase = baseNameAny(e.sess || '').replace(/\.jsonl$/i, '');
+                if (!boundBaseR || eBase !== boundBaseR) continue;
+                // 上行落盘有 ~1-2s 延迟：发送太新的条目跳过，回放可能先于落盘
+                if (Date.now() - (e.at || 0) < 3000) { deferAudit(3000 - (Date.now() - (e.at || 0)) + 400); continue; }
+                // 在途证据须「新」：真在途轮持续产帧，lastReplayAgentAt 必然距今很近；
+                // 进程在生成途中被杀的轮，其 agent 证据全部停在过去——陈旧证据不当
+                // 在途判据，否则死轮泡永远干等不报未送达（实测 br1 在途被杀静默悬挂）。
+                if (lastReplayAgentAt && lastReplayAgentAt >= (e.at || 0) &&
+                    Date.now() - lastReplayAgentAt < 90000) {
+                  deferAudit(90000 - (Date.now() - lastReplayAgentAt) + 400);
+                  continue;
+                }
+                if (!(lastReplayUserTs && lastReplayUserTs >= (e.at || 0)) &&
+                    Date.now() - (e.at || 0) < 45000) {
+                  deferAudit(45000 - (Date.now() - (e.at || 0)) + 400);
+                  continue;
+                }
+                if (replayedUserKeys.has(userTextDedupeKey(e.text))) continue;
+                sentAwaitingReply.splice(i, 1);
+                if (!(input.value || '').trim()) { input.value = e.text; sendVerifyRestoredText = e.text; }
+                sendVerifyMissedAt = Date.now();
+                addSys('发送可能未送达（连接中断），文本已回填，请重新发送');
+              }
+              if (minRetryMs) setTimeout(runUndeliveredAudit, minRetryMs);
+          } catch (_) {}
+          };
+          runUndeliveredAudit();
+          // 排队消息在刷新时随内存蒸发：从持久化副本恢复——入队后更新的
+          // 回放 USER 说明刷新瞬间已出队送达（销账）；否则把最近一条回填
+          // 输入框（不自动重发）。按 ts 判送达：同文重问时老 USER 不算数。
+          try {
             const rawQ = sessionStorage.getItem(QUEUED_SENDS_KEY);
             if (rawQ) {
               const arrQ = JSON.parse(rawQ);
