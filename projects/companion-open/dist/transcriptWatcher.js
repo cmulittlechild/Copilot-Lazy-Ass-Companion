@@ -1656,6 +1656,18 @@ class TranscriptWatcher {
                         // 多个 in-flight 时按 FIFO 取第一个在 fallbackRequestUserText 中匹配或队列头
                         matchedUser = this.pendingGapQueue[0]?.userText;
                     }
+                    // 时序门：队列兜底纯属到达序猜测——事件自带时刻早于候选问题的
+                    // 开问时刻 >15s = 旧轮经慢通道迟到的重投影（chatSessions 整文件
+                    // 重投可迟数分钟），不可能是该 pending 的答案。错配会把 _ut 错盖
+                    // 到在途新轮上：客户端渲染成新轮答案、销账待答、提前放队（实测旧
+                    // 答案挂在作文轮下）。rid/_ut 自证匹配的不进此分支不受影响。
+                    if (matchedUser && !matchedRid) {
+                        const evTs0 = typeof ev.timestamp === 'number' ? ev.timestamp : NaN;
+                        const askTs = this.userTsByUt.get(this.normUserText(String(matchedUser)));
+                        if (Number.isFinite(evTs0) && askTs != null && evTs0 + 15_000 < askTs) {
+                            matchedUser = undefined;
+                        }
+                    }
                     if (matchedUser && !matchedRid) {
                         for (const [rid, ut] of this.fallbackRequestUserText) {
                             if (ut === matchedUser) {
@@ -2505,21 +2517,47 @@ class TranscriptWatcher {
         // 0.5.24：turn_end 到了，取消超时定时器
         this.clearTurnGapTimer();
         this.clearTurnHardTimer();
+        // 时序纠偏：本 turn_end 记录自身的时刻早于「当前活跃问题」的开问时刻
+        // >15s → 上游懒写把旧轮记录排到新 USER 之后（chatSessions 尾部乱序可
+        // 迟数分钟），该收尾属于旧轮而非在途轮：归属 _ut 按「开问时刻 ≤ 本记录
+        // 时刻的最新用户」纠偏、completed/pending 簿记对纠偏后的归属做，且不得
+        // 清 activeUserText——它记在途轮的账，清了会让真收尾 _ut 全丢（实测旧轮
+        // 收尾把旧答案 _ut 错盖到在途作文轮下渲染+销账待答+提前放队）。
+        let staleOwner = false;
+        let doneUt = this.activeUserText || undefined;
+        if (doneUt && Number.isFinite(this.evTsMs)) {
+            const askTs = this.userTsByUt.get(this.normUserText(doneUt));
+            if (askTs != null && this.evTsMs + 15_000 < askTs) {
+                staleOwner = true;
+                doneUt = undefined;
+                let best = 0;
+                for (const [ut0, ts0] of this.userTsByUt) {
+                    if (ts0 <= this.evTsMs && ts0 > best) {
+                        best = ts0;
+                        doneUt = ut0;
+                    }
+                }
+            }
+        }
         // 0.5.28：如果已发出过可见正文，把用户文记入 completed，并从 pending 中移除，避免 chatSessions 兜底再 gap 出重复回复
-        if (this.turnEmittedVisibleAgent && this.activeUserText) {
-            const ut = this.normUserText(this.activeUserText);
-            this.completedGapUserTexts.add(ut);
-            this.removePendingGap(ut);
+        {
+            const bookUt = staleOwner ? doneUt : this.activeUserText || undefined;
+            if (this.turnEmittedVisibleAgent && bookUt) {
+                const ut = this.normUserText(bookUt);
+                this.completedGapUserTexts.add(ut);
+                this.removePendingGap(ut);
+            }
         }
         // 0.5.23：本 turn 从未发出用户可见正文（空 content / 仅 monologue / 仅 tool）→ gap
-        // 注意：工具切断会清 streamAccum，不能用 streamAccum 空判断
-        if (!this.turnEmittedVisibleAgent) {
+        // 注意：工具切断会清 streamAccum，不能用 streamAccum 空判断。
+        // 旧轮迟到的收尾不登记——markCurrentTurnGap 记的是在途轮的账。
+        if (!this.turnEmittedVisibleAgent && !staleOwner) {
             this.markCurrentTurnGap();
         }
         // 收尾事件必须先取本轮 ut 再清：AGENT_MESSAGE/DONE 按 _ut 归属到本题，
         // 客户端按 ut 释放「已发未答」条目与去重键（兜底 activeUserText 已清会归空键）。
-        const doneUt = this.activeUserText || undefined;
-        this.activeUserText = '';
+        if (!staleOwner)
+            this.activeUserText = '';
         if (this.streamAccum && !(0, jsonl_1.isInternalMonologue)(this.streamAccum)) {
             this.emit({
                 type: 'AGENT_MESSAGE',
