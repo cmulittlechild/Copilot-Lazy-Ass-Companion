@@ -171,6 +171,8 @@
   const STREAM_STALE_AWAIT_MS = 150 * 1000;
   /** 最后一次流活动（STREAM_* / COPILOT_TYPING / AGENT_MESSAGE）时间戳 */
   let lastStreamActivityAt = 0;
+  let lastAgentMessageAt = 0; // 最近一次真渲染 AGENT_MESSAGE 的时刻
+  let lastUserSendAt = 0;     // 最近一次真发送（含回声/桌面来源 USER）的时刻
   /**
    * 发送后置核验：半死 socket 上 ws.send() 不抛异常但从未送达——
    * 送出后在 N 秒内等服务器 USER_MESSAGE 回声，超时判丢失并回填文本。
@@ -2226,6 +2228,7 @@
         break;
       }
       case 'USER_MESSAGE': {
+        if (!replaying && !replayingInstant) lastUserSendAt = Date.now();
         // 发送核验：自己的消息被服务器回声了 = 真送达，撤銷核验计时。
         // 但回声须来自当前绑定会话——绑定/桌面活跃分叉时（P2），别会话里同文
         // 的迟到的 USER 回声会误清核验，把一次真吞包伪装成已送达。
@@ -2310,7 +2313,6 @@
         break;
       case 'AGENT_STREAM_END':
         if (frameRearms(msg)) lastStreamActivityAt = Date.now();
-        const endEntry = streamingTurns.get(msg.streamId || 'default');
         doneStreams.delete(msg.streamId || 'default');
         completeAssistantTurn(msg.streamId || 'default');
         clearTyping();
@@ -2329,12 +2331,13 @@
             });
             markAllToolsDone();
           }
-          // END 只是「某条流」的终止帧——骨架/进度块的 END（该流从未产出正文）
-          // 会在轮中途来，把它当终止帧释放会让在途态在静默窗内提前落回「发送」：
-          // 连发排队消息 ~6s 后即逃逸插队（R33/R34 实测 U2 在 A1 前 19s 广播）。
-          // 只有「所关流产过正文」的 END 才算轮终止征兆走宽限复查；
+          // END 只是「某条流」的终止帧——骨架/进度块的 END 会在轮中途来，把它
+          // 当终止帧释放会让在途态在静默窗内提前落回「发送」：连发排队消息
+          // ~6s 后即逃逸插队（R33/R34/R35 实测 U2 在 A1 前 19s+ 广播）。
+          // 判据：本轮真答案（AGENT_MESSAGE）必须在最后发送之后才渲染过——
+          // 进度流也写 markdown，流级标记区分不了；只有真答帧能证明轮近终。
           // 无 DONE 收尾的真轮由 releaseHardTimer（15s 硬看门狗）兜底释放。
-          const endHadText = !!(endEntry && (endEntry.markdown || '').trim());
+          const endHadText = lastAgentMessageAt > 0 && lastAgentMessageAt > lastUserSendAt;
           if (!replaying && endHadText) setRequestRunning(false, undefined, { deferMs: 3000 });
           if (!any) setStatus(true, connectedLabel());
         }
@@ -2462,6 +2465,7 @@
           clearTyping();
           break;
         }
+        lastAgentMessageAt = Date.now();
         if (msg.streamId) {
           completeAssistantTurn(msg.streamId, msg.text || '', msg);
         } else {
