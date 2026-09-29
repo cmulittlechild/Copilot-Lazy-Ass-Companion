@@ -1524,7 +1524,11 @@
             n.style.display = 'none';
             n.classList.add('is-done');
           });
-          setRequestRunning(false);
+          // 摘除迟到双卡后若真轮还在生成（其流卡未建），直释会放排队逃逸——
+          // 同门：本轮真答渲过才可释放，否则靠 DONE/硬看门狗。
+          if (lastAgentMessageAt > lastUserSendAt) {
+            setRequestRunning(false, undefined, { deferMs: 3000 });
+          }
         }
         return;
       }
@@ -1568,8 +1572,12 @@
         });
         // 与 END 处理同锚：流卡收尾只是「这条流」结束，不是轮终——轮中途
         // 的骨架/进度块 END 会走到这里。无条件即释会让在途态在静默窗内
-        // 提前回弹（R29 实测连发仍逃逸）。统一宽限复查：≥5s 无活动才放。
-        setRequestRunning(false, undefined, { deferMs: 3000 });
+        // 提前回弹（R36 wire：骨架 END 经此站点 +6.8s 放出排队消息）。
+        // 同门：本轮真答案渲染过（lastAgentMessageAt > lastUserSendAt）才算轮终；
+        // AGENT_MESSAGE 路径会先盖 lastAgentMessageAt 再调本函数，不受影响。
+        if (lastAgentMessageAt > lastUserSendAt) {
+          setRequestRunning(false, undefined, { deferMs: 3000 });
+        }
       }
     }
   }
@@ -2571,7 +2579,9 @@
             if (!requestRunning) return;
             const n2 = Date.now();
             const y2 = Math.max(0, ...sentAwaitingReply.map((e) => e.at || 0));
-            if (y2 === 0 || n2 - y2 >= 8000) {
+            // 仅当本轮真答已渲染（真轮终特征）才释放——否则在途轮的旧队列条目
+            // 会让 y2 判据误判而把在途态提前放掉（第二阶逃逸路径）。
+            if ((y2 === 0 || n2 - y2 >= 8000) && lastAgentMessageAt > lastUserSendAt) {
               markAllToolsDone();
               finishAllAssistantVisuals();
               setRequestRunning(false, undefined, { deferMs: 1500 });
