@@ -640,7 +640,12 @@ export async function cancelChatRequest(): Promise<{ ok: boolean; via?: string; 
   let lastErr: unknown;
   for (const cmd of candidates) {
     try {
-      await vscode.commands.executeCommand(cmd);
+      // 工具执行中的取消命令可能挂起（Copilot 内部等工具收尾）——不设超时
+      // 会永远 await，停止路径两路广播（DONE[phone_stop]/失败提示）都发不出。
+      await Promise.race([
+        vscode.commands.executeCommand(cmd),
+        new Promise((_, rej) => setTimeout(() => rej(new Error("cancel command timed out")), 5000)),
+      ]);
       return { ok: true, via: cmd };
     } catch (e) {
       lastErr = e;

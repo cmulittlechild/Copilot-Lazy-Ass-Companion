@@ -144,6 +144,9 @@
   let requestRunning = false;
   /** 停止需双击确认：空输入点击发送键先武装 3s，再点才真正停（防误触/打字未落框杀掉在途回复） */
   let stopArmUntil = 0;
+  /** PHONE_STOP 发出/回执时刻：服务端 DONE[phone_stop] 缺席超 12s 提示可能未生效 */
+  let stopSentAt = 0;
+  let stopAckAt = 0;
   /** 本会话见过的最大 requestIndex（仅 live）：用于识别旧请求迟到的 DONE，
       防止把当前在途轮的发送键/队列提前释放 */
   let latestLiveReqIdx = -1;
@@ -2595,6 +2598,7 @@
           msg.ack === true ||
           (!doneImmediate && youngestAwaitAt > 0 && now0 - youngestAwaitAt < 8000);
         const releaseDone = !staleDone && !injectAckDone;
+        if (msg.reason === 'phone_stop' || msg.reason === 'isCanceled') stopAckAt = Date.now();
         DBG('done', { stale: !!staleDone, ack: !!injectAckDone, rel: releaseDone, imm: !!doneImmediate, reason: msg.reason || '', ut: !!msg._ut, cut: !!msg.closedUt, idx: doneIdx, dts: doneTs });
 
         if (injectAckDone) {
@@ -4230,6 +4234,14 @@
       addSys('未连接，无法停止');
       return;
     }
+    // 停止回执看护：PHONE_STOP 无送达核验——服务端 DONE[phone_stop] 不上线
+    // （命令挂起/上游忽略）时，12s 后如实提示「可能未生效」，不再静默。
+    stopSentAt = Date.now();
+    setTimeout(() => {
+      if (stopSentAt && (!stopAckAt || stopAckAt < stopSentAt) && lastStreamActivityAt >= stopSentAt) {
+        addSys('停止请求已发出，但上游仍在执行（工具调用中的取消可能延迟生效）');
+      }
+    }, 12000);
     finishAllAssistantVisuals();
     if (requestDoneTimer) {
       clearTimeout(requestDoneTimer);
