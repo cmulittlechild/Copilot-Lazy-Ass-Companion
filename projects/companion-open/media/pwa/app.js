@@ -2860,14 +2860,18 @@
           // 换会话后排队消息的目标已变化：泡丢掉（防注入到新会话），但文本
           // 捞回输入框而不是蒸发——用户重发还是复制走由用户决定。
           if (pendingSendQueue.length) {
-            let lastText = '';
+            const texts = [];
             for (const qi of pendingSendQueue) {
               if (qi && qi.el && qi.el.isConnected) qi.el.remove();
-              if (qi && qi.text) lastText = qi.text;
+              if (qi && qi.text) texts.push(qi.text);
             }
             pendingSendQueue.length = 0;
             persistQueuedSends();
-            if (lastText && !(input.value || '').trim()) input.value = lastText;
+            // 草稿非空时换行追加而不是丢——此前只在空框回填，有草稿时排队文本蒸发
+            if (texts.length) {
+              const cur = (input.value || '').trim();
+              input.value = cur ? cur + '\n' + texts.join('\n') : texts.join('\n');
+            }
             addSys('已切换会话，排队消息已回填输入框');
             if (queuedHintEl) { queuedHintEl.remove(); queuedHintEl = null; }
           }

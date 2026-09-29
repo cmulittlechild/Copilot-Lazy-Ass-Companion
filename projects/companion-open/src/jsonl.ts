@@ -65,6 +65,9 @@ export class JsonlProjector {
   private lastToolKey = new Map<string, string>();
   private lastProgressKey = new Map<string, string>();
   private lastThinkingKey = new Map<string, string>();
+  /** toolCallId → true：0.67 的待批形态是 toolInvocationSerialized.isConfirmed={type:0}，
+      不是独立 confirmation kind。type 转非 0（批准/拒绝）时发一次 RESOLVED。 */
+  private pendingToolConfirms = new Map<string, boolean>();
   private doneTimers = new Map<number, NodeJS.Timeout>();
   private doneSink: ((ev: PhoneEvent) => void) | undefined;
   /** 已投影过错误文本的请求（requestId），避免 kind0 重写/重复收尾重发 */
@@ -99,6 +102,7 @@ export class JsonlProjector {
     this.lastToolKey.clear();
     this.lastProgressKey.clear();
     this.lastThinkingKey.clear();
+    this.pendingToolConfirms.clear();
     for (const t of this.doneTimers.values()) clearTimeout(t);
     this.doneTimers.clear();
     this.lastKind0ReqCount = 0;
@@ -259,7 +263,7 @@ export class JsonlProjector {
     }
     this.respParts.set(pathKey, cur);
 
-    const blocks = renderBlocks(cur);
+    const blocks = renderBlocks(cur, this.pendingToolConfirms);
     const out: PhoneEvent[] = [];
     let textBlockIdx = 0;
     let stepIdx = 0;
@@ -308,6 +312,8 @@ export class JsonlProjector {
           buttons: b.buttons,
           requestIndex: reqIndex,
         });
+      } else if (b.type === 'confirmResolved') {
+        out.push({ type: 'AGENT_CONFIRM_RESOLVED', button: b.title, requestIndex: reqIndex } as any);
       }
     }
     return out;
@@ -480,7 +486,7 @@ export function isInternalMonologue(text: string): boolean {
   return false;
 }
 
-function renderBlocks(parts: any[]) {
+function renderBlocks(parts: any[], pendingToolConfirms?: Map<string, boolean>) {
   const blocks: any[] = [];
   let textAcc = '';
   const flushText = () => {
@@ -521,14 +527,42 @@ function renderBlocks(parts: any[]) {
       const inv = p.invocationMessage ?? p.pastTenseMessage ?? {};
       const name = typeof inv === 'string' ? inv : inv?.value ?? inv?.content ?? '';
       stepCount++;
+      const callId = p.toolCallId ?? p.toolId ?? null;
+      const tsd = p.toolSpecificData ?? {};
+      const confType =
+        p.isConfirmed && typeof p.isConfirmed === 'object' && typeof (p.isConfirmed as any).type === 'number'
+          ? (p.isConfirmed as any).type
+          : p.isConfirmed === true
+            ? 1
+            : p.isConfirmed === false
+              ? 0
+              : null;
       blocks.push({
         type: 'tool',
-        toolId: p.toolCallId ?? p.toolId ?? null,
+        toolId: callId,
         text: name || p.toolId || 'tool',
         input: p.toolSpecificData ?? p.parameters ?? p.input ?? null,
         isComplete: p.isComplete !== false && p.isComplete !== 0,
-        isConfirmed: p.isConfirmed,
+        isConfirmed: confType != null ? confType !== 0 : p.isConfirmed,
       });
+      // 0.67 待批：isConfirmed.type 0→非0 翻转即审批落地。首次见 0 发确认卡，
+      // 翻转时补 RESOLVED 让各端收掉卡片（手机按钮仅消卡，审批仍需桌面端）。
+      if (callId) {
+        const cmdLine =
+          (tsd.commandLine && (tsd.commandLine.forDisplay || tsd.commandLine.original)) || '';
+        if (confType === 0 && pendingToolConfirms && !pendingToolConfirms.has(callId)) {
+          pendingToolConfirms.set(callId, true);
+          blocks.push({
+            type: 'confirm',
+            title: `待批准: ${name || p.toolId || 'tool'}`,
+            message: String(cmdLine || name || '').slice(0, 300) || 'Copilot 正在等待批准',
+            buttons: ['知道了（请在 VS Code 端批准）'],
+          });
+        } else if (confType != null && confType !== 0 && pendingToolConfirms && pendingToolConfirms.has(callId)) {
+          pendingToolConfirms.delete(callId);
+          blocks.push({ type: 'confirmResolved', title: name || p.toolId || 'tool' });
+        }
+      }
       continue;
     }
 
