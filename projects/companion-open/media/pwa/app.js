@@ -2152,9 +2152,23 @@
     }
     // 跨会话事件过滤：服务端给 live 事件打 _sess（绑定会话 id）；与当前绑定不符的
     // 直接丢弃，防别会话 USER/AGENT 泡漏进当前 feed（回放类消息不带 _sess 不拦）。
+    // 放行例外：_ut/文本与「已发未答」条目同文 = 自家轮次被 Copilot 归进了别的
+    // 会话文件（注入落到新会话、或会话只存于 sessiondb 无 jsonl）——是本轮的
+    // 应答而非别会话泄漏；丢下会让待答泡空等、答案永不可见。
+    let ownTurnForeignSess = false;
     if (msg._sess && currentSessionMeta.file) {
       const bound = baseNameAny(currentSessionMeta.file).replace(/\.jsonl$/i, '');
-      if (bound && String(msg._sess) !== bound) return;
+      if (bound && String(msg._sess) !== bound) {
+        const evUt = String(
+          msg._ut || (msg.type === 'USER_MESSAGE' ? msg.text : '') || '',
+        );
+        ownTurnForeignSess =
+          !!evUt &&
+          sentAwaitingReply.some(
+            (e) => userTextDedupeKey(e.text) === userTextDedupeKey(evUt),
+          );
+        if (!ownTurnForeignSess) return;
+      }
     }
     // 跟踪本会话 live 最大 requestIndex：识别旧请求迟到的 DONE
     if (!replaying && typeof msg.requestIndex === 'number' && msg.requestIndex > latestLiveReqIdx) {
@@ -2211,6 +2225,7 @@
         // 的迟到的 USER 回声会误清核验，把一次真吞包伪装成已送达。
         const echoSessOk = (() => {
           if (!msg._sess) return true;
+          if (ownTurnForeignSess) return true; // 自家轮被归进别会话文件——回声即送达
           const bound = baseNameAny(currentSessionMeta.file || '').replace(/\.jsonl$/i, '');
           const mBase = baseNameAny(msg._sess).replace(/\.jsonl$/i, '');
           return !bound || !mBase || bound === mBase;
