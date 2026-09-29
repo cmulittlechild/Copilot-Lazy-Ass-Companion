@@ -2181,6 +2181,20 @@
               sendVerifyRestoredText = String(msg.notPersisted);
             }
           }
+          // 终态注入失败（串台/bind-failed/verified_false → 已复制剪贴板）：
+          // 本会话绝不会再产出本轮，但终态 DONE 被裁决器判 inject-ack 丢弃
+          // 到不了这里——待答条目会挂到看门狗超时、空 Copilot 泡干等。
+          // 按 ut 销条目+回填原文（与 notPersisted 同语义：泡不删）。
+          if (msg.injectFailed) {
+            const ifKey = userTextDedupeKey(String(msg.injectFailed));
+            for (let i = sentAwaitingReply.length - 1; i >= 0; i--) {
+              if (userTextDedupeKey(sentAwaitingReply[i].text) === ifKey) sentAwaitingReply.splice(i, 1);
+            }
+            if (!(input.value || '').trim()) {
+              input.value = String(msg.injectFailed);
+              sendVerifyRestoredText = String(msg.injectFailed);
+            }
+          }
         } catch (_) {}
         // auth failed 曾只关 socket → PWA 无限重连显示 connecting
         if (/auth failed/i.test(t) || /auth required/i.test(t)) {
@@ -3845,6 +3859,16 @@
   function scheduleReconnect() {
     clearTimeout(reconnectTimer);
     reconnectAttempt += 1;
+    // 选中的实例已消失（窗口关闭/进程死掉）时，instanceUrlOverride 会让
+    // 重连死磕一个不存在的服务。多次失败后丢弃失效选择、回退页面宿主
+    // 桥——页面既然加载得出来，宿主桥大概率还活着；原实例恢复后可在
+    // 抽屉里重新点选。
+    if (reconnectAttempt >= 5 && instanceUrlOverride) {
+      instanceUrlOverride = null;
+      try {
+        localStorage.removeItem('sidecar.instanceUrl');
+      } catch {}
+    }
     const delay = Math.min(8000, 800 + reconnectAttempt * 400);
     reconnectTimer = setTimeout(connect, delay);
   }
