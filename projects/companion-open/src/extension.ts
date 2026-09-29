@@ -543,7 +543,10 @@ export async function activate(context: vscode.ExtensionContext) {
     // 终端管理 + 多实例发现（参考 copilot-remote 的 TerminalManager / InstanceDiscovery）
     terminalMgr = new TerminalManager((line) => qrPanel.addLog(line));
     discovery = new InstanceDiscovery({
-      basePort: bridge.port,
+      // 扫描必须锚规范基端口而非本实例实绑端口：端口被占时桥会自增
+      // 绑定（3010 忙→3011→3012…），若从实绑端口起扫，后起的实例永远
+      // 看不到排在自己前面的实例（3012 扫 3012..3032 → 列表恒空）。
+      basePort: bridge.preferredListenPort,
       authToken: bridge.getAuthToken() || undefined,
       log: (line) => qrPanel.addLog(line),
     });
