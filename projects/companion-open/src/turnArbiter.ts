@@ -197,6 +197,18 @@ export class TurnArbiter {
     switch (type) {
       case "USER_MESSAGE": {
         const t = normText(ev.text);
+        // 迟到重投影去重：sessiondb 行 / kind:2 记录编辑重写会把「同一轮」的
+        // USER 再投一遍（实测 run_in_terminal 待批准轮在其 tool 重试时于
+        // +430s 重投 → 客户端同文用户泡二次渲染）。判定：live 事件与同会话
+        // 「未答开启轮」同文 = 该轮本身，不是新轮——整件丢弃（用户泡早已渲）。
+        // 真同文重问发生在前轮 answered 之后，不受影响；回放/历史事件放行。
+        if (t && !ev.replayed && !ev.history) {
+          for (const ot of this.openTurns) {
+            if (ot.answered) continue;
+            if (sessBase && (ot as any).sess && (ot as any).sess !== sessBase) continue;
+            if (ot.utKey === t) return null;
+          }
+        }
         const reqIdx =
           typeof ev.requestIndex === "number" ? ev.requestIndex : null;
         if (reqIdx != null && reqIdx > this.latestReqIdx) this.latestReqIdx = reqIdx;
