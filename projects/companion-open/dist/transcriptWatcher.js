@@ -254,6 +254,16 @@ class TranscriptWatcher {
     // ---- 事件 → PhoneEvent 映射状态 ----
     activeTurnId = null;
     turnSeq = 0;
+    /** 轮级归属：turn_start 时捕获的当时问题文本。轮内事件归属用它而非按
+     * 记录 ts 找最近问题——并发/乱序轮里 +2s 宽限会把旧轮正文错盖到后开的
+     * 问题下（实测 BURST3 的 assistant 记录被归到 BURST1 轮、答案贴错泡）。 */
+    turnUt = '';
+    turnStartTsMs = NaN;
+    /** 下一条 turn_start 应归属的问题：transcript 的 user.message 处理时记录。
+     *  不用 activeUserText——注入侧 addPendingPhoneUserText 会随时覆盖它，
+     *  在轮次交错/乱序时把 turn_start 错挂到新问题上（实测 BURST3 轮被归
+     *  到 BURST1）。 */
+    pendingTurnUt = '';
     activeStreamId = null;
     streamAccum = '';
     pendingReasoning = [];
@@ -1712,7 +1722,7 @@ class TranscriptWatcher {
     }
     /** 当前 turn 缺可见正文 → 登记待补用户文（不重扫全文） */
     markCurrentTurnGap() {
-        const ut = this.normUserText(this.activeUserText);
+        const ut = this.normUserText(this.turnUt || this.activeUserText);
         if (ut && !this.completedGapUserTexts.has(ut)) {
             this.pushPendingGap(ut);
         }
@@ -2087,6 +2097,9 @@ class TranscriptWatcher {
                 }
                 this.turnSeq += 1;
                 this.activeTurnId = turnId;
+                this.turnUt = this.pendingTurnUt || this.activeUserText;
+                this.pendingTurnUt = '';
+                this.turnStartTsMs = tsMs;
                 this.streamAccum = '';
                 this.pendingReasoning = [];
                 this.turnEmittedVisibleAgent = false;
@@ -2154,6 +2167,7 @@ class TranscriptWatcher {
         // 旧答案——本轮的新答不能按「跨通道已答」丢弃；orphan 检查要用这个基线。
         this.utCompletedBeforeTurn = !!newUt && this.completedGapUserTexts.has(newUt);
         this.activeUserText = newUt;
+        this.pendingTurnUt = newUt;
         const messageId = asString(data.messageId);
         this.emit({
             type: 'USER_MESSAGE',
@@ -2185,6 +2199,20 @@ class TranscriptWatcher {
         }
         return best ?? this.activeUserText;
     }
+    /** 轮内事件归属：activeTurn 开启期间的记录属于本 turn——归属取 turn_start
+     *  捕获的问题；明显早于轮开启的迟到件（乱序追加到文件尾的旧轮记录）按
+     *  记录 ts 找回旧轮。无在途轮时按 ts 归属。 */
+    resolveTurnUt(tsMs) {
+        if (this.activeTurnId && this.turnUt) {
+            if (!Number.isNaN(tsMs) &&
+                Number.isFinite(this.turnStartTsMs) &&
+                tsMs < this.turnStartTsMs - 2000) {
+                return this.resolveUtForTs(tsMs);
+            }
+            return this.turnUt;
+        }
+        return this.resolveUtForTs(tsMs);
+    }
     handleAssistantMessage(data, tsMs = NaN) {
         const messageId = asString(data.messageId);
         const reasoning = asString(data.reasoningText);
@@ -2202,6 +2230,9 @@ class TranscriptWatcher {
         if (!this.activeTurnId && (reasoning || toolReqs.length)) {
             this.turnSeq += 1;
             this.activeTurnId = 'auto';
+            this.turnUt = this.pendingTurnUt;
+            this.pendingTurnUt = '';
+            this.turnStartTsMs = NaN;
             this.streamAccum = '';
             this.turnEmittedVisibleAgent = false;
             this.pendingReasoning = [];
@@ -2316,7 +2347,7 @@ class TranscriptWatcher {
         // 迟到重投影：上一轮 assistant.message 延迟落盘到达时，内容已是发过的答案 → 不开流。
         // ut 归属：按记录时间戳找回它所属的问题（activeUserText 可能已被新问覆盖）；
         // 同时查 stale pending 兜底。
-        const resolvedUt = this.resolveUtForTs(tsMs);
+        const resolvedUt = this.resolveTurnUt(tsMs);
         if (this.isReplayedFor(content, resolvedUt) || this.isStalePendingReplay(content))
             return;
         // 同问题答案文本变体压制：迟到记录的正文与已投版本形态不同（markdown/db 差异）
@@ -2524,7 +2555,7 @@ class TranscriptWatcher {
         // 清 activeUserText——它记在途轮的账，清了会让真收尾 _ut 全丢（实测旧轮
         // 收尾把旧答案 _ut 错盖到在途作文轮下渲染+销账待答+提前放队）。
         let staleOwner = false;
-        let doneUt = this.activeUserText || undefined;
+        let doneUt = (this.turnUt || this.activeUserText) || undefined;
         if (doneUt && Number.isFinite(this.evTsMs)) {
             const askTs = this.userTsByUt.get(this.normUserText(doneUt));
             if (askTs != null && this.evTsMs + 15_000 < askTs) {
@@ -2573,6 +2604,8 @@ class TranscriptWatcher {
         this.emit({ type: 'COPILOT_DONE', requestIndex: this.turnSeq, _ut: doneUt });
         this.activeStreamId = null;
         this.activeTurnId = null;
+        this.turnUt = '';
+        this.turnStartTsMs = NaN;
         this.streamAccum = '';
         this.pendingReasoning = [];
         this.turnEmittedVisibleAgent = false;
@@ -2589,6 +2622,7 @@ class TranscriptWatcher {
                     streamId,
                     text: this.streamAccum,
                     requestIndex: this.turnSeq,
+                    _ut: this.turnUt || undefined,
                 });
             }
             if (this.activeStreamId || this.streamAccum || this.lastEmittedTextByStream.has(streamId)) {
@@ -2596,6 +2630,7 @@ class TranscriptWatcher {
                     type: 'AGENT_STREAM_END',
                     streamId,
                     requestIndex: this.turnSeq,
+                    _ut: this.turnUt || undefined,
                 });
             }
             this.lastEmittedTextByStream.delete(streamId);
@@ -2657,7 +2692,7 @@ class TranscriptWatcher {
                     streamId,
                     text: this.streamAccum,
                     requestIndex: this.turnSeq,
-                    _ut: this.activeUserText || undefined,
+                    _ut: this.turnUt || this.activeUserText || undefined,
                 });
             }
             if (this.activeStreamId || this.streamAccum || this.lastEmittedTextByStream.has(streamId)) {
@@ -2665,7 +2700,7 @@ class TranscriptWatcher {
                     type: 'AGENT_STREAM_END',
                     streamId,
                     requestIndex: this.turnSeq,
-                    _ut: this.activeUserText || undefined,
+                    _ut: this.turnUt || this.activeUserText || undefined,
                 });
             }
             this.lastEmittedTextByStream.delete(streamId);
@@ -2675,10 +2710,12 @@ class TranscriptWatcher {
         this.emit({
             type: 'COPILOT_DONE',
             requestIndex: this.turnSeq,
-            _ut: this.activeUserText || undefined,
+            _ut: this.turnUt || this.activeUserText || undefined,
         });
         this.activeTurnId = null;
         this.activeStreamId = null;
+        this.turnUt = '';
+        this.turnStartTsMs = NaN;
         this.streamAccum = '';
         this.pendingReasoning = [];
         this.turnEmittedVisibleAgent = false;
@@ -2690,6 +2727,9 @@ class TranscriptWatcher {
     resetState(preserveDedupe = false) {
         this.activeTurnId = null;
         this.turnSeq = 0;
+        this.turnUt = '';
+        this.turnStartTsMs = NaN;
+        this.pendingTurnUt = '';
         this.activeStreamId = null;
         this.streamAccum = '';
         this.pendingReasoning = [];
