@@ -42,6 +42,7 @@ exports.localChatSessionUri = localChatSessionUri;
 exports.activateSessionForInject = activateSessionForInject;
 exports.waitForInjectInSessionFile = waitForInjectInSessionFile;
 exports.detectCrossSessionLeak = detectCrossSessionLeak;
+exports.checkInjectEverLanded = checkInjectEverLanded;
 exports.injectMessage = injectMessage;
 exports.handleConfirmation = handleConfirmation;
 exports.cancelChatRequest = cancelChatRequest;
@@ -410,6 +411,63 @@ async function detectCrossSessionLeak(targetFile, text, lookbackMs = 20_000) {
         }
     }
     return undefined;
+}
+/** 读文件尾部判断是否含 needle（复刻 detectCrossSessionLeak 的读法，不含时序门槛） */
+function fileTailContains(file, needle) {
+    try {
+        if (!fs.existsSync(file))
+            return false;
+        const st = fs.statSync(file);
+        const readSize = Math.min(st.size, 512 * 1024);
+        const fd = fs.openSync(file, "r");
+        try {
+            const buf = Buffer.alloc(readSize);
+            fs.readSync(fd, buf, 0, readSize, Math.max(0, st.size - readSize));
+            return buf.toString("utf8").includes(needle);
+        }
+        finally {
+            fs.closeSync(fd);
+        }
+    }
+    catch {
+        return false;
+    }
+}
+/**
+ * soft-unverified 延迟复核：提交的文本到底有没有落进**目标会话**。
+ * 命中目标会话文件尾部、其 transcript 镜像、或调用方提供的补充检查
+ * （extension 侧传 sessiondb 绑定 sid 的 turns 行扫描）都算已送达。
+ * 旧同文命中同样算（保守不判死）——判死只发生在目标会话零命中时。
+ * 打进别的会话（异会话归属）对本客户端同样不可见 = 未送达，不误放行。
+ */
+async function checkInjectEverLanded(targetFile, text, extraCheck) {
+    const needle = text.trim();
+    if (!needle)
+        return true;
+    if (targetFile) {
+        try {
+            const base = path.basename(targetFile);
+            const dir = path.dirname(targetFile);
+            if (dir.endsWith("chatSessions")) {
+                const mirror = path.join(path.dirname(dir), "GitHub.copilot-chat", "transcripts", base);
+                if (fileTailContains(mirror, needle))
+                    return true;
+            }
+        }
+        catch {
+            /* ignore */
+        }
+        if (fileTailContains(targetFile, needle))
+            return true;
+    }
+    try {
+        if (extraCheck && (await extraCheck()))
+            return true;
+    }
+    catch {
+        /* ignore */
+    }
+    return false;
 }
 async function submitFocusedQuery(text) {
     try {

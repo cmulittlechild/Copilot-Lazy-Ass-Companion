@@ -317,6 +317,12 @@ class TurnArbiter {
                 break;
             }
             case "COPILOT_DONE": {
+                // 扩展自产的注入终态信号（inject_* reason）不是上游轮次事件——死注入
+                // 路径上目标轮从未注册，过裁决会被 !doneTurn/!recentClose 判死整条丢，
+                // 客户端永远收不到终态（实测空窗口死桥上 inject_soft_unverified 即被丢，
+                // 其送达核验解除逻辑从未触发）。
+                if (typeof ev.reason === "string" && ev.reason.startsWith("inject_"))
+                    return ev;
                 // requestIndex 负数是 Copilot 的「无归属」哨兵（裸答案 DONE 实测带 -1）——
                 // 按无索引处理：否则 -1 < latestReqIdx 被误判陈旧 DONE，该轮释放信号整条丢。
                 const reqIdx = typeof ev.requestIndex === "number" && ev.requestIndex >= 0

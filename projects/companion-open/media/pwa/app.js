@@ -2546,6 +2546,16 @@
         }
         break;
       case 'COPILOT_DONE':
+        // inject_lost = 服务端 55s 延迟复核后全库零命中——提交可能打进了无
+        // Copilot 的窗口（消息停在草稿态）：回填原文让用户重试；待答条目由
+        // 下面 _ut 清条目逻辑销掉，rr 随之正常释放。
+        if (msg.reason === 'inject_lost' && typeof msg._ut === 'string') {
+          const lost = String(msg._ut);
+          if (!(input.value || '').trim() || input.value === sendVerifyRestoredText) {
+            input.value = lost;
+            sendVerifyRestoredText = lost;
+          }
+        }
         // inject_soft_unverified = 服务端已把消息提交进目标会话（Windows 落盘确认慢
         // 会触发该路径）——送达核验立即通过，别让 9s 计时器误报「可能未送达」。
         if (msg.reason === 'inject_soft_unverified') {

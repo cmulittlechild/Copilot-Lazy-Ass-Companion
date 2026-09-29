@@ -14,6 +14,8 @@ import {
   isInjectedEcho,
   setActiveSessionFile,
   getActiveSessionFile,
+  sessionIdFromFile,
+  checkInjectEverLanded,
 } from "./inject";
 import { samePath } from "./pathutil";
 import { TunnelManager } from "./tunnel";
@@ -444,6 +446,45 @@ export async function activate(context: vscode.ExtensionContext) {
               text: "已提交到目标会话（落盘确认稍慢，若桌面未出现再重试）",
             });
             bridge?.broadcast({ type: "COPILOT_DONE", reason: "inject_soft_unverified" });
+            // 延迟复核判死：soft-unverified = 提交后 20s+30s 双核验零落盘。
+            // 提交可能打进了无 Copilot 的窗口（消息停在草稿态）——55s 后
+            // 全库再扫一遍仍零命中 ⇒ 明确判未送达：客户端回填原文+释放，
+            // 否则泡挂 ~194s 死流看门狗才放，原文静默丢失。
+            const lostText = String(msg.text || "");
+            const lostTarget = getActiveSessionFile();
+            const lostSid = lostTarget ? sessionIdFromFile(lostTarget) : undefined;
+            setTimeout(() => {
+              void (async () => {
+                try {
+                  const landed = await checkInjectEverLanded(
+                    lostTarget,
+                    lostText,
+                    () => {
+                      // sessiondb 快径：turns 行先于 chatSessions 落盘——正确会话
+                      // 的轮次已开（文件写在路上）算已送达，不误判死。
+                      if (!lostSid) return false;
+                      const rows = transcriptWatcher?.sessionDbRecentTurns(40, lostSid) ?? [];
+                      const needle = lostText.trim();
+                      return rows.some((r) =>
+                        String(r.user_message || "").includes(needle),
+                      );
+                    },
+                  );
+                  if (landed) return;
+                  bridge?.broadcast({
+                    type: "SYSTEM_MESSAGE",
+                    text: "上一条消息未送达目标会话（可能提交到了不可用窗口），文本已回填，请重试",
+                  });
+                  bridge?.broadcast({
+                    type: "COPILOT_DONE",
+                    reason: "inject_lost",
+                    _ut: lostText,
+                  });
+                } catch {
+                  /* ignore */
+                }
+              })();
+            }, 55_000);
           } else if (result.injectPath === "bind+chat.open+leak-warning") {
             bridge?.broadcast({
               type: "SYSTEM_MESSAGE",
