@@ -590,6 +590,31 @@ export class BridgeServer {
                 }
               }
             }
+            // 在途轮 USER 补投：lazy-write 让轮完成前的请求行不在文件回放里，
+            // 冷连客户端会看到「裸答案挂上一轮」。与 replaySession 同源——
+            // 从裁决器开启轮补齐缺失的 pending USER（R104 B3）。
+            {
+              const sessB = replayFile
+                ? path.basename(replayFile).replace(/\.jsonl$/i, '')
+                : '';
+              const pend = this.arbiter.pendingUserEvents(sessB);
+              if (pend.length) {
+                const have = new Set(
+                  replay
+                    .filter((e: any) => e?.type === 'USER_MESSAGE')
+                    .map((e: any) =>
+                      String(e._ut || e.text || '')
+                        .replace(/\s+/g, ' ')
+                        .trim()
+                        .slice(0, 120),
+                    ),
+                );
+                for (const pe of pend) {
+                  const k = String(pe._ut || pe.text || '');
+                  if (k && !have.has(k)) replay.push(pe);
+                }
+              }
+            }
             this.send(ws, {
               type: 'HISTORY_REPLAY',
               messages: annotateOrphanUserTurns(replay),

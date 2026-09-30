@@ -3095,6 +3095,10 @@
           // 会干等且占住 rr/收割器的在途判断。
           // R31：跳过理由（<3s 落盘窗 / 在途证据 / <45s 核验窗）都会过期——
           // 跳过时布延期复查，否则进程被杀的消息静默丢失永不再查。
+          // 提升到两个 try 块共同作用域——此前在箭头函数内声明、外层 try
+          // 引用 → ReferenceError 被 catch 吞掉，排队消息刷新回填永远跑不到
+          // （R104 B2：刷新后排队消息静默丢失）。
+          const boundBaseR = baseNameAny(currentSessionMeta.file).replace(/\.jsonl$/i, '');
           const runUndeliveredAudit = () => {
             try { let minRetryMs = 0;
               const deferAudit = (ms) => { if (ms > 0 && (!minRetryMs || ms < minRetryMs)) minRetryMs = ms; };
@@ -3104,7 +3108,6 @@
                 replayedUserKeys.add(userTextDedupeKey(m.text));
               }
             }
-            const boundBaseR = baseNameAny(currentSessionMeta.file).replace(/\.jsonl$/i, '');
             // 懒写盘在途证据：回放里 send 之后仍有 agent 活动（AGENT/TOOL/THINKING 帧 ts）
             // 说明管道活着——USER 行要轮次完成才写盘，在途轮缺席不等于丢失，
             // 误报未送达会把仍在生成的条目回填+移出待答（答案随后裸挂上一轮）。
@@ -4132,6 +4135,9 @@
         // 二次入队复用同一提示元素——覆盖引用会把上一条提示泄漏在 DOM 里（B4）。
         if (queuedHintEl && queuedHintEl.isConnected) queuedHintEl.remove();
         queuedHintEl = addSys('已排队：当前回复结束后自动发送');
+        // 排队也要回焦输入框——焦点留在按钮/正文上，下一次打字会被吃
+        // （输入为空时发送键还会武装成「停止」误杀在途轮，R104 B1）。
+        try { input.focus(); } catch (_) {}
         return;
       }
       if (Date.now() < stopArmUntil) {
