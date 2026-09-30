@@ -38,6 +38,10 @@ class JsonlProjector {
      *  对「confirmation 存在但 isConfirmed 永远缺席」的已决调用不落解决态，
      *  只靠轮终判定才不会让手机端挂一张永远不会被批准的卡。 */
     pendingToolConfirms = new Map();
+    /** 已收尸的 callId：pending 卡在文件里永远停在「待批准」形态（phone_stop 的轮
+     *  上游不落收尾件），被取代/收尸后若同一 part 再次投影会重复发卡且错序挂到
+     *  更晚轮答案之下（B3 冷回放幽灵卡）。判死后不再重发。 */
+    resolvedToolConfirms = new Set();
     doneTimers = new Map();
     doneSink;
     /** 已投影过错误文本的请求（requestId），避免 kind0 重写/重复收尾重发 */
@@ -71,6 +75,7 @@ class JsonlProjector {
         this.lastProgressKey.clear();
         this.lastThinkingKey.clear();
         this.pendingToolConfirms.clear();
+        this.resolvedToolConfirms.clear();
         for (const t of this.doneTimers.values())
             clearTimeout(t);
         this.doneTimers.clear();
@@ -237,7 +242,7 @@ class JsonlProjector {
             cur.splice(i, 0, ...add);
         }
         this.respParts.set(pathKey, cur);
-        const blocks = renderBlocks(cur, this.pendingToolConfirms, reqIndex);
+        const blocks = renderBlocks(cur, this.pendingToolConfirms, reqIndex, this.resolvedToolConfirms);
         const out = [];
         let textBlockIdx = 0;
         let stepIdx = 0;
@@ -307,6 +312,7 @@ class JsonlProjector {
             if (ri !== reqIndex)
                 continue;
             this.pendingToolConfirms.delete(callId);
+            this.resolvedToolConfirms.add(callId);
             out.push({ type: 'AGENT_CONFIRM_RESOLVED', button: 'completed', toolCallId: callId, requestIndex: reqIndex });
         }
         return out;
@@ -319,6 +325,7 @@ class JsonlProjector {
             if (ri >= reqIndex)
                 continue;
             this.pendingToolConfirms.delete(callId);
+            this.resolvedToolConfirms.add(callId);
             out.push({ type: 'AGENT_CONFIRM_RESOLVED', button: 'superseded', toolCallId: callId, requestIndex: ri });
         }
         return out;
@@ -508,7 +515,7 @@ function isInternalMonologue(text) {
         return true;
     return false;
 }
-function renderBlocks(parts, pendingToolConfirms, reqIndex) {
+function renderBlocks(parts, pendingToolConfirms, reqIndex, resolvedToolConfirms) {
     const blocks = [];
     let textAcc = '';
     const flushText = () => {
@@ -576,7 +583,7 @@ function renderBlocks(parts, pendingToolConfirms, reqIndex) {
             // 翻转时补 RESOLVED 让各端收掉卡片（手机按钮仅消卡，审批仍需桌面端）。
             if (callId) {
                 const cmdLine = (tsd.commandLine && (tsd.commandLine.forDisplay || tsd.commandLine.original)) || '';
-                if (confType === 0 && pendingToolConfirms && !pendingToolConfirms.has(callId)) {
+                if (confType === 0 && pendingToolConfirms && !pendingToolConfirms.has(callId) && !resolvedToolConfirms?.has(callId)) {
                     pendingToolConfirms.set(callId, reqIndex ?? -1);
                     blocks.push({
                         type: 'confirm',
@@ -588,6 +595,7 @@ function renderBlocks(parts, pendingToolConfirms, reqIndex) {
                 }
                 else if (confType != null && confType !== 0 && pendingToolConfirms && pendingToolConfirms.has(callId)) {
                     pendingToolConfirms.delete(callId);
+                    resolvedToolConfirms?.add(callId);
                     blocks.push({ type: 'confirmResolved', title: name || p.toolId || 'tool', toolCallId: callId });
                 }
             }

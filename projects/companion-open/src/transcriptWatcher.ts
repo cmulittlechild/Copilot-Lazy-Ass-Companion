@@ -930,6 +930,12 @@ export class TranscriptWatcher {
    *  盖上真实记录时刻，PWA 的按 ts 排序才有意义（否则全塌成到达序）。
    *  仅 handleEvent 内有效，分发结束即清——定时器/轮询通道的事件必须自带 ts。 */
   private evTsMs = NaN;
+  /** 行链归属：transcript 每行带 id+parentId 链（id → 该行所属轮次的归一用户文）。
+   *  晚到落盘的记录沿 parentId 找回本 turn，不靠 ts/activeUserText 猜（B1：
+   *  alpha 的 assistant.message 迟写落在 beta 轮期间被盖错 _ut 重投）。 */
+  private idToTurnUt = new Map<string, string>();
+  /** 当前处理行的谱系 ut（dispatch 期间有效，同 evTsMs 语义）。 */
+  private evLineageUt: string | undefined = undefined;
   /** sessiondb 悬挂行：首取时 assistant_response 为空（先插 user 行后 UPDATE），
    *  `id>` 游标已越过 → 每轮显式重查直到补全或超过 TTL。行 id → 首见时间。 */
   private sessionDbPendingRows = new Map<number, number>();
@@ -2028,13 +2034,33 @@ export class TranscriptWatcher {
     if (!type) return;
     const data = asRecord(rec.data);
     const id = asString(rec.id);
+    const parentId = asString(rec.parentId);
     const tsStr = asString(rec.timestamp);
     const tsMs = tsStr ? Date.parse(tsStr) : NaN;
     this.evTsMs = tsMs;
+    // 谱系归属：沿 parentId 找回本行所属轮次；user.message 行本身就是问题。
+    const lineageUt =
+      type === 'user.message' && data
+        ? this.normUserText(asString(data.content) || '') || undefined
+        : parentId
+          ? this.idToTurnUt.get(parentId)
+          : undefined;
+    this.evLineageUt = lineageUt;
     try {
       this.dispatchEvent(type, data, id, tsMs);
     } finally {
       this.evTsMs = NaN;
+      this.evLineageUt = undefined;
+    }
+    if (id) {
+      // turn_start 的 parentId 常是上一轮的 turn_end——优先用它自己解析的
+      // turnUt；无用户行的延续轮（工具循环）才退回谱系（= 延续上一问题，合理）。
+      const recUt =
+        type === 'assistant.turn_start' ? this.turnUt || lineageUt || undefined : lineageUt;
+      if (recUt) {
+        this.idToTurnUt.set(id, recUt);
+        this.capMap(this.idToTurnUt, 2000);
+      }
     }
   }
 
@@ -2320,7 +2346,7 @@ export class TranscriptWatcher {
     // 迟到重投影：上一轮 assistant.message 延迟落盘到达时，内容已是发过的答案 → 不开流。
     // ut 归属：按记录时间戳找回它所属的问题（activeUserText 可能已被新问覆盖）；
     // 同时查 stale pending 兜底。
-    const resolvedUt = this.resolveTurnUt(tsMs);
+    const resolvedUt = this.evLineageUt || this.resolveTurnUt(tsMs);
     if (this.isReplayedFor(content, resolvedUt) || this.isStalePendingReplay(content)) return;
     // 同问题答案文本变体压制：迟到记录的正文与已投版本形态不同（markdown/db 差异）
     // 键未命中时按「该问题已投答案」的前/后 40 字比对——前缀因工具引用缺失异、
@@ -2528,8 +2554,10 @@ export class TranscriptWatcher {
     // 清 activeUserText——它记在途轮的账，清了会让真收尾 _ut 全丢（实测旧轮
     // 收尾把旧答案 _ut 错盖到在途作文轮下渲染+销账待答+提前放队）。
     let staleOwner = false;
-    let doneUt = (this.turnUt || this.activeUserText) || undefined;
-    if (doneUt && Number.isFinite(this.evTsMs)) {
+    // 谱系归属优先：turn_end 的 parentId 链回自己轮次——晚到收尾按链归属，
+    // 不走 15s 偏差启发式（链在就是权威）。
+    let doneUt = this.evLineageUt || (this.turnUt || this.activeUserText) || undefined;
+    if (!this.evLineageUt && doneUt && Number.isFinite(this.evTsMs)) {
       const askTs = this.userTsByUt.get(this.normUserText(doneUt));
       if (askTs != null && this.evTsMs + 15_000 < askTs) {
         staleOwner = true;
@@ -2721,6 +2749,7 @@ export class TranscriptWatcher {
     this.clearTurnHardTimer();
     this.toolStates.clear();
     this.seenMessageIds.clear();
+    this.idToTurnUt.clear();
     this.lastContentByMessageId.clear();
     this.lastEmittedTextByStream.clear();
     this.lastUserTsMs = null;

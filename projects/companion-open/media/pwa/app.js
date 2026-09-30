@@ -2225,9 +2225,13 @@
         );
         ownTurnForeignSess =
           !!evUt &&
-          sentAwaitingReply.some(
-            (e) => userTextDedupeKey(e.text) === userTextDedupeKey(evUt),
-          );
+          sentAwaitingReply.some((e) => {
+            if (userTextDedupeKey(e.text) !== userTextDedupeKey(evUt)) return false;
+            // 例外仅适用于「本会话的轮被归进了别文件」：条目本身须属当前查看
+            // 会话。条目的 sess 属别会话时放行 = 别会话在途答案画进本视图（B2）。
+            const eBase = baseNameAny(e.sess || '').replace(/\.jsonl$/i, '');
+            return !e.sess || !eBase || eBase === bound;
+          });
         if (!ownTurnForeignSess) return;
       }
     }
@@ -4122,6 +4126,8 @@
         persistQueuedSends();
         input.value = '';
         input.style.height = 'auto';
+        // 二次入队复用同一提示元素——覆盖引用会把上一条提示泄漏在 DOM 里（B4）。
+        if (queuedHintEl && queuedHintEl.isConnected) queuedHintEl.remove();
         queuedHintEl = addSys('已排队：当前回复结束后自动发送');
         return;
       }
