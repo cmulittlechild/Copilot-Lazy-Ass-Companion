@@ -1192,11 +1192,15 @@ export async function activate(context: vscode.ExtensionContext) {
                     const pTarget = String(
                       (p as any).csFile || (p as any).file || "",
                     );
+                    // newestSessionFile() 在 transcripts 目录命中同名时返回的是
+                    // transcripts 路径——与 pTarget（chatSessions 路径）按全路径
+                    // 比较永假，被压跟随必然当「过时」丢弃（R99 死链）。同名 basename
+                    // 即同一会话，按 basename 比。
                     const stillNewest = transcriptWatcher?.newestSessionFile?.();
                     if (
                       pTarget &&
                       stillNewest &&
-                      !samePath(pTarget, stillNewest)
+                      path.basename(pTarget) !== path.basename(stillNewest)
                     ) {
                       qrPanel.addLog(
                         `SESSION_FOLLOW 丢弃: 目标已非最新 ${path.basename(pTarget)}`,

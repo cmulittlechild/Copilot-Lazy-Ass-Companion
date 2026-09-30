@@ -565,19 +565,28 @@ export class BridgeServer {
               const provUsers = provided.filter((e) => e?.type === 'USER_MESSAGE').length;
               if (provUsers >= liveUsers) replay = provided;
               else {
-                // live 版胜出（刚发的用户消息还没落盘）。live 回放若混入
-                // 别会话的事件，不能认领单一 file/title；但当所有带 _sess
-                // 的事件都指向绑定会话（或根本没有会话戳）时身份仍然成立——
-                // 保留 file/title，否则重连后标题停在品牌名、按会话守门的
-                // 逻辑（_sess 过滤/待答补画/未送达校验）也一起失效。
-                const foreign = replay.some((e) => {
-                  const s = String(e?._sess || '');
-                  if (!s) return false;
-                  return replayFile ? !String(replayFile).includes(s) : true;
-                });
-                if (foreign || !replayFile) {
-                  replayFile = undefined;
-                  replayTitle = undefined;
+                // live 版胜出（刚发的用户消息还没落盘）。history 是跨会话
+                // 累积——把带 _sess 且不属于绑定会话的事件从回放里剔除
+                // （重连后外会话最新轮混入当前 feed 的修复：R99 B-R99-2），
+                // 剔除后身份成立，file/title 保留（此前混入直接丢 file/title
+                // 还导致标题退回品牌名）。无 _sess 的裸事件保留（无法判属，
+                // 丢弃风险大于混入）。
+                if (replayFile) {
+                  const boundBase = replayFile
+                    .split(/[\\/]/)
+                    .pop()!
+                    .replace(/\.jsonl$/i, '');
+                  replay = replay.filter((e) => {
+                    const s = String(e?._sess || '');
+                    return !s || s === boundBase;
+                  });
+                } else {
+                  // 无法确定绑定会话：只要发现带 _sess 的异源事件就不认领身份
+                  const foreign = replay.some((e) => !!String(e?._sess || ''));
+                  if (foreign) {
+                    replayFile = undefined;
+                    replayTitle = undefined;
+                  }
                 }
               }
             }

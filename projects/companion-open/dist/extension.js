@@ -1156,10 +1156,14 @@ async function activate(context) {
                                     // 「桌面活跃会话」，窗口结束时桌面可能已搬到别处（含 inject 完成
                                     // 切到所选会话）——过时跟随直接丢，否则手机会被拽去死会话（R18）。
                                     const pTarget = String(p.csFile || p.file || "");
+                                    // newestSessionFile() 在 transcripts 目录命中同名时返回的是
+                                    // transcripts 路径——与 pTarget（chatSessions 路径）按全路径
+                                    // 比较永假，被压跟随必然当「过时」丢弃（R99 死链）。同名 basename
+                                    // 即同一会话，按 basename 比。
                                     const stillNewest = transcriptWatcher?.newestSessionFile?.();
                                     if (pTarget &&
                                         stillNewest &&
-                                        !(0, pathutil_1.samePath)(pTarget, stillNewest)) {
+                                        path.basename(pTarget) !== path.basename(stillNewest)) {
                                         qrPanel.addLog(`SESSION_FOLLOW 丢弃: 目标已非最新 ${path.basename(pTarget)}`);
                                     }
                                     else {
