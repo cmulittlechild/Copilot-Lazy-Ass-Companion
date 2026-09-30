@@ -4241,6 +4241,9 @@
       input.style.height = 'auto';
     }
     sendVerifyRestoredText = null; // 新发送即抛弃旧回填标记
+    // 发送键取走焦点后紧接的键入会无声吞掉整条消息（F1 连发吞字族）——
+    // 发送成功立即把焦点还回输入框，连打不丢字。
+    try { input.focus(); } catch (_) {}
     // 半死 socket 防御：N 秒内服务器没回声这条消息就判丢，回填文本让用户重发。
     // 同时写 sessionStorage——半死 socket 报错可能刷新页面杀死计时器，刷新后启动时回填。
     if (pendingSendCheck) clearTimeout(pendingSendCheck.timer);
