@@ -225,3 +225,9 @@ PWA ↔ VS Code bridge。仓库 `~/repos/sidecar_remote/projects/companion-open`
 - **未送达 notice 存活性缺口**：回填+剪除生效（input.value 回填、awaiting 泡移除、pendingSend=null 证明走的是新路径非 pendingSend），但「发送可能未送达…」sys 行终态缺席——同块代码里 addSys 必执行过 ⇒ 元素被后续二次重建清掉（重连期 socket flap/第二次 unicast replay 或 addSys 内异常被 catch 吞）。判读：回填文本在 input 里 = 修复生效；sys 行缺失 = 通知瞬态化残留问题，用户走神即无感知。查第二回放：broadcast 通道 select/follow 可见，unicast 不可见——只能由 DOM 终态反推。
 - **sessiondb 归属裁决仍是铁证**：切后立即发（~10s 后）的 R28F 落 caec5d61 turn4——wire `sess=` 标签 + db 行 session_id 双证；本次零 SESSION_SELECTED = 无拽回。
 - **dup-per-ut 正例**：同 ut 两条 AGENT_MESSAGE ≠ 双投——进度卡("draft is 405 words")与正文同 ut 属合法成对，按文本判重。
+
+## R102 取证心得补充（F1 fix-verify，vsix 2e93d1a 修发送键持焦吞字）
+- **F1 吞字根因实锤**：点「发送」后按钮持焦，紧跟的键入落在按钮上被无声丢弃；修法 = sendTextNow 成功后 `input.focus()` 还焦。验证法：send → **不补点 composer** 直接 0.5s 内 type——补点会把「focus 是否自动还回」变量掩盖掉；修前 0/38 字落框，修后全文落框正常入队。
+- **换 vsix 必须三步齐全才算测到新码**：`--install-extension --force`（更新 extensions 目录）→ Developer: Reload Window（换 ext host，channel.json pid 变更判据）→ Safari ⟳ 拉新 app.js（md5 比对 installed vs repo）。三步缺一仍是旧码。
+- **停止回归点**：双击停止后 wire `DONE closedUt=… reason=phone_stop` ~5s + arm 行 + 「（该轮无回复）」占位；post-stop 发送须正常。
+- **DONE reason 白名单补充**：`inject_soft_unverified` 属 inject_* 正常族，见到不算异常。
