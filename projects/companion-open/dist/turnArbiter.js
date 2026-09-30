@@ -453,6 +453,7 @@ class TurnArbiter {
             case "PROGRESS_STEP": {
                 const evTs = TurnArbiter.tsOf(ev);
                 const { t, ownerUt } = this.turnForStreamEvent(sessBase, evTs, String(ev.streamId || ""));
+                const hadStream = t?.sawStream === true;
                 if (t && (!ownerUt || t.utKey === ownerUt))
                     t.sawStream = true;
                 if (!utKey)
@@ -462,6 +463,25 @@ class TurnArbiter {
                     // 思考/进度帧——归属轮已收尾，放出去客户端只会为它新建流卡并
                     // 贴到 feed 底部（实测两枚旧轮 thinking 泡串进新轮下）。
                     return null;
+                }
+                // 迟到帧的第二种形态：上游把旧轮 thinking 以「新鲜 ts」在归属轮判答
+                // 后 1-2s 重投（实测 R96A 答 DONE 后 +1s 到达，>2s stale-ts 门兜不住）。
+                // 到达序把它归到刚开启、尚无流的新轮 → 错锚渲染在新用户泡下。
+                // 无 _ut/rid 自证且新轮未见流时，同会话另一轮 3s 内刚判答 → 判旧轮残骸丢。
+                // 新轮自身首帧思考通常在其 DONE 数秒后才可能产出，窗口内不误伤。
+                if (t &&
+                    !ownerUt &&
+                    !hadStream &&
+                    !ev.replayed &&
+                    !ev.history) {
+                    for (const ot of this.openTurns) {
+                        if (ot === t || !ot.answeredAt)
+                            continue;
+                        if (sessBase && ot.sess && ot.sess !== sessBase)
+                            continue;
+                        if (now - ot.answeredAt < 3000)
+                            return null;
+                    }
                 }
                 break;
             }

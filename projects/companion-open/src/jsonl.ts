@@ -67,7 +67,11 @@ export class JsonlProjector {
   private lastThinkingKey = new Map<string, string>();
   /** toolCallId → true：0.67 的待批形态是 toolInvocationSerialized.isConfirmed={type:0}，
       不是独立 confirmation kind。type 转非 0（批准/拒绝）时发一次 RESOLVED。 */
-  private pendingToolConfirms = new Map<string, boolean>();
+  /** callId → 该确认所属请求下标：请求整体完成（result/elapsedMs/isCanceled
+   *  或嵌带的完成标记）时按此补发 AGENT_CONFIRM_RESOLVED 收尸——新版 Copilot
+   *  对「confirmation 存在但 isConfirmed 永远缺席」的已决调用不落解决态，
+   *  只靠轮终判定才不会让手机端挂一张永远不会被批准的卡。 */
+  private pendingToolConfirms = new Map<string, number>();
   private doneTimers = new Map<number, NodeJS.Timeout>();
   private doneSink: ((ev: PhoneEvent) => void) | undefined;
   /** 已投影过错误文本的请求（requestId），避免 kind0 重写/重复收尾重发 */
@@ -131,6 +135,7 @@ export class JsonlProjector {
     ) {
       const reqIndex = k[1] as number;
       const endEvs = this.endActiveStreamsForRequest(reqIndex);
+      const confEvs = this.resolveConfirmsForRequest(reqIndex);
       // kind=1 result 收尾标记的 obj.v 就是 result 对象（可含 errorDetails）
       const errEvs = k[2] === 'result' ? this.errorEventsForRequest({ result: obj.v }, reqIndex) : [];
       const doneEv: PhoneEvent = {
@@ -140,11 +145,11 @@ export class JsonlProjector {
         v: obj.v,
       };
       if (this.doneSink) {
-        out.push(...endEvs, ...errEvs);
+        out.push(...endEvs, ...confEvs, ...errEvs);
         this.scheduleDone(reqIndex, doneEv);
         return out;
       }
-      out.push(...endEvs, ...errEvs, doneEv);
+      out.push(...endEvs, ...confEvs, ...errEvs, doneEv);
       return out;
     }
 
@@ -159,6 +164,9 @@ export class JsonlProjector {
       const base = typeof obj.i === 'number' && obj.i >= 0 ? obj.i : this.reqCount;
       for (let n = 0; n < v.length; n++) {
         const gi = base + n;
+        // 更晚请求出现 ⇒ 此前所有挂起待批准卡已被取代（上游对被弃的待批准轮
+        // 不落任何收尾标记，孤儿轮全靠此路径收尸）。
+        out.push(...this.resolveConfirmsBefore(gi));
         out.push(...this.handleUserRequest(v[n], gi));
         // if request already has response parts in this mutation, project them
         if (Array.isArray(v[n]?.response) && v[n].response.length) {
@@ -173,6 +181,7 @@ export class JsonlProjector {
         const reason = requestDoneReason(v[n]);
         if (reason) {
           out.push(...this.endActiveStreamsForRequest(gi));
+          out.push(...this.resolveConfirmsForRequest(gi));
           out.push(...this.errorEventsForRequest(v[n], gi));
           const doneEv: PhoneEvent = { type: 'COPILOT_DONE', requestIndex: gi, reason };
           if (this.doneSink) this.scheduleDone(gi, doneEv);
@@ -201,6 +210,7 @@ export class JsonlProjector {
     const start = Math.max(0, reqs.length - 3); // last 3 requests max to avoid flood
     for (let i = start; i < reqs.length; i++) {
       const req = reqs[i];
+      out.push(...this.resolveConfirmsBefore(i));
       out.push(...this.handleUserRequest(req, i));
       const resp = req?.response;
       if (Array.isArray(resp) && resp.length) {
@@ -211,6 +221,7 @@ export class JsonlProjector {
         const reason = requestDoneReason(req);
         if (reason) {
           out.push(...this.endActiveStreamsForRequest(i));
+          out.push(...this.resolveConfirmsForRequest(i));
           out.push(...this.errorEventsForRequest(req, i));
           const doneEv: PhoneEvent = { type: 'COPILOT_DONE', requestIndex: i, reason };
           if (this.doneSink) this.scheduleDone(i, doneEv);
@@ -263,7 +274,7 @@ export class JsonlProjector {
     }
     this.respParts.set(pathKey, cur);
 
-    const blocks = renderBlocks(cur, this.pendingToolConfirms);
+    const blocks = renderBlocks(cur, this.pendingToolConfirms, reqIndex);
     const out: PhoneEvent[] = [];
     let textBlockIdx = 0;
     let stepIdx = 0;
@@ -310,11 +321,37 @@ export class JsonlProjector {
           title: b.title,
           message: b.message,
           buttons: b.buttons,
+          toolCallId: b.toolCallId,
           requestIndex: reqIndex,
-        });
+        } as any);
       } else if (b.type === 'confirmResolved') {
-        out.push({ type: 'AGENT_CONFIRM_RESOLVED', button: b.title, requestIndex: reqIndex } as any);
+        out.push({ type: 'AGENT_CONFIRM_RESOLVED', button: b.title, toolCallId: b.toolCallId, requestIndex: reqIndex } as any);
       }
+    }
+    return out;
+  }
+
+  /** 请求整体完成时补发该轮残留待批准卡的 RESOLVED——新版 Copilot 对
+   * 「confirmation 存在 + isConfirmed 缺席」的已决调用不落解决态，
+   * 轮终是唯一能观测的收尸信号（与 bridge 的 pendingConfirms 清理同语义）。 */
+  private resolveConfirmsForRequest(reqIndex: number): PhoneEvent[] {
+    const out: PhoneEvent[] = [];
+    for (const [callId, ri] of [...this.pendingToolConfirms.entries()]) {
+      if (ri !== reqIndex) continue;
+      this.pendingToolConfirms.delete(callId);
+      out.push({ type: 'AGENT_CONFIRM_RESOLVED', button: 'completed', toolCallId: callId, requestIndex: reqIndex } as any);
+    }
+    return out;
+  }
+
+  /** 请求 gi 投影前，所有更早请求上挂的待批准卡一律判被取代——上游对被弃
+   * 待批准轮不落收尾件，孤儿轮的确认卡只能靠「更晚请求出现」收尸。 */
+  private resolveConfirmsBefore(reqIndex: number): PhoneEvent[] {
+    const out: PhoneEvent[] = [];
+    for (const [callId, ri] of [...this.pendingToolConfirms.entries()]) {
+      if (ri >= reqIndex) continue;
+      this.pendingToolConfirms.delete(callId);
+      out.push({ type: 'AGENT_CONFIRM_RESOLVED', button: 'superseded', toolCallId: callId, requestIndex: ri } as any);
     }
     return out;
   }
@@ -486,7 +523,7 @@ export function isInternalMonologue(text: string): boolean {
   return false;
 }
 
-function renderBlocks(parts: any[], pendingToolConfirms?: Map<string, boolean>) {
+function renderBlocks(parts: any[], pendingToolConfirms?: Map<string, number>, reqIndex?: number) {
   const blocks: any[] = [];
   let textAcc = '';
   const flushText = () => {
@@ -536,7 +573,13 @@ function renderBlocks(parts: any[], pendingToolConfirms?: Map<string, boolean>) 
             ? 1
             : p.isConfirmed === false
               ? 0
-              : null;
+              : // 新版 Copilot（terminal 类工具）：待批准序列化为 toolSpecificData.confirmation
+                // 存在且完全不带 isConfirmed 字段（批准/拒绝后才补 {type:1|0}）。
+                // 把「confirmation 存在 + isConfirmed 缺席」视为 pending（0），
+                // 否则该版本下待批准轮永远拿不到确认卡、被取代时也收不到 superseded DONE。
+                tsd && typeof tsd === 'object' && (tsd as any).confirmation
+                  ? 0
+                  : null;
       blocks.push({
         type: 'tool',
         toolId: callId,
@@ -551,16 +594,17 @@ function renderBlocks(parts: any[], pendingToolConfirms?: Map<string, boolean>) 
         const cmdLine =
           (tsd.commandLine && (tsd.commandLine.forDisplay || tsd.commandLine.original)) || '';
         if (confType === 0 && pendingToolConfirms && !pendingToolConfirms.has(callId)) {
-          pendingToolConfirms.set(callId, true);
+          pendingToolConfirms.set(callId, reqIndex ?? -1);
           blocks.push({
             type: 'confirm',
             title: `待批准: ${name || p.toolId || 'tool'}`,
             message: String(cmdLine || name || '').slice(0, 300) || 'Copilot 正在等待批准',
             buttons: ['知道了（请在 VS Code 端批准）'],
+            toolCallId: callId,
           });
         } else if (confType != null && confType !== 0 && pendingToolConfirms && pendingToolConfirms.has(callId)) {
           pendingToolConfirms.delete(callId);
-          blocks.push({ type: 'confirmResolved', title: name || p.toolId || 'tool' });
+          blocks.push({ type: 'confirmResolved', title: name || p.toolId || 'tool', toolCallId: callId });
         }
       }
       continue;
