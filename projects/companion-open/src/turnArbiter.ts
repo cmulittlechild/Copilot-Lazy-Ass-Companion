@@ -727,7 +727,9 @@ export class TurnArbiter {
         (key && (this.emitted.get(key) ?? 0) && now - this.emitted.get(key)! <= window) ||
         altDup ||
         reprojDup;
-      if (isDup) return null;
+      if (isDup) {
+        return null;
+      }
       // 只在「真的会广播」时记名：离线排队/被后续闸丢弃的首发不算已投递，
       // 否则首份被吞、重发又被当重复——净丢一条消息。
       if (markEmitted) {

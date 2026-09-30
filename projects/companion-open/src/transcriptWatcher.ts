@@ -1563,7 +1563,14 @@ export class TranscriptWatcher {
     // 但流收尾事件仍放行——否则已开流的「…」占位泡/停止按钮会卡死
     if (!this.hasPendingGap()) {
       for (const ev of evs) {
-        if (ev.type === 'AGENT_STREAM_END' || ev.type === 'COPILOT_DONE') {
+        // 待批准卡属控制事件：投影器 pendingToolConfirms 是一次性锁存——
+        // 首投被吞就永不重投，卡永远到不了手机端（实测 SLEPT96/PEND97）。
+        if (
+          ev.type === 'AGENT_STREAM_END' ||
+          ev.type === 'COPILOT_DONE' ||
+          ev.type === 'AGENT_CONFIRM' ||
+          ev.type === 'AGENT_CONFIRM_RESOLVED'
+        ) {
           const doneUt = this.resolveUtForFallbackEv(ev);
           if (doneUt && !(ev as any)._ut) (ev as any)._ut = doneUt;
           this.emit(ev);
@@ -1590,6 +1597,11 @@ export class TranscriptWatcher {
       if (ev.type === 'COPILOT_DONE') {
         const doneUt = this.resolveUtForFallbackEv(ev);
         if (doneUt && !(ev as any)._ut) (ev as any)._ut = doneUt;
+        this.emit(ev);
+        continue;
+      }
+      // 待批准卡同上属控制事件，gap 期也要放行（与 DONE 同权）。
+      if (ev.type === 'AGENT_CONFIRM' || ev.type === 'AGENT_CONFIRM_RESOLVED') {
         this.emit(ev);
         continue;
       }
