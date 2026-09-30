@@ -775,6 +775,23 @@ class BridgeServer {
             slice = firstUser > 0 ? tail.slice(firstUser) : tail;
         }
         this.history = annotateOrphanUserTurns(slice);
+        // pending 轮 USER 补投：kind:2 惰性写盘，在途轮的请求可能还没进文件——
+        // 回放缺它时从裁决器的开启轮补一枚 USER_MESSAGE（桌面发出的轮 PWA 端
+        // 没有 sentAwaitingReply 备份；R66 B1 在途轮泡+卡整条消失）。
+        {
+            const sessB = file ? path.basename(file).replace(/\.jsonl$/i, '') : '';
+            const pend = this.arbiter.pendingUserEvents(sessB);
+            if (pend.length) {
+                const have = new Set(this.history
+                    .filter((e) => e && e.type === 'USER_MESSAGE')
+                    .map((e) => String(e._ut || e.text || '').replace(/\s+/g, ' ').trim().slice(0, 120)));
+                for (const pe of pend) {
+                    const k = String(pe._ut || pe.text || '');
+                    if (k && !have.has(k))
+                        this.history.push(pe);
+                }
+            }
+        }
         // file 透传：PWA 回放后据此恢复该会话的滚动位置（切回不从头拉到底）
         this.broadcastRaw({
             type: 'HISTORY_REPLAY',

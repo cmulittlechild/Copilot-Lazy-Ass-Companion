@@ -48,6 +48,8 @@ class TurnArbiter {
     emittedUt = new Map();
     /** toolId → {t, done}：跨轮工具重投影压制（session 域内）。 */
     emittedTools = new Map();
+    /** sess|toolId → 归属轮 ut：START 时钉死，进度/完成帧钉回原轮（R66 B3）。 */
+    toolOwnerUt = new Map();
     /** a2 指纹（sess|前缀80）→ {t, 归属轮, ut}：轮次实例级同文去重。 */
     emittedA2 = new Map();
     /** 已 END 的 streamId → 终结时刻。END 后迟到的 START/CHUNK 服务端丢弃——
@@ -56,14 +58,40 @@ class TurnArbiter {
         60s 窗不会误伤下一轮。 */
     endedStreams = new Map();
     /** 会话切换/绑定变更时调用：清本轮状态，避免跨会话误杀。 */
+    /** 当前 sess 的未答开启轮 USER 事件（全文）：供回放尾部补投未落盘的
+        pending 轮 USER（桌面发出的轮 PWA 端无 sentAwaitingReply 备份）。 */
+    pendingUserEvents(sessBase) {
+        const out = [];
+        for (const t of this.openTurns) {
+            if (t.answered || !t.text)
+                continue;
+            if (sessBase && t.sess && t.sess !== sessBase)
+                continue;
+            out.push({
+                type: "USER_MESSAGE",
+                text: t.text,
+                timestamp: t.ts,
+                _ut: t.utKey,
+                _sess: t.sess || sessBase,
+                _seq: ++this.seq,
+                pendingTurn: true,
+            });
+        }
+        return out;
+    }
     resetForSession(sessBase) {
-        this.openTurns = [];
+        // openTurns 跨切保留（轮次都带 sess 戳，查找点按 sessBase 过滤）：
+        // 否则「在途轮切走→切回」后 pendingUserEvents 拿不到该轮记录，
+        // 回放无法补投未落盘的 pending USER（R66 B1）。只修剪过老/已答轮。
+        const now0 = Date.now();
+        this.openTurns = this.openTurns.filter((t) => !t.answered && now0 - t.ts < 30 * 60_000);
         this.latestUserLiveTs = 0;
         this.latestReqIdx = -1;
         // 位置型 streamId（requests/N/…）每个会话文件从 0 重新计数——换会话必须清
         this.endedStreams.clear();
         this.emittedUt.clear();
         this.emittedTools.clear();
+        this.toolOwnerUt.clear();
         this.emittedA2.clear();
         if (sessBase)
             this.pruneEmitted(0);
@@ -211,7 +239,13 @@ class TurnArbiter {
                     this.latestReqIdx = reqIdx;
                 if (!ev.replayed && !ev.history)
                     this.latestUserLiveTs = Math.max(this.latestUserLiveTs, now);
-                const turn = { utKey: t, ts: now, reqIdx, answered: false };
+                const turn = {
+                    utKey: t,
+                    ts: now,
+                    reqIdx,
+                    answered: false,
+                    text: typeof ev.text === "string" ? ev.text : undefined,
+                };
                 turn.sess = sessBase;
                 this.openTurns.push(turn);
                 if (this.openTurns.length > MAX_TRACKED_TURNS)
@@ -239,8 +273,10 @@ class TurnArbiter {
                     // 的 START/SET 同理是旧轮迟到件。openTurns 全空不可判——放行，
                     // 以免吞掉 USER 尚未登记的桌面新轮。
                     const staleVsOpen = evTs != null && this.newestOpenTurn(sessBase) != null;
-                    const noOpenButKnown = this.newestOpenTurn(sessBase) == null &&
-                        this.openTurns.length > 0;
+                    // noOpenButKnown 需按会话数轮（openTurns 现跨切保留——别会话的轮
+                    // 不该把本会话的孤儿 CHUNK 判成迟到重投影）。
+                    const anyTurnHere = this.openTurns.some((ot) => !sessBase || !ot.sess || ot.sess === sessBase);
+                    const noOpenButKnown = this.newestOpenTurn(sessBase) == null && anyTurnHere;
                     if (type === "AGENT_STREAM_CHUNK" ? staleVsOpen || noOpenButKnown : staleVsOpen)
                         return null;
                 }
@@ -282,11 +318,36 @@ class TurnArbiter {
                     evTs < this.latestUserLiveTs - 10_000) {
                     return null;
                 }
+                // 工具归属钉死：START 帧记录 toolId→归属轮 ut；随后的进度/完成帧（即使
+                // 该轮已被新 USER 取代、或 ts 缺失的慢通道重投）一律钉回原轮——否则
+                // isComplete 会盖上新轮 _ut，渲成串位的孤儿工具卡（R66 B3）。
+                const tidPin = String(ev.toolId || ev.callId || ev.toolCallId || ev.id || "");
+                const evComplete = ev.isComplete === true;
+                if (tidPin && sessBase) {
+                    const k = `${sessBase}|${tidPin}`;
+                    const owner = this.toolOwnerUt.get(k);
+                    if (owner && !utKey)
+                        utKey = owner;
+                    if (!evComplete && utKey)
+                        this.toolOwnerUt.set(k, utKey);
+                    if (evComplete)
+                        this.toolOwnerUt.delete(k);
+                    if (this.toolOwnerUt.size > 256) {
+                        const cut = this.toolOwnerUt.keys();
+                        for (const key of cut)
+                            this.toolOwnerUt.delete(key);
+                        // Map 键序即插入序——全清过度但不误伤（极少到 256）。
+                        break;
+                    }
+                }
                 const t = this.openTurnForEvent(sessBase, evTs);
                 if (t) {
                     t.sawStream = true;
                     if (!utKey)
                         utKey = t.utKey;
+                    if (tidPin && sessBase && !evComplete) {
+                        this.toolOwnerUt.set(`${sessBase}|${tidPin}`, t.utKey);
+                    }
                 }
                 break;
             }

@@ -2158,7 +2158,9 @@
         const body = nodes[i].querySelector('.user-bubble');
         if (body && body.textContent === m.text) { found = true; break; }
       }
-      if (!found) addUser(m.text, m.key, { force: true, ts: m.at || Date.now() });
+      // ts 用当前时刻而非 m.at：补画泡是最新未完成轮，要排在「已切换会话」
+      // 系统提示之后；用旧发送时刻会把它插到提示上面（R66 P3 乱序）。
+      if (!found) addUser(m.text, m.key, { force: true, ts: Date.now() });
     }
   }
 
@@ -2842,16 +2844,11 @@
           replayingInstant = true;
           // 模型选择按会话分：切完刷新 chip，不然 PWA 显示上个会话的模型
           send({ type: 'PHONE_MODEL_LIST' });
-          // 待答清单按会话分：sess 与即将切到的会话不符就丢——旧会话在途条目
-          // 会补画进新 feed（残泡/答案裸奔归因错乱）。无 sess（旧写入）保留。
-          {
-            const selBase = baseNameAny(msg.file).replace(/\.jsonl$/i, '');
-            for (let i = sentAwaitingReply.length - 1; i >= 0; i--) {
-              const s = sentAwaitingReply[i].sess;
-              const sBase = baseNameAny(s).replace(/\.jsonl$/i, '');
-              if (sBase && selBase && sBase !== selBase) sentAwaitingReply.splice(i, 1);
-            }
-          }
+          // 待答清单【保留】跨会话条目：repaintAwaitingUserBubbles 已按 boundBase
+          // 过滤，别会话条目不会画进当前 feed。清掉会在「在途轮切走→切回」时丢掉
+          // 唯一备份——pending 请求的 USER 可能还没落进 jsonl（kind:2 惰性写），
+          // 回放缺它时只能靠清单补画（R66 B1 在途轮泡+卡整条消失）。
+          // 条目仍受 DONE/_ut 匹配清理与年龄上限约束，不会无限积压。
           if (sessionSwitchFallbackTimer) {
             clearTimeout(sessionSwitchFallbackTimer);
             sessionSwitchFallbackTimer = null;
