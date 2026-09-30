@@ -592,8 +592,21 @@ class BridgeServer {
                                 if (provUsers >= liveUsers)
                                     replay = provided;
                                 else {
-                                    replayFile = undefined;
-                                    replayTitle = undefined;
+                                    // live 版胜出（刚发的用户消息还没落盘）。live 回放若混入
+                                    // 别会话的事件，不能认领单一 file/title；但当所有带 _sess
+                                    // 的事件都指向绑定会话（或根本没有会话戳）时身份仍然成立——
+                                    // 保留 file/title，否则重连后标题停在品牌名、按会话守门的
+                                    // 逻辑（_sess 过滤/待答补画/未送达校验）也一起失效。
+                                    const foreign = replay.some((e) => {
+                                        const s = String(e?._sess || '');
+                                        if (!s)
+                                            return false;
+                                        return replayFile ? !String(replayFile).includes(s) : true;
+                                    });
+                                    if (foreign || !replayFile) {
+                                        replayFile = undefined;
+                                        replayTitle = undefined;
+                                    }
                                 }
                             }
                             this.send(ws, {
