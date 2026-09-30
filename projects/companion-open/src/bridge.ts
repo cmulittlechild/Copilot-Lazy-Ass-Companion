@@ -889,7 +889,24 @@ export class BridgeServer {
       const message = String(stamped.message ?? '');
       void this.push?.notify(title, message).catch(() => {});
     }
+    this.emitSynthetic();
     return true;
+  }
+
+  /** 裁决器附属合成终态件（如 superseded DONE：parked 待批准轮被新 USER 取代
+      时上游不再发 DONE）：主事件广播后补投，并顺手清理该轮的挂起审批卡。 */
+  private emitSynthetic() {
+    const list = this.arbiter.drainSynthetic();
+    for (const s of list) {
+      if (s.type === 'COPILOT_DONE' || s.type === 'AGENT_CONFIRM_RESOLVED') {
+        const key = this.confirmSessKey(s);
+        const pc = this.pendingConfirms.get(key);
+        const doneUt = typeof s._ut === 'string' ? s._ut : '';
+        const pcUt = typeof pc?.ev?._ut === 'string' ? pc.ev._ut : '';
+        if (pc && (!pcUt || !doneUt || pcUt === doneUt)) this.pendingConfirms.delete(key);
+      }
+      if (this.authorizedClientCount() !== 0) this.broadcastRaw(s);
+    }
   }
 
   /** Keep active stream snapshot in sync for projector path (not only sendStream*). */
@@ -1017,6 +1034,7 @@ export class BridgeServer {
     }
     this.trackStreamState(arbitrated);
     this.pushHistory(arbitrated);
+    this.emitSynthetic();
     this.broadcastRaw(arbitrated);
   }
 
@@ -1137,6 +1155,7 @@ export class BridgeServer {
     this.pushHistory(arbitrated);
     this.broadcastRaw(arbitrated);
     this.rememberPhoneText(t);
+    this.emitSynthetic();
   }
 
   private isPhoneEcho(ev: any): boolean {

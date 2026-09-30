@@ -428,6 +428,7 @@ export async function activate(context: vscode.ExtensionContext) {
           // PHONE_MESSAGE text so sendToPhone can drop JSONL USER_MESSAGE echo.
           // USER_MESSAGE 已由 bridge.acceptPhoneUserMessage 广播；这里只推 typing 态。
           bridge?.broadcast({ type: "COPILOT_TYPING" });
+          const injectBeganAt = Date.now();
           const result = await injectMessage(msg.text, mode);
           try {
             const leak = (result as any).leakFile
@@ -441,6 +442,28 @@ export async function activate(context: vscode.ExtensionContext) {
           }
           // soft-unverified：已 submit 且无串台证据，落盘可能延迟 — 不吓用户去粘贴双发
           if (String(result.injectPath || "").includes("soft-unverified")) {
+            // 误报抑制：inject 内部双核验走的是落盘扫描（chatSessions 可能慢于
+            // 实时流几十秒）——核验超时返回时答案可能早已经 transcripts 实时
+            // 通道上线（实测 soft-unverified 在答案投送 ~13s 后才到）。此时该
+            // _ut 已有 agent 活动/全局已有 agent 活动 = 送达成立，只发终态 DONE
+            // 清发送核验，不再提示「若未出现再重试」也不挂 55s 判死复核。
+            const softKey = String(msg.text || "")
+              .replace(/\s+/g, " ")
+              .trim()
+              .slice(0, 120);
+            const landedAlready =
+              (lastAgentUtAt.get(softKey) || 0) >= injectBeganAt - 2_000 ||
+              lastAnyAgentEventAt >= injectBeganAt - 2_000;
+            if (landedAlready) {
+              qrPanel.addLog(
+                `soft-unverified 误报抑制: ${softKey.slice(0, 50)} 已见 agent 活动`,
+              );
+              bridge?.broadcast({
+                type: "COPILOT_DONE",
+                reason: "inject_soft_unverified",
+                _ut: softKey,
+              });
+            } else {
             bridge?.broadcast({
               type: "SYSTEM_MESSAGE",
               text: "已提交到目标会话（落盘确认稍慢，若桌面未出现再重试）",
@@ -485,6 +508,7 @@ export async function activate(context: vscode.ExtensionContext) {
                 }
               })();
             }, 55_000);
+            }
           } else if (result.injectPath === "bind+chat.open+leak-warning") {
             bridge?.broadcast({
               type: "SYSTEM_MESSAGE",
@@ -885,12 +909,14 @@ export async function activate(context: vscode.ExtensionContext) {
         }
         // 绑定会话活动打点：sessionWatcher 只 tail 绑定文件，其可见事件即
         // 「所选会话仍在被使用」的信号（跟随拉锯评估用）。
+        // COPILOT_DONE 不算：它是终止簿记——多通道收尾件/迟到件会在这条 tail 上
+        // 持续到达（实测 ridx 簿记噪声让 boundHot 永真、被压跟随续压死循环），
+        // 在途轮的活跃由 USER/AGENT/STREAM 事件已经覆盖。
         if (
           ev.type === "USER_MESSAGE" ||
           ev.type === "AGENT_MESSAGE" ||
           ev.type === "AGENT_STREAM_SET" ||
-          ev.type === "AGENT_STREAM_CHUNK" ||
-          ev.type === "COPILOT_DONE"
+          ev.type === "AGENT_STREAM_CHUNK"
         ) {
           boundSessionActivityAt = Date.now();
         }

@@ -1956,8 +1956,27 @@
     // Inline feed card (Remote pS) + sticky bar for thumb reach
     const buttons = Array.isArray(msg.buttons) && msg.buttons.length ? msg.buttons : ['Continue', 'Cancel'];
     const confirmId = msg.confirmId || msg.requestId || msg.toolCallId || null;
+    // 同一张卡的第二份（双通道重投/回放重post）：已有同 id 或同标题+正文的
+    // 未决卡时不再建第二张——否则 feed 出现双份待批准卡（R96）。
+    try {
+      const cards = feed.querySelectorAll('.msg.confirm-card');
+      for (const c of cards) {
+        // 同 id 一律拦（含已决卡：回放重投不得把已答确认复活成新卡）；
+        // 无 id 的只拦未决卡同标题+正文（已决卡 body 已被改写，按内容对不上）。
+        const sameId = confirmId && c.dataset.confirmId === confirmId;
+        const sameBody =
+          !c.classList.contains('resolved') &&
+          (c.querySelector('.confirm-title')?.textContent || '') === (msg.title || 'Confirm') &&
+          (c.querySelector('.confirm-body')?.textContent || '') === (msg.message || '');
+        if (sameId || sameBody) {
+          if (!c.classList.contains('resolved')) confirmBar.classList.remove('hidden');
+          return;
+        }
+      }
+    } catch (_) {}
     let resolved = false;
     const el = document.createElement('div');
+    if (confirmId) el.dataset.confirmId = confirmId;
     el.className = 'msg confirm-card';
     const title = document.createElement('div');
     title.className = 'confirm-title';

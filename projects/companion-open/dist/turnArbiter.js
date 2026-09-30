@@ -61,6 +61,13 @@ class TurnArbiter {
         把队列挂到看门狗（~135s 悬挂）。位置型 sid（requests/N/…）每轮唯一，
         60s 窗不会误伤下一轮。 */
     endedStreams = new Map();
+    /** 最近 SESSION_SELECTED 的会话 basename：sess 缺失的轮次（只有手机发出的
+        USER 不带 _sess/file 戳）归到这个会话——否则 pendingUserEvents 会把
+        别会话的 pending 泡补投进任意会话的回放尾部（R96 跨会话泄漏）。 */
+    boundSess = "";
+    /** 合成待投事件（superseded DONE 等）：accept 只能回一件，附属终态件由
+        桥端在广播主事件后 drain 补投。 */
+    syntheticOut = [];
     /** 会话切换/绑定变更时调用：清本轮状态，避免跨会话误杀。 */
     /** 当前 sess 的未答开启轮 USER 事件（全文）：供回放尾部补投未落盘的
         pending 轮 USER（桌面发出的轮 PWA 端无 sentAwaitingReply 备份）。 */
@@ -69,8 +76,13 @@ class TurnArbiter {
         for (const t of this.openTurns) {
             if (t.answered || !t.text)
                 continue;
-            if (sessBase && t.sess && t.sess !== sessBase)
-                continue;
+            // 严格会话匹配：sess 缺失的轮（手机发出）视同属于绑定会话，
+            // 只在回放目标恰是绑定会话时才补投——不再漏进别会话 feed。
+            if (sessBase) {
+                const ts = String(t.sess || this.boundSess);
+                if (ts !== sessBase)
+                    continue;
+            }
             out.push({
                 type: "USER_MESSAGE",
                 text: t.text,
@@ -81,6 +93,12 @@ class TurnArbiter {
                 pendingTurn: true,
             });
         }
+        return out;
+    }
+    /** 取出并清空合成待投事件队列。 */
+    drainSynthetic() {
+        const out = this.syntheticOut;
+        this.syntheticOut = [];
         return out;
     }
     resetForSession(sessBase) {
@@ -127,6 +145,18 @@ class TurnArbiter {
                 return sid
                     ? `a|${sessBase}|${sid}|${t.slice(0, 40)}`
                     : `a|${sessBase}|${req}|${utKey}|${t.slice(0, 80)}`;
+            }
+            case "AGENT_CONFIRM": {
+                // 同一待批准确认卡在各通道各投一遍（transcript + sessiondb 重投影）——
+                // 客户端每张建一块卡 → feed 双卡。指纹：confirmId/toolCallId 优先，
+                // 否则标题+正文前缀（不同确认文案不同，不会误杀新卡）。
+                const cid = String(ev.confirmId || ev.requestId || ev.toolCallId || ev.id || "");
+                if (cid)
+                    return `c|${sessBase}|${cid}`;
+                const body = normText(`${ev.title || ""} ${ev.message || ""}`);
+                if (!body)
+                    return null;
+                return `c|${sessBase}|${utKey}|${body.slice(0, 80)}`;
             }
             case "TOOL_CALL":
             case "AGENT_TOOL_CALL":
@@ -240,6 +270,8 @@ class TurnArbiter {
         this.pruneEmitted(now);
         const sessBase = sessBaseOf(ev);
         const type = String(ev.type || "");
+        if (type === "SESSION_SELECTED" && sessBase)
+            this.boundSess = sessBase;
         // 轮次归属键：服务端下发的 _ut 优先；否则归到最新未答轮
         let utKey = typeof ev._ut === "string" ? normText(ev._ut) : "";
         let ownerTurn;
@@ -273,10 +305,38 @@ class TurnArbiter {
                     answered: false,
                     text: typeof ev.text === "string" ? ev.text : undefined,
                 };
-                turn.sess = sessBase;
+                // sess 缺失 = 手机发出的轮（watcher 事件恒带文件戳）——归到绑定会话，
+                // 否则 openTurns 里 sess='' 的轮跨会话泄漏（pendingUserEvents/R96）。
+                turn.sess = sessBase || this.boundSess;
+                if (!sessBase && this.boundSess && !ev._sess) {
+                    ev._sess = this.boundSess;
+                }
+                const turnSess = String(turn.sess || "");
                 this.openTurns.push(turn);
                 if (this.openTurns.length > MAX_TRACKED_TURNS)
                     this.openTurns.shift();
+                // parked 待批准轮被取代：同会话新 live USER 到达时，挂确认卡的旧轮
+                // 上游永不发 DONE（工具调用被弃）——合成 superseded DONE 让客户端
+                // 释放该轮的待答条目+清审批卡（ack:true 不碰新轮的在途态）。
+                // steering 合轮不受影响：那类轮没挂确认卡。
+                if (!ev.replayed && !ev.history) {
+                    for (const ot of this.openTurns) {
+                        if (ot === turn || ot.answered || !ot.hasConfirm)
+                            continue;
+                        if (String(ot.sess || "") !== turnSess)
+                            continue;
+                        ot.answered = true;
+                        ot.answeredAt = now;
+                        this.syntheticOut.push({
+                            type: "COPILOT_DONE",
+                            reason: "superseded",
+                            ack: true,
+                            _ut: ot.utKey,
+                            _sess: turnSess,
+                            timestamp: now,
+                        });
+                    }
+                }
                 utKey = t;
                 break;
             }
@@ -402,6 +462,18 @@ class TurnArbiter {
                     // 思考/进度帧——归属轮已收尾，放出去客户端只会为它新建流卡并
                     // 贴到 feed 底部（实测两枚旧轮 thinking 泡串进新轮下）。
                     return null;
+                }
+                break;
+            }
+            case "AGENT_CONFIRM": {
+                // 待批准卡归属到当前开启轮：其 DONE 携带的 _ut 才能与 pendingConfirms
+                // 的卡片 ut 对齐（bridge 按 ut 配对清理）；确认卡不视为「回答」。
+                // hasConfirm 标记 parked 轮：被新 USER 取代时合成收尾 DONE 的依据。
+                const t = this.openTurnForEvent(sessBase, TurnArbiter.tsOf(ev));
+                if (t) {
+                    t.hasConfirm = true;
+                    if (!utKey)
+                        utKey = t.utKey;
                 }
                 break;
             }
@@ -543,7 +615,10 @@ class TurnArbiter {
                 }
             }
         }
-        if (type === "AGENT_MESSAGE" || type.endsWith("TOOL_CALL") || type.endsWith("TOOL_RESULT")) {
+        if (type === "AGENT_MESSAGE" ||
+            type === "AGENT_CONFIRM" ||
+            type.endsWith("TOOL_CALL") ||
+            type.endsWith("TOOL_RESULT")) {
             const key = this.contentKey(ev, sessBase, utKey);
             // AGENT_MESSAGE 再配一条「轮次+前缀」副指纹：sessiondb 位置型 streamId
             // （requests/N/）与实时流 id 不同，同一答文经异构 sid 双通道到会各渲一
@@ -554,7 +629,13 @@ class TurnArbiter {
             const altKey = type === "AGENT_MESSAGE"
                 ? `a2|${sessBase}|${normText(ev.text).slice(0, 80)}`
                 : null;
-            const window = type === "AGENT_MESSAGE" ? CONTENT_DEDUPE_MS : TOOL_DEDUPE_MS;
+            // AGENT_CONFIRM 用 30s 窗：吃双通道同刻重投，但不误杀数分钟后同文案的
+            // 真实新一轮待批准（同窗口只在「真·同一张卡」上才误伤）。
+            const window = type === "AGENT_MESSAGE"
+                ? CONTENT_DEDUPE_MS
+                : type === "AGENT_CONFIRM"
+                    ? 30_000
+                    : TOOL_DEDUPE_MS;
             const altPrev = altKey ? this.emittedA2.get(altKey) : undefined;
             // 幻影重投影纠偏（R20 BUG-4）：上轮答案经变体重投到达时被盖到新开启轮
             // 的 _ut 下——事件自证不了归属（无 requestIndex 或下标落后于已见最新），
@@ -613,6 +694,9 @@ class TurnArbiter {
         const out = { ...ev, _seq: ++this.seq };
         if (sessBase && !out._sess)
             out._sess = sessBase;
+        else if (type === "USER_MESSAGE" && !out._sess && this.boundSess) {
+            out._sess = this.boundSess;
+        }
         if (utKey && !out._ut)
             out._ut = utKey;
         return out;
