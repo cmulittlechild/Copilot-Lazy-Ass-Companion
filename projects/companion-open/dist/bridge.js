@@ -653,6 +653,12 @@ class BridgeServer {
                                         .replace(/\s+/g, ' ')
                                         .trim()
                                         .slice(0, 80)));
+                                    const haveUByText = new Set(replay
+                                        .filter((e) => e?.type === 'USER_MESSAGE')
+                                        .map((e) => String(e._ut || e.text || '')
+                                        .replace(/\s+/g, ' ')
+                                        .trim()
+                                        .slice(0, 120)));
                                     for (const ce of donePairs) {
                                         if (ce.type === 'USER_MESSAGE') {
                                             const k = String(ce._ut || '');
@@ -662,7 +668,7 @@ class BridgeServer {
                                                     .replace(/\s+/g, ' ')
                                                     .trim()
                                                     .slice(0, 120);
-                                                if (!have.has(tk))
+                                                if (!haveUByText.has(tk))
                                                     replay.push(ce);
                                             }
                                         }
