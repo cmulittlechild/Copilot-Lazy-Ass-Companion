@@ -65,6 +65,10 @@ export class TurnArbiter {
   private emittedTools = new Map<string, { t: number; done: boolean }>();
   /** sess|toolId → 归属轮 ut：START 时钉死，进度/完成帧钉回原轮（R66 B3）。 */
   private toolOwnerUt = new Map<string, string>();
+  /** sess|streamId → 归属轮 ut：首帧钉死，之后的 _ut-less 帧一律钉回原轮——
+      回声开新轮后旧轮的在途流/思考帧不会再被盖成新轮的 ut（R48：A1 作文流
+      在 A2/A3 echo 开新轮后被盖成 M48A3，渲染到 A3 泡下）。 */
+  private streamOwnerUt = new Map<string, string>();
   /** a2 指纹（sess|前缀80）→ {t, 归属轮, ut}：轮次实例级同文去重。 */
   private emittedA2 = new Map<string, { t: number; turn: TrackedTurn | undefined; ut: string }>();
   /** 已 END 的 streamId → 终结时刻。END 后迟到的 START/CHUNK 服务端丢弃——
@@ -109,6 +113,7 @@ export class TurnArbiter {
     this.emittedUt.clear();
     this.emittedTools.clear();
     this.toolOwnerUt.clear();
+    this.streamOwnerUt.clear();
     this.emittedA2.clear();
     if (sessBase) this.pruneEmitted(0);
   }
@@ -190,6 +195,31 @@ export class TurnArbiter {
     return t;
   }
 
+  /**
+   * sid 归属钉住：首帧把 streamId 钉到当时归属轮；之后同 sid 的帧（即使
+   * 到达时更新轮已开启）一律钉回原轮。返回 {t, ownerUt}——ownerUt 是
+   * 钉住的 ut（归属轮可能已被修剪只剩 ut 戳），用它盖戳优先于 t.utKey。
+   */
+  private turnForStreamEvent(
+    sessBase: string,
+    evTs: number | null,
+    sid: string,
+  ): { t: TrackedTurn | undefined; ownerUt: string } {
+    const pinKey = sid && sessBase ? `${sessBase}|${sid}` : "";
+    const owner = pinKey ? this.streamOwnerUt.get(pinKey) || "" : "";
+    const owned = owner ? this.lastTurnWithUt(sessBase, owner) : undefined;
+    const t = owned ?? this.openTurnForEvent(sessBase, evTs);
+    if (t && pinKey && !owner) this.streamOwnerUt.set(pinKey, t.utKey);
+    if (this.streamOwnerUt.size > 512) {
+      let n = 0;
+      for (const k of this.streamOwnerUt.keys()) {
+        this.streamOwnerUt.delete(k);
+        if (++n >= 64) break;
+      }
+    }
+    return { t, ownerUt: owner };
+  }
+
   private static tsOf(ev: any): number | null {
     const v = typeof ev?.timestamp === "number" ? ev.timestamp : typeof ev?.ts === "number" ? ev.ts : null;
     return v;
@@ -268,8 +298,8 @@ export class TurnArbiter {
         // 广播出去会重新武装 rr 并渲第二份答文——直接丢（R64/R33 同族）。
         const evTs = TurnArbiter.tsOf(ev);
         if (evTs != null && now - evTs > 30_000) return null;
-        const t = this.openTurnForEvent(sessBase, evTs);
-        if (!t) {
+        const { t, ownerUt } = this.turnForStreamEvent(sessBase, evTs, sid);
+        if (!t && !ownerUt) {
           // 孤儿流帧：归属不到任何开启轮。CHUNK 在「全轮已答」后到达 =
           // 已收尾轮的迟到重投影——客户端会为它新建永不收尾的 ghost 卡
           // （requests/N 投影在答案落线 ~55s 后补帧实测）。ts 早于开启轮
@@ -288,10 +318,8 @@ export class TurnArbiter {
           if (type === "AGENT_STREAM_CHUNK" ? staleVsOpen || noOpenButKnown : staleVsOpen)
             return null;
         }
-        if (t) {
-          t.sawStream = true;
-          if (!utKey) utKey = t.utKey;
-        }
+        if (t && (!ownerUt || t.utKey === ownerUt)) t.sawStream = true;
+        if (!utKey) utKey = ownerUt || (t ? t.utKey : "");
         break;
       }
       case "AGENT_STREAM_END": {
@@ -304,10 +332,14 @@ export class TurnArbiter {
             }
           }
         }
-        const t = this.openTurnForEvent(sessBase, TurnArbiter.tsOf(ev));
-        if (t) {
-          t.sawStream = true;
-          if (!utKey) utKey = t.utKey;
+        {
+          const { t, ownerUt } = this.turnForStreamEvent(
+            sessBase,
+            TurnArbiter.tsOf(ev),
+            sid,
+          );
+          if (t && (!ownerUt || t.utKey === ownerUt)) t.sawStream = true;
+          if (!utKey) utKey = ownerUt || (t ? t.utKey : "");
         }
         break;
       }
@@ -359,21 +391,26 @@ export class TurnArbiter {
       case "THINKING_START":
       case "THINKING_END":
       case "COPILOT_TYPING": {
-        const t = this.openTurnForEvent(sessBase, TurnArbiter.tsOf(ev));
-        if (t) {
-          t.sawStream = true;
-          if (!utKey) utKey = t.utKey;
-        }
+        const { t, ownerUt } = this.turnForStreamEvent(
+          sessBase,
+          TurnArbiter.tsOf(ev),
+          String(ev.streamId || ""),
+        );
+        if (t && (!ownerUt || t.utKey === ownerUt)) t.sawStream = true;
+        if (!utKey) utKey = ownerUt || (t ? t.utKey : "");
         break;
       }
       case "THINKING_STEP":
       case "PROGRESS_STEP": {
         const evTs = TurnArbiter.tsOf(ev);
-        const t = this.openTurnForEvent(sessBase, evTs);
-        if (t) {
-          t.sawStream = true;
-          if (!utKey) utKey = t.utKey;
-        } else if (evTs != null && this.newestOpenTurn(sessBase)) {
+        const { t, ownerUt } = this.turnForStreamEvent(
+          sessBase,
+          evTs,
+          String(ev.streamId || ""),
+        );
+        if (t && (!ownerUt || t.utKey === ownerUt)) t.sawStream = true;
+        if (!utKey) utKey = ownerUt || (t ? t.utKey : "");
+        if (!t && !ownerUt && evTs != null && this.newestOpenTurn(sessBase)) {
           // 存在开启轮但事件 ts 早于其开启 >2s：上一轮经慢通道迟到的
           // 思考/进度帧——归属轮已收尾，放出去客户端只会为它新建流卡并
           // 贴到 feed 底部（实测两枚旧轮 thinking 泡串进新轮下）。
@@ -382,11 +419,13 @@ export class TurnArbiter {
         break;
       }
       case "AGENT_MESSAGE": {
-        const t = this.openTurnForEvent(sessBase, TurnArbiter.tsOf(ev));
-        if (t) {
-          t.sawStream = true;
-          if (!utKey) utKey = t.utKey;
-        }
+        const { t, ownerUt } = this.turnForStreamEvent(
+          sessBase,
+          TurnArbiter.tsOf(ev),
+          String(ev.streamId || ""),
+        );
+        if (t && (!ownerUt || t.utKey === ownerUt)) t.sawStream = true;
+        if (!utKey) utKey = ownerUt || (t ? t.utKey : "");
         // 去重归属：_ut 自证优先（已答轮也能反查回自己的实例）；
         // 无 _ut 的才落到到达序最新未答轮。
         ownerTurn = utKey ? this.lastTurnWithUt(sessBase, utKey) ?? t : t;

@@ -433,6 +433,33 @@ function fileTailContains(file, needle) {
         return false;
     }
 }
+/** 送达判定版：会话 jsonl 的 inputState.inputText 里躺着的文本只是
+    composer 草稿（submit 被 pending-requests 弹窗吞掉时文本就停在这里，
+    从未成为请求）——命中草稿不算落盘送达。先清空所有 inputText 值再搜；
+    文本另在 pendingRequests/requests 里仍是真送达。 */
+function fileTailContainsDelivered(file, needle) {
+    try {
+        if (!fs.existsSync(file))
+            return false;
+        const st = fs.statSync(file);
+        const readSize = Math.min(st.size, 512 * 1024);
+        const fd = fs.openSync(file, "r");
+        try {
+            const buf = Buffer.alloc(readSize);
+            fs.readSync(fd, buf, 0, readSize, Math.max(0, st.size - readSize));
+            const tail = buf
+                .toString("utf8")
+                .replace(/"inputText"\s*:\s*"((?:[^"\\]|\\.)*)"/g, '"inputText":""');
+            return tail.includes(needle);
+        }
+        finally {
+            fs.closeSync(fd);
+        }
+    }
+    catch {
+        return false;
+    }
+}
 /**
  * soft-unverified 延迟复核：提交的文本到底有没有落进**目标会话**。
  * 命中目标会话文件尾部、其 transcript 镜像、或调用方提供的补充检查
@@ -457,7 +484,7 @@ async function checkInjectEverLanded(targetFile, text, extraCheck) {
         catch {
             /* ignore */
         }
-        if (fileTailContains(targetFile, needle))
+        if (fileTailContainsDelivered(targetFile, needle))
             return true;
     }
     try {
