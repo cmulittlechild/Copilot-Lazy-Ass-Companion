@@ -69,6 +69,12 @@ class TurnArbiter {
         桥端在广播主事件后 drain 补投。 */
     syntheticOut = [];
     /** 会话切换/绑定变更时调用：清本轮状态，避免跨会话误杀。 */
+    turnMatchesSess(t, sessBase) {
+        if (!sessBase)
+            return true;
+        const ts = String(t.sess || this.boundSess);
+        return ts === sessBase;
+    }
     /** 当前 sess 的未答开启轮 USER 事件（全文）：供回放尾部补投未落盘的
         pending 轮 USER（桌面发出的轮 PWA 端无 sentAwaitingReply 备份）。 */
     pendingUserEvents(sessBase) {
@@ -78,11 +84,8 @@ class TurnArbiter {
                 continue;
             // 严格会话匹配：sess 缺失的轮（手机发出）视同属于绑定会话，
             // 只在回放目标恰是绑定会话时才补投——不再漏进别会话 feed。
-            if (sessBase) {
-                const ts = String(t.sess || this.boundSess);
-                if (ts !== sessBase)
-                    continue;
-            }
+            if (!this.turnMatchesSess(t, sessBase))
+                continue;
             out.push({
                 type: "USER_MESSAGE",
                 text: t.text,
@@ -91,6 +94,40 @@ class TurnArbiter {
                 _sess: t.sess || sessBase,
                 _seq: ++this.seq,
                 pendingTurn: true,
+            });
+        }
+        return out;
+    }
+    /** 近 withinMs 内完成的轮 → [USER, AGENT] 事件对：transcript 懒写盘让
+        刚完成的轮几十秒内不在文件回放里（R105 跟进缺口：冷连/刷新回放
+        整轮丢失或答案裸奔无用户泡）。回放构建按内容键去重，缺啥补啥。 */
+    recentCompletedEvents(sessBase, withinMs = 120_000) {
+        const out = [];
+        const now = Date.now();
+        for (const t of this.openTurns) {
+            if (!t.answered || !t.text || !t.answerText)
+                continue;
+            if (!t.answeredAt || now - t.answeredAt > withinMs)
+                continue;
+            if (!this.turnMatchesSess(t, sessBase))
+                continue;
+            const sess = t.sess || sessBase;
+            out.push({
+                type: "USER_MESSAGE",
+                text: t.text,
+                timestamp: t.ts,
+                _ut: t.utKey,
+                _sess: sess,
+                _seq: ++this.seq,
+                pendingTurn: false,
+            });
+            out.push({
+                type: "AGENT_MESSAGE",
+                text: t.answerText,
+                timestamp: t.answeredAt,
+                _ut: t.utKey,
+                _sess: sess,
+                _seq: ++this.seq,
             });
         }
         return out;
@@ -709,8 +746,16 @@ class TurnArbiter {
                 if (reprojKey && utKey)
                     this.emittedUt.set(reprojKey, utKey);
             }
-            if (type === "AGENT_MESSAGE")
+            if (type === "AGENT_MESSAGE") {
                 this.markAnswered(sessBase, utKey);
+                // 记答案全文：回放补投刚完成的轮用（transcript 懒写盘缺口）
+                const full = String(ev.text || "");
+                if (full) {
+                    const tt = this.openTurns.find((x) => x.answered && x.utKey === utKey);
+                    if (tt && !tt.answerText)
+                        tt.answerText = full;
+                }
+            }
         }
         const out = { ...ev, _seq: ++this.seq };
         if (sessBase && !out._sess)

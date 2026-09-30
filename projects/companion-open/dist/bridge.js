@@ -639,6 +639,43 @@ class BridgeServer {
                                             replay.push(pe);
                                     }
                                 }
+                                // 近完成轮补投：transcript 懒写盘，刚完成的轮几十秒内不在文件
+                                // 回放里——整轮丢或答案裸奔（R105 缺口）。缺 USER 补 USER、
+                                // 缺 AGENT 补 AGENT。
+                                const donePairs = this.arbiter.recentCompletedEvents(sessB);
+                                if (donePairs.length) {
+                                    const haveU = new Set(replay
+                                        .filter((e) => e?.type === 'USER_MESSAGE')
+                                        .map((e) => String(e._ut || '').trim() || ''));
+                                    const haveA = new Set(replay
+                                        .filter((e) => e?.type === 'AGENT_MESSAGE')
+                                        .map((e) => String(e._ut || e.text || '')
+                                        .replace(/\s+/g, ' ')
+                                        .trim()
+                                        .slice(0, 80)));
+                                    for (const ce of donePairs) {
+                                        if (ce.type === 'USER_MESSAGE') {
+                                            const k = String(ce._ut || '');
+                                            if (k && !haveU.has(k)) {
+                                                // 补投 USER 时回放可能已有同文裸事件——按文本键再查一层
+                                                const tk = String(ce.text || '')
+                                                    .replace(/\s+/g, ' ')
+                                                    .trim()
+                                                    .slice(0, 120);
+                                                if (!have.has(tk))
+                                                    replay.push(ce);
+                                            }
+                                        }
+                                        else {
+                                            const ak = String(ce._ut || ce.text || '')
+                                                .replace(/\s+/g, ' ')
+                                                .trim()
+                                                .slice(0, 80);
+                                            if (ak && !haveA.has(ak))
+                                                replay.push(ce);
+                                        }
+                                    }
+                                }
                             }
                             this.send(ws, {
                                 type: 'HISTORY_REPLAY',
@@ -833,6 +870,45 @@ class BridgeServer {
                     const k = String(pe._ut || pe.text || '');
                     if (k && !have.has(k))
                         this.history.push(pe);
+                }
+            }
+            // 近完成轮补投：transcript 懒写盘，刚完成的轮几十秒内不在文件回放
+            // 里——切会话/冷连回放会整轮丢或答案裸奔（R105 缺口，与连接路同源）。
+            const donePairs = this.arbiter.recentCompletedEvents(sessB);
+            if (donePairs.length) {
+                const haveU = new Set(this.history
+                    .filter((e) => e && e.type === 'USER_MESSAGE')
+                    .map((e) => String(e._ut || '').trim()));
+                const haveA = new Set(this.history
+                    .filter((e) => e && e.type === 'AGENT_MESSAGE')
+                    .map((e) => String(e._ut || e.text || '')
+                    .replace(/\s+/g, ' ')
+                    .trim()
+                    .slice(0, 80)));
+                const haveUByText = new Set(this.history
+                    .filter((e) => e && e.type === 'USER_MESSAGE')
+                    .map((e) => String(e._ut || e.text || '')
+                    .replace(/\s+/g, ' ')
+                    .trim()
+                    .slice(0, 120)));
+                for (const ce of donePairs) {
+                    if (ce.type === 'USER_MESSAGE') {
+                        const k = String(ce._ut || '');
+                        const tk = String(ce.text || '')
+                            .replace(/\s+/g, ' ')
+                            .trim()
+                            .slice(0, 120);
+                        if (k && !haveU.has(k) && !haveUByText.has(tk))
+                            this.history.push(ce);
+                    }
+                    else {
+                        const ak = String(ce._ut || ce.text || '')
+                            .replace(/\s+/g, ' ')
+                            .trim()
+                            .slice(0, 80);
+                        if (ak && !haveA.has(ak))
+                            this.history.push(ce);
+                    }
                 }
             }
         }
