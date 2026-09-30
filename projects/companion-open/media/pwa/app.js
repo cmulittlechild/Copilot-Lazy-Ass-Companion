@@ -1063,6 +1063,9 @@
     pill.className = 'sys-pill';
     pill.textContent = text || '';
     el.appendChild(pill);
+    // 打 ts 让按序插入把它当时间锚点：无 ts 的 sys 行会被后到的 USER 越过、
+    // AGENT 又按归属插回 USER 之后 → 「已切换到会话」夹在 U/A 对中间。
+    el.dataset.ts = String(Date.now());
     feed.appendChild(el);
     scrollFeed();
     return el;
