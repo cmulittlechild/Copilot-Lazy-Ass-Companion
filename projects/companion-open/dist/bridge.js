@@ -862,11 +862,11 @@ class BridgeServer {
             slice = firstUser > 0 ? tail.slice(firstUser) : tail;
         }
         this.history = annotateOrphanUserTurns(slice);
+        const sessB = file ? path.basename(file).replace(/\.jsonl$/i, '') : '';
         // pending 轮 USER 补投：kind:2 惰性写盘，在途轮的请求可能还没进文件——
         // 回放缺它时从裁决器的开启轮补一枚 USER_MESSAGE（桌面发出的轮 PWA 端
         // 没有 sentAwaitingReply 备份；R66 B1 在途轮泡+卡整条消失）。
         {
-            const sessB = file ? path.basename(file).replace(/\.jsonl$/i, '') : '';
             const pend = this.arbiter.pendingUserEvents(sessB);
             if (pend.length) {
                 const have = new Set(this.history
@@ -919,6 +919,10 @@ class BridgeServer {
             }
         }
         // file 透传：PWA 回放后据此恢复该会话的滚动位置（切回不从头拉到底）
+        // inFlight：该会话仍有未答开启轮（切走时在途 → 切回）。客户端据此
+        // 维持发送排队 + 不强制完结在途工具卡——否则回放把在途轮渲成「已完成」、
+        // 发送键放开让下一发送插队，原轮答案被归属偷走后丢失（R107 BUG-1）。
+        const inFlight = this.arbiter.openTurnForSession(sessB);
         this.broadcastRaw({
             type: 'HISTORY_REPLAY',
             messages: this.history,
@@ -926,6 +930,7 @@ class BridgeServer {
             // 标题随回放走：PWA 侧 currentSessionMeta 可能还停在旧会话上，
             // 没有权威的 msg.title 时它会拿旧会话名做回退 → 切回后标题滞留。
             title: title || undefined,
+            ...(inFlight ? { inFlight: true, inFlightUt: inFlight.utKey, inFlightTs: inFlight.ts } : {}),
             timestamp: Date.now(),
         });
         // 回放清空了 feed：该会话挂起的审批卡随回放重投（瞬态事件不在历史里）。
@@ -992,7 +997,14 @@ class BridgeServer {
         this.trackStreamState(stamped);
         this.pushHistory(stamped);
         if (stamped.type === 'AGENT_CONFIRM') {
-            this.pendingConfirms.set(this.confirmSessKey(stamped), { ev: stamped, at: Date.now() });
+            // 同会话已有未决审批卡时，第二份（异通道/cid 异形的重投影）不再广播：
+            // Copilot 同刻只挂一张待批准卡，双卡必为重复投影（R107 BUG-2）。
+            // 老条目 >120s 视为残留放行——真·新一轮确认不被旧残卡堵住。
+            const ckey = this.confirmSessKey(stamped);
+            const prevC = this.pendingConfirms.get(ckey);
+            if (prevC && Date.now() - prevC.at < 120_000)
+                return false;
+            this.pendingConfirms.set(ckey, { ev: stamped, at: Date.now() });
         }
         else if (stamped.type === 'COPILOT_DONE' || stamped.type === 'AGENT_CONFIRM_RESOLVED') {
             // 轮次收尾/被取代（桌面侧批准无事件源，DONE 是唯一可观测的收尸信号）→
@@ -1176,7 +1188,11 @@ class BridgeServer {
         if (!arbitrated)
             return;
         if (arbitrated?.type === 'AGENT_CONFIRM') {
-            this.pendingConfirms.set(this.confirmSessKey(arbitrated), { ev: arbitrated, at: Date.now() });
+            const ckey = this.confirmSessKey(arbitrated);
+            const prevC = this.pendingConfirms.get(ckey);
+            if (prevC && Date.now() - prevC.at < 120_000)
+                return;
+            this.pendingConfirms.set(ckey, { ev: arbitrated, at: Date.now() });
         }
         this.trackStreamState(arbitrated);
         this.pushHistory(arbitrated);

@@ -151,6 +151,13 @@ export class TurnArbiter {
     return out;
   }
 
+  /** 该会话最新未答开启轮（在途轮）：回放据此声明 in-flight 态，让客户端
+      维持发送排队而不把在途轮当已完成（R107 BUG-1）。 */
+  openTurnForSession(sessBase: string): { utKey: string; ts: number } | null {
+    const t = this.newestOpenTurn(sessBase);
+    return t ? { utKey: t.utKey, ts: t.ts } : null;
+  }
+
   /** 取出并清空合成待投事件队列。 */
   drainSynthetic(): any[] {
     const out = this.syntheticOut;
@@ -754,12 +761,20 @@ export class TurnArbiter {
       // 且 requestIndex 恒 -1 使 unproven 恒真 → 该通道永远无法自证）。
       // sessionDbEmittedIds + a|sid 键已挡同行重投，a3 对它只有误伤。
       const isSessionDb = String(ev.streamId || "").startsWith("sessiondb/");
+      // 注册与检查分开：sessiondb 行自己不被 a3 查（R17 误杀族），但长文
+      // （≥200）的行要登记指纹——transcript 慢通道把同一聚合尾段盖上新轮
+      // _ut 重投时才能查到 prior 归属并丢弃（R107 ANOMALY-3：sessiondb dump
+      // 与 t1m dump 同前缀各渲一遍）。短文不登记：同文短答是合法重问。
+      const a3Txt = type === "AGENT_MESSAGE" ? String(ev.text || "") : "";
       const reprojKey =
-        type === "AGENT_MESSAGE" && utKey && unproven && !isSessionDb
+        type === "AGENT_MESSAGE" &&
+        utKey &&
+        unproven &&
+        (!isSessionDb || a3Txt.length >= 200)
           ? `a3|${sessBase}|${normText(ev.text).slice(0, 80)}`
           : null;
       const reprojUt = reprojKey ? this.emittedUt.get(reprojKey) : undefined;
-      const reprojDup = reprojUt != null && reprojUt !== utKey;
+      const reprojDup = !isSessionDb && reprojUt != null && reprojUt !== utKey;
       const isDup =
         (key && (this.emitted.get(key) ?? 0) && now - this.emitted.get(key)! <= window) ||
         altDup ||

@@ -144,6 +144,7 @@
   let requestRunning = false;
   /** 停止需双击确认：空输入点击发送键先武装 3s，再点才真正停（防误触/打字未落框杀掉在途回复） */
   let stopArmUntil = 0;
+  let stopArmHintEl = null;
   /** PHONE_STOP 发出/回执时刻：服务端 DONE[phone_stop] 缺席超 12s 提示可能未生效 */
   let stopSentAt = 0;
   let stopAckAt = 0;
@@ -1822,10 +1823,17 @@
   }
 
   /** 强制所有未完成 tool-card → done，并折叠步骤组（COPILOT_DONE / STREAM_END） */
-  function markAllToolsDone() {
+  function markAllToolsDone(exceptSince) {
+    const cut = typeof exceptSince === 'number' && Number.isFinite(exceptSince) ? exceptSince : 0;
     try {
       for (const [, el] of tools) {
         if (!el || !el.isConnected) continue;
+        // 在途轮切走→切回：回放把尚在运行的工具卡也盖成 done（R107 BUG-1）。
+        // 开启时刻之后的卡豁免——源事件 ts >= 轮开启时间的属于在途轮，保持 running。
+        if (cut > 0) {
+          const ets = Number(el.dataset.ts);
+          if (!Number.isFinite(ets) || ets >= cut) continue;
+        }
         const badge = el.querySelector('.tool-badge');
         if (badge && badge.classList.contains('running')) {
           badge.className = 'tool-badge done';
@@ -3030,7 +3038,10 @@
             } catch (_) {}
           }
         } finally {
-          markAllToolsDone();
+          // inFlight：该会话仍有未答开启轮（切走时在途 → 切回）——在途轮
+          // 的工具卡保持 running，rr 维持 true 让发送继续走队列（R107 BUG-1）。
+          const inFlight = msg.inFlight === true;
+          markAllToolsDone(inFlight ? Number(msg.inFlightTs) || 0 : 0);
           replaying = false;
           replayingInstant = false;
           try {
@@ -3045,7 +3056,10 @@
             clearTimeout(requestDoneTimer);
             requestDoneTimer = null;
           }
-          requestRunning = false;
+          // 在途轮回放不得松开发送键：否则下一发送插队、把原轮的
+          // 完成事件/答案归属偷走 → 原答案丢失（R107 BUG-1）。
+          requestRunning = inFlight ? true : false;
+          try { paintSendButton(); } catch (_) {}
           // 回放会清空 feed：把未确认送达的本地待发消息补画回去（发后遭遇 REPLAY 丢泡）
           try {
             const raw = sessionStorage.getItem(PENDING_SEND_KEY);
@@ -4147,7 +4161,8 @@
         return;
       }
       stopArmUntil = Date.now() + 3000;
-      addSys('再次点击「停止」中断当前回复');
+      // 提示行复用：3s 武装窗过期再武装不再叠新行（R107 BUG-2 停止提示 ×4）。
+      if (!stopArmHintEl || !stopArmHintEl.isConnected) stopArmHintEl = addSys('再次点击「停止」中断当前回复');
       try { sendBtn.title = '再次点击确认停止'; } catch (_) {}
       setTimeout(() => {
         if (stopArmUntil && Date.now() >= stopArmUntil) {
