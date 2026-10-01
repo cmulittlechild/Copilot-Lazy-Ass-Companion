@@ -378,6 +378,18 @@ class TurnArbiter {
                             _sess: turnSess,
                             timestamp: now,
                         });
+                        // 配套 RESOLVED 销审批卡：DONE 只放客户端待答状态，feed 里的待
+                        // 批准卡无 RESOLVED 会永久挂「待批准」（jsonl 的 resolveConfirms
+                        // Before 依赖新 USER 走文件投影径渲染才触发——经 sessiondb 镜像
+                        // 先渲/排队出队注入的新 USER 会绕过该径，实测卡不被收）。
+                        this.syntheticOut.push({
+                            type: "AGENT_CONFIRM_RESOLVED",
+                            button: "superseded",
+                            toolCallId: ot.confirmId || null,
+                            _ut: ot.utKey,
+                            _sess: turnSess,
+                            timestamp: now,
+                        });
                     }
                 }
                 utKey = t;
@@ -535,6 +547,7 @@ class TurnArbiter {
                 const t = this.openTurnForEvent(sessBase, TurnArbiter.tsOf(ev));
                 if (t) {
                     t.hasConfirm = true;
+                    t.confirmId = String(ev.toolCallId || ev.confirmId || ev.requestId || ev.id || "") || t.confirmId;
                     if (!utKey)
                         utKey = t.utKey;
                 }

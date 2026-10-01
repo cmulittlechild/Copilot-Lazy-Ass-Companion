@@ -42,6 +42,9 @@ interface TrackedTurn {
   /** 该轮挂过待批准确认卡（AGENT_CONFIRM）——parked 轮被新 USER 取代时上游
       不再发 DONE，需合成收尾否则客户端待答条目/审批卡永久滞留（R96）。 */
   hasConfirm?: boolean;
+  /** parked 卡的 confirmId（toolCallId/requestId 任一）——supersede 收尸时
+      配套 AGENT_CONFIRM_RESOLVED 精确销卡；缺省时客户端按会话兜底全销。 */
+  confirmId?: string;
   sess?: string;
 }
 
@@ -389,6 +392,18 @@ export class TurnArbiter {
               _sess: turnSess,
               timestamp: now,
             });
+            // 配套 RESOLVED 销审批卡：DONE 只放客户端待答状态，feed 里的待
+            // 批准卡无 RESOLVED 会永久挂「待批准」（jsonl 的 resolveConfirms
+            // Before 依赖新 USER 走文件投影径渲染才触发——经 sessiondb 镜像
+            // 先渲/排队出队注入的新 USER 会绕过该径，实测卡不被收）。
+            this.syntheticOut.push({
+              type: "AGENT_CONFIRM_RESOLVED",
+              button: "superseded",
+              toolCallId: ot.confirmId || null,
+              _ut: ot.utKey,
+              _sess: turnSess,
+              timestamp: now,
+            });
           }
         }
         utKey = t;
@@ -551,6 +566,9 @@ export class TurnArbiter {
         const t = this.openTurnForEvent(sessBase, TurnArbiter.tsOf(ev));
         if (t) {
           t.hasConfirm = true;
+          t.confirmId = String(
+            (ev as any).toolCallId || (ev as any).confirmId || (ev as any).requestId || (ev as any).id || "",
+          ) || t.confirmId;
           if (!utKey) utKey = t.utKey;
         }
         break;
