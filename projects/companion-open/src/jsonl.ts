@@ -72,6 +72,15 @@ export class JsonlProjector {
    *  对「confirmation 存在但 isConfirmed 永远缺席」的已决调用不落解决态，
    *  只靠轮终判定才不会让手机端挂一张永远不会被批准的卡。 */
   private pendingToolConfirms = new Map<string, number>();
+  /** 会话级 hasPendingEdits 标志（kind:1 键）：追踪会话里「编辑已暂存进
+      Keep/Undo 审阅条」的状态。它与「轮被批准门挂起」只有部分相关——
+      待批准门在编辑暂存后仍未决的窗口（暂存+未批准双挂）此标志为 true；
+      但门先于暂存（response 仅 mcpServersStarting）时它为 false，不可见。
+      故只在其翻转且有在途轮时才投影待批准卡：轮已答后审阅条滞留属纯审阅态，
+      发卡会让客户端把空转当 parked 而扣住队列。 */
+  private lastPendingEdits = false;
+  /** 最新在途（未见收尾标记）请求下标；-1 = 无在途轮。 */
+  private openReqIdx = -1;
   /** 已收尸的 callId：pending 卡在文件里永远停在「待批准」形态（phone_stop 的轮
    *  上游不落收尾件），被取代/收尸后若同一 part 再次投影会重复发卡且错序挂到
    *  更晚轮答案之下（B3 冷回放幽灵卡）。判死后不再重发。 */
@@ -112,6 +121,8 @@ export class JsonlProjector {
     this.lastThinkingKey.clear();
     this.pendingToolConfirms.clear();
     this.resolvedToolConfirms.clear();
+    this.lastPendingEdits = false;
+    this.openReqIdx = -1;
     for (const t of this.doneTimers.values()) clearTimeout(t);
     this.doneTimers.clear();
     this.lastKind0ReqCount = 0;
@@ -139,6 +150,7 @@ export class JsonlProjector {
       (k[2] === 'elapsedMs' || k[2] === 'result' || k[2] === 'isCanceled')
     ) {
       const reqIndex = k[1] as number;
+      if (reqIndex === this.openReqIdx) this.openReqIdx = -1;
       const endEvs = this.endActiveStreamsForRequest(reqIndex);
       const confEvs = this.resolveConfirmsForRequest(reqIndex);
       // kind=1 result 收尾标记的 obj.v 就是 result 对象（可含 errorDetails）
@@ -155,6 +167,14 @@ export class JsonlProjector {
         return out;
       }
       out.push(...endEvs, ...confEvs, ...errEvs, doneEv);
+      return out;
+    }
+
+    // 会话级 hasPendingEdits（kind:1）：文件编辑批准挂起/解除的唯一信号——
+    // 待批准期间 response 部件零变化，不投影此事件客户端会把 parked 轮
+    // 当死轮收割（实测工作区外 create_file 挂起 ~75s 后 rr 被强释）。
+    if (k.length === 1 && k[0] === 'hasPendingEdits') {
+      out.push(...this.handlePendingEditsFlag(obj.v === true));
       return out;
     }
 
@@ -185,12 +205,15 @@ export class JsonlProjector {
         // 否则手机端 typing/停止按钮要等 transcript 兜底超时（~120s）才清。
         const reason = requestDoneReason(v[n]);
         if (reason) {
+          if (gi === this.openReqIdx) this.openReqIdx = -1;
           out.push(...this.endActiveStreamsForRequest(gi));
           out.push(...this.resolveConfirmsForRequest(gi));
           out.push(...this.errorEventsForRequest(v[n], gi));
           const doneEv: PhoneEvent = { type: 'COPILOT_DONE', requestIndex: gi, reason };
           if (this.doneSink) this.scheduleDone(gi, doneEv);
           else out.push(doneEv);
+        } else {
+          this.openReqIdx = gi;
         }
       }
       this.reqCount = Math.max(this.reqCount, base + v.length);
@@ -204,12 +227,48 @@ export class JsonlProjector {
     return out;
   }
 
+  /** hasPendingEdits 翻转 → 待批准编辑卡投影/收尸。callId 固定 'session-edits'
+      （会话级唯一信号），requestIndex 归最近请求（批准门挂在其上）。 */
+  private handlePendingEditsFlag(pending: boolean): PhoneEvent[] {
+    if (pending === this.lastPendingEdits) return [];
+    this.lastPendingEdits = pending;
+    const callId = 'session-edits';
+    const ri = this.openReqIdx >= 0 ? this.openReqIdx : Math.max(0, this.reqCount - 1);
+    if (pending) {
+      // 无在途轮 = 轮已答后的审阅条滞留：纯审阅态不投卡（投了会让客户端
+      // parkedConfirmAlive 把空转当 parked 扣住队列）。lastPendingEdits 仍同步，
+      // 后续翻 false 因 pendingToolConfirms 无卡也不发空 RESOLVED。
+      if (this.openReqIdx < 0) return [];
+      this.pendingToolConfirms.set(callId, ri);
+      return [
+        {
+          type: 'AGENT_CONFIRM',
+          title: '待批准: 修改文件',
+          message: 'Copilot 请求批准文件修改（工作区外编辑需在 VS Code 端批准）',
+          buttons: ['知道了（请在 VS Code 端批准）'],
+          toolCallId: callId,
+          requestIndex: ri,
+        } as PhoneEvent,
+      ];
+    }
+    if (!this.pendingToolConfirms.has(callId)) return [];
+    this.pendingToolConfirms.delete(callId);
+    this.resolvedToolConfirms.add(callId);
+    return [
+      {
+        type: 'AGENT_CONFIRM_RESOLVED',
+        button: 'edits resolved',
+        toolCallId: callId,
+        requestIndex: ri,
+      } as PhoneEvent,
+    ];
+  }
+
   private handleKind0Snapshot(v: any): PhoneEvent[] {
     if (!v || typeof v !== 'object') return [];
     const reqs = v.requests;
     if (!Array.isArray(reqs)) return [];
     const out: PhoneEvent[] = [];
-
     // Only emit for newly appeared requests, and always refresh the latest request's response
     // so live UI can catch up after a full rewrite.
     const start = Math.max(0, reqs.length - 3); // last 3 requests max to avoid flood
@@ -225,14 +284,23 @@ export class JsonlProjector {
       if (req?.response) {
         const reason = requestDoneReason(req);
         if (reason) {
+          if (i === this.openReqIdx) this.openReqIdx = -1;
           out.push(...this.endActiveStreamsForRequest(i));
           out.push(...this.resolveConfirmsForRequest(i));
           out.push(...this.errorEventsForRequest(req, i));
           const doneEv: PhoneEvent = { type: 'COPILOT_DONE', requestIndex: i, reason };
           if (this.doneSink) this.scheduleDone(i, doneEv);
           else out.push(doneEv);
+        } else if (i === reqs.length - 1) {
+          // 最新一轮未见收尾 = 在途轮（待批准门挂着的轮亦属此形态）。
+          this.openReqIdx = i;
         }
       }
+    }
+    // 快照里的会话级挂起标志：必须在请求循环之后判——openReqIdx 已反映
+    // 快照最新轮的在途态，冷连重放时待批准卡才有归属可挂。
+    if (typeof v.hasPendingEdits === 'boolean') {
+      out.push(...this.handlePendingEditsFlag(v.hasPendingEdits));
     }
     this.lastKind0ReqCount = reqs.length;
     // 快照重写后同步计数器，使后续 kind=2 append 能接在正确下标上
@@ -628,6 +696,38 @@ function renderBlocks(parts: any[], pendingToolConfirms?: Map<string, number>, r
           ? p.buttons.map((b: any) => (typeof b === 'string' ? b : b?.label || b?.title || 'OK'))
           : ['Continue', 'Cancel'],
       });
+      continue;
+    }
+
+    // textEditGroup = 文件编辑级批准（工作区外文件修改「Allow edits to
+    // sensitive files?」）——toolInvocationSerialized 本身的 isConfirmed 不受
+    // 它门控（实测 type:4 已决态），此部件的 done:false 才是挂起信号。不投影
+    // 时 parked 轮静默无任何事件，客户端 75s 死流看门狗把活轮收割、
+    // 排队消息绕过等待插队。done 翻 true（批准应用）补 RESOLVED 收卡；
+    // 被取代的孤儿轮仍靠 resolveConfirmsBefore/ForRequest 兜底。
+    if (kind === 'textEditGroup') {
+      flushText();
+      const fsPath =
+        (p.uri && typeof p.uri === 'object' && (p.uri.fsPath || p.uri.external)) ||
+        (typeof p.uri === 'string' ? p.uri : '') ||
+        '';
+      const callId = fsPath ? `${fsPath}|r${reqIndex ?? -1}` : `editgroup-${reqIndex ?? -1}`;
+      const done = p.done === true || p.done === 1;
+      if (!done && pendingToolConfirms && !pendingToolConfirms.has(callId) && !resolvedToolConfirms?.has(callId)) {
+        pendingToolConfirms.set(callId, reqIndex ?? -1);
+        const base = fsPath.split(/[\\/]/).pop() || 'file';
+        blocks.push({
+          type: 'confirm',
+          title: `待批准: 修改文件 ${base}`,
+          message: `Copilot 请求批准文件修改（${fsPath || '未知文件'}）`.slice(0, 300),
+          buttons: ['知道了（请在 VS Code 端批准）'],
+          toolCallId: callId,
+        });
+      } else if (done && pendingToolConfirms && pendingToolConfirms.has(callId)) {
+        pendingToolConfirms.delete(callId);
+        resolvedToolConfirms?.add(callId);
+        blocks.push({ type: 'confirmResolved', title: 'file edit approved', toolCallId: callId });
+      }
       continue;
     }
 

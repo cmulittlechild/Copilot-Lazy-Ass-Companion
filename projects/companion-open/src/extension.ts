@@ -973,7 +973,17 @@ export async function activate(context: vscode.ExtensionContext) {
         // （assistant 侧仍被 gate 拦，避免双渲染；手机注入回声由 isInjectedEcho 拦。）
         // USER_MESSAGE 双源重复由 bridge.sendToPhone 的时间窗去重处理
         // （gate 会矫枉过正：transcripts 静默时唯一来源被吞 → 零气泡）。
-        if (transcriptActive && ev.type !== "USER_MESSAGE") return;
+        // AGENT_CONFIRM/_RESOLVED 同属放行：待批准信号只存在于 chatSessions
+        // （transcript 源不含 hasPendingEdits/工具确认态），被 gate 吞掉后手机端
+        // 永远看不到待批准卡（实测 hasPendingEdits 翻转投影在此被整条丢弃）。
+        // 双通道重复由 bridge 确认卡去重兜底。
+        if (
+          transcriptActive &&
+          ev.type !== "USER_MESSAGE" &&
+          ev.type !== "AGENT_CONFIRM" &&
+          ev.type !== "AGENT_CONFIRM_RESOLVED"
+        )
+          return;
         if (bridge?.sendToPhone) bridge.sendToPhone(ev);
         else bridge?.broadcast(ev);
       },
