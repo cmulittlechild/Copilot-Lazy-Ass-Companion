@@ -128,6 +128,12 @@
   let lastSysText = '';
   let lastSysAt = 0;
   let replaying = false;
+  /** 已完成回放次数：0=冷启/首次连接回放——排队暂存按「回填输入框不自动发」
+      处理；>=1=切会话/重连回放——同会话暂存项重新挂回队列。 */
+  let replayCount = 0;
+  /** 暂存在 ss 里的跨会话排队项（sess != 当前绑定会话）：回放合并写回时
+      不得丢掉，否则切到别的会话再切回后排队文本凭空蒸发。 */
+  let parkedForeignQueue = [];
   let typingEl = null;
   let typingTimer = null;
   /** 会话切换 / 历史回放期间：禁用 smooth 滚动，直接跳到底部（避免整段滑动动画） */
@@ -283,6 +289,11 @@
           arr.push({ text: q.text, at: q.at || Date.now(), sess: q.sess || currentSessionMeta.file || '' });
         }
       }
+      // 跨会话暂存项一并写回：内存队列覆盖整个 ss key，不带 foreign
+      // 会把别会话的暂存条目抹掉。
+      for (const q of parkedForeignQueue) {
+        if (q && typeof q.text === 'string' && q.text.trim()) arr.push(q);
+      }
       if (arr.length) sessionStorage.setItem(QUEUED_SENDS_KEY, JSON.stringify(arr.slice(0, 8)));
       else sessionStorage.removeItem(QUEUED_SENDS_KEY);
     } catch (_) {}
@@ -299,7 +310,9 @@
     releaseHardTimer = null;
     if (!requestRunning) return;
     const hrcSil = Date.now() - lastStreamActivityAt;
-    if (hrcSil >= 5000) {
+    // 有未决待批准卡的轮 parked 等桌面批准：静默 ≠ 死亡，续查不释放
+    //（否则 inject-ack DONE 触发的本看门狗 15s 内就把 parked 轮杀掉）。
+    if (hrcSil >= 5000 && !parkedConfirmAlive()) {
       DBG('hrc', { act: 'release', sil: hrcSil });
       markAllToolsDone();
       finishAllAssistantVisuals();
@@ -2149,6 +2162,7 @@
     if (
       requestRunning &&
       !stillAwaitingReply &&
+      !parkedConfirmAlive() &&
       lastStreamActivityAt &&
       Date.now() - lastStreamActivityAt > STREAM_STALE_MS
     ) {
@@ -2570,6 +2584,9 @@
         break;
       }
       case 'AGENT_CONFIRM':
+        // 待批准卡到达也是活性帧：parked 轮此后静默等待桌面批准，静默本身
+        // 不是死亡——有未决卡的轮由 parkedConfirmAlive 豁免僵尸收割。
+        lastStreamActivityAt = Date.now();
         showConfirm(msg);
         break;
       case 'AGENT_CONFIRM_RESOLVED': {
@@ -2660,16 +2677,23 @@
           ...sentAwaitingReply.map((e) => e.at || 0),
         );
         const doneImmediate = msg.reason === 'phone_stop' || msg.reason === 'isCanceled';
+        // inject_soft_unverified 是「已提交但落盘核验慢」的发送回执（verify ~20s
+        // 后才返回，早越过下面的 8s 宽限），不是轮终——真送达时该轮仍在上游跑，
+        // 释放 rr 会让排队消息提前插队；真未送达由 55s 复核的 inject_lost 收尾。
         const injectAckDone =
           msg.ack === true ||
+          msg.reason === 'inject_soft_unverified' ||
           (!doneImmediate && youngestAwaitAt > 0 && now0 - youngestAwaitAt < 8000);
         const releaseDone = !staleDone && !injectAckDone;
         if (msg.reason === 'phone_stop' || msg.reason === 'isCanceled') stopAckAt = Date.now();
         DBG('done', { stale: !!staleDone, ack: !!injectAckDone, rel: releaseDone, imm: !!doneImmediate, reason: msg.reason || '', ut: !!msg._ut, cut: !!msg.closedUt, idx: doneIdx, dts: doneTs });
 
-        if (injectAckDone) {
+        if (injectAckDone && msg.reason !== 'inject_soft_unverified') {
           // 被挡的 DONE 不会重发——若它其实是真轮终（无 _ut 的收尾通道），
           // 8s 窗口到期后补一次释放评估，否则 rr 要靠 75s 看门狗才放得掉。
+          // inject_soft_unverified 例外：它是注入核验回执、永远不可能是轮终，
+          // 复评的 lastAgentMessageAt>lastUserSendAt 判据会把工具轮 preamble
+          // （「I'll run…」）误判成真答而放行 rr → 排队消息提前插队。
           setTimeout(() => {
             if (!requestRunning) return;
             const n2 = Date.now();
@@ -2932,7 +2956,12 @@
             const texts = [];
             for (const qi of pendingSendQueue) {
               if (qi && qi.el && qi.el.isConnected) qi.el.remove();
-              if (qi && qi.text) texts.push(qi.text);
+              if (qi && qi.text) {
+                texts.push(qi.text);
+                // 按 sess 暂存：切回该会话的回放会把它们重新挂回队列，
+                // 自动出队语义在往返切换后不丢。
+                parkedForeignQueue.push({ text: qi.text, at: qi.at || Date.now(), sess: qi.sess || '' });
+              }
             }
             pendingSendQueue.length = 0;
             persistQueuedSends();
@@ -3073,6 +3102,10 @@
           // 在途轮回放不得松开发送键：否则下一发送插队、把原轮的
           // 完成事件/答案归属偷走 → 原答案丢失（R107 BUG-1）。
           requestRunning = inFlight ? true : false;
+          // 服务端刚声明该会话有未答开启轮 = 活性证据：待批准 parked 轮
+          // 天然静默（CONFIRM 不出流帧），不刷新会在下个僵尸检查点被当
+          // 死轮收尸 → 发送键放开、排队消息立即插队（实测切回后 +55ms 出队）。
+          if (inFlight) lastStreamActivityAt = Date.now();
           try { paintSendButton(); } catch (_) {}
           // 回放会清空 feed：把未确认送达的本地待发消息补画回去（发后遭遇 REPLAY 丢泡）
           try {
@@ -3189,6 +3222,8 @@
           // 回放 USER 说明刷新瞬间已出队送达（销账）；否则把最近一条回填
           // 输入框（不自动重发）。按 ts 判送达：同文重问时老 USER 不算数。
           try {
+            // 回放开始先清内存侧暂存视图：ss 缺席/为空时也不得残留上次的 foreign
+            parkedForeignQueue = [];
             const rawQ = sessionStorage.getItem(QUEUED_SENDS_KEY);
             if (rawQ) {
               const arrQ = JSON.parse(rawQ);
@@ -3203,29 +3238,63 @@
                 }
                 const nowQ = Date.now();
                 const keepQ = [];
+                const foreignQ = [];
                 for (const q of arrQ) {
                   if (!q || typeof q.text !== 'string' || !q.text.trim()) continue;
                   if (nowQ - (q.at || 0) > 5 * 60 * 1000) continue;
                   const qBase = baseNameAny(q.sess || '').replace(/\.jsonl$/i, '');
-                  if (boundBaseR && qBase && qBase !== boundBaseR) continue;
+                  if (boundBaseR && qBase && qBase !== boundBaseR) { foreignQ.push(q); continue; }
                   const rt = replayedUserTs.get(userTextDedupeKey(q.text)) || 0;
                   if (rt && rt >= (q.at || 0) - 15000) continue;
                   keepQ.push(q);
                 }
+                // 别会话的暂存项继续保留（此前一并丢弃，切回时排队蒸发）。
+                parkedForeignQueue = foreignQ;
                 if (keepQ.length) {
-                  if (!(input.value || '').trim()) {
-                    const lastQ = keepQ[keepQ.length - 1];
-                    input.value = lastQ.text;
-                    sendVerifyRestoredText = lastQ.text;
-                    addSys('排队消息因页面刷新中断，文本已回填，请重新发送');
+                  // 已手动重发 / 已在内存队列（持久化副本同文同时段）的不再入队——双发/双渲。
+                  const requeueQ = keepQ.filter((q) => {
+                    const k0 = userTextDedupeKey(q.text);
+                    if (sentAwaitingReply.some((e) => userTextDedupeKey(e.text || '') === k0)) return false;
+                    if (pendingSendQueue.some((e) => userTextDedupeKey(e.text || '') === k0 && Math.abs((e.at || 0) - (q.at || 0)) < 120000)) return false;
+                    return true;
+                  });
+                  if (replayCount > 0 && requeueQ.length) {
+                    // 非冷启回放（切会话切回/重连）：同会话暂存项重新挂回
+                    // 队列——往返切换不该把「发后会送」悄悄降级成草稿。
+                    // 输入框里若正是排队回填的文本则清掉防双发，用户改过的草稿保留。
+                    for (const q of requeueQ) {
+                      const qKey = `user:queued:${q.at || Date.now()}:${userTextDedupeKey(q.text)}`;
+                      const qEl = addUser(q.text, qKey, { force: true, ts: q.at || Date.now() });
+                      if (qEl) qEl.classList.add('queued');
+                      pendingSendQueue.push({ text: q.text, mode: 'agent', el: qEl, key: qKey, at: q.at || Date.now(), sess: q.sess || '' });
+                    }
+                    const drained = requeueQ.map((q) => (q.text || '').trim()).filter(Boolean).join('\n');
+                    if (drained && (input.value || '').trim() === drained) {
+                      input.value = '';
+                      if ((sendVerifyRestoredText || '').trim() === drained) sendVerifyRestoredText = '';
+                    }
+                    if (!queuedHintEl || !queuedHintEl.isConnected) queuedHintEl = addSys('已排队：当前回复结束后自动发送');
+                    persistQueuedSends();
+                    try { flushSendQueue(); } catch (_) {}
+                  } else {
+                    // 冷启回填只填未被手动重发的项；已重发的同步从暂存销账
+                    if (requeueQ.length && !(input.value || '').trim()) {
+                      const lastQ = requeueQ[requeueQ.length - 1];
+                      input.value = lastQ.text;
+                      sendVerifyRestoredText = lastQ.text;
+                      addSys('排队消息因页面刷新中断，文本已回填，请重新发送');
+                    }
+                    sessionStorage.setItem(QUEUED_SENDS_KEY, JSON.stringify(requeueQ.concat(foreignQ)));
                   }
-                  sessionStorage.setItem(QUEUED_SENDS_KEY, JSON.stringify(keepQ));
+                } else if (foreignQ.length) {
+                  sessionStorage.setItem(QUEUED_SENDS_KEY, JSON.stringify(foreignQ));
                 } else {
                   sessionStorage.removeItem(QUEUED_SENDS_KEY);
                 }
               }
             }
           } catch (_) {}
+          replayCount++;
           jumpFeedToBottom();
           // 回放完成后恢复顶部状态文案（SESSION_SELECTED 可能写成「切换会话…」）
           setStatus(true, connectedLabel());
@@ -4143,9 +4212,19 @@
     };
   }
 
+  /** feed 里有未决待批准卡 = 该轮 parked 等桌面批准：静默不是死轮，豁免
+      僵尸收尸（否则 parked 轮 ~85s 静默后被杀 rr，排队消息提前出队插队）。
+      上限 10min：桌面端静默销卡且无 RESOLVED 到达的真死局仍能靠收割兜底。 */
+  function parkedConfirmAlive() {
+    try {
+      if (Date.now() - lastStreamActivityAt > 10 * 60 * 1000) return false;
+      return !!(feed && feed.querySelector('.msg.confirm-card:not(.resolved)'));
+    } catch (_) { return false; }
+  }
+
   function doSend() {
     // 请求进行中：发送键已变成停止；但流已静默超阈值的僵尸态直接当作空闲
-    if (requestRunning && lastStreamActivityAt && Date.now() - lastStreamActivityAt > STREAM_STALE_MS) {
+    if (requestRunning && lastStreamActivityAt && !parkedConfirmAlive() && Date.now() - lastStreamActivityAt > STREAM_STALE_MS) {
       forceFinishDeadStream();
     }
     if (requestRunning) {
@@ -4196,7 +4275,8 @@
     if (!pendingSendQueue.length) return;
     // 僵尸 rr：DONE 丢失/被去重吞掉时 rr 卡死，flush 全靠 10s 看门狗兜底，
     // 实测排队消息滞留 40-55s。这里就地收尸（内部会再调本函数重试）。
-    if (requestRunning && lastStreamActivityAt && Date.now() - lastStreamActivityAt > STREAM_STALE_MS) {
+    // 待批准 parked 轮豁免：挂确认卡的轮静默等人批准，不是死轮。
+    if (requestRunning && lastStreamActivityAt && !parkedConfirmAlive() && Date.now() - lastStreamActivityAt > STREAM_STALE_MS) {
       DBG('flush', { gate: 'dead' });
       forceFinishDeadStream();
       return;

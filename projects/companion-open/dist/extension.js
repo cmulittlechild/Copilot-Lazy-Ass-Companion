@@ -528,23 +528,45 @@ async function activate(context) {
                     }
                     // 商业化：clipboard → 明确告诉手机；verified 成功保持安静
                     if (result.via === "clipboard") {
-                        const reason = String(result.injectPath || "clipboard");
-                        bridge?.broadcast({
-                            type: "SYSTEM_MESSAGE",
-                            // injectFailed：终态注入失败（该会话绝不会再产出本轮内容）——
-                            // 客户端据此销掉待答条目并回填原文。DONE 走裁决器会被判
-                            // inject-ack 丢弃，终态信号只能搭 SYSTEM_MESSAGE。
-                            injectFailed: String(msg.text || ""),
-                            text: reason.includes("cross-session-leak")
-                                ? "注入未确认目标会话（检测到可能串台），消息已复制到剪贴板，请在正确 Chat 粘贴"
-                                : reason.includes("unverified")
-                                    ? "注入未能确认目标会话，消息已复制到剪贴板（请打开手机选中的会话后粘贴）"
-                                    : reason.includes("bind-failed")
-                                        ? "无法打开目标会话，消息已复制到剪贴板"
-                                        : "已复制到剪贴板（未能安全注入目标会话，请在 Chat 粘贴发送）",
-                        });
-                        // 结束手机端 typing，避免一直转圈
-                        bridge?.broadcast({ type: "COPILOT_DONE", reason: "inject_clipboard" });
+                        // 假阴性抑制：inject 走剪贴板兜底返回时，若该文本之后已有 agent
+                        // 活动/目标会话请求行已落盘，说明提交其实成功、只是核验慢判死——
+                        // 照失败广播会把已送达的消息回填+释放发送键，在途轮中排队的下一条
+                        // 提前出队插队（实测工具轮在跑时判 clipboard，排队消息立即外发）。
+                        const clipKey = String(msg.text || "")
+                            .replace(/\s+/g, " ")
+                            .trim()
+                            .slice(0, 120);
+                        const clipTarget = typeof msg.file === "string" ? msg.file.trim() : "";
+                        const clipLanded = (lastAgentUtAt.get(clipKey) || 0) >= injectBeganAt - 2_000 ||
+                            lastAnyAgentEventAt >= injectBeganAt - 2_000 ||
+                            (clipTarget
+                                ? transcriptHasRequestSince(clipTarget, clipKey, injectBeganAt - 5_000)
+                                : false);
+                        if (clipLanded) {
+                            // 真落地就不发任何事件：与 verified 成功径同语义（静默）。
+                            // 发 inject_soft_unverified DONE 也会销待答条目+释放 rr+收
+                            // 在途工具卡——真轮的发送键/排队该由它自己的轮终 DONE 管。
+                            qrPanel.addLog(`clipboard 误报抑制: ${clipKey.slice(0, 50)} 已见落地证据`);
+                        }
+                        else {
+                            const reason = String(result.injectPath || "clipboard");
+                            bridge?.broadcast({
+                                type: "SYSTEM_MESSAGE",
+                                // injectFailed：终态注入失败（该会话绝不会再产出本轮内容）——
+                                // 客户端据此销掉待答条目并回填原文。DONE 走裁决器会被判
+                                // inject-ack 丢弃，终态信号只能搭 SYSTEM_MESSAGE。
+                                injectFailed: String(msg.text || ""),
+                                text: reason.includes("cross-session-leak")
+                                    ? "注入未确认目标会话（检测到可能串台），消息已复制到剪贴板，请在正确 Chat 粘贴"
+                                    : reason.includes("unverified")
+                                        ? "注入未能确认目标会话，消息已复制到剪贴板（请打开手机选中的会话后粘贴）"
+                                        : reason.includes("bind-failed")
+                                            ? "无法打开目标会话，消息已复制到剪贴板"
+                                            : "已复制到剪贴板（未能安全注入目标会话，请在 Chat 粘贴发送）",
+                            });
+                            // 结束手机端 typing，避免一直转圈
+                            bridge?.broadcast({ type: "COPILOT_DONE", reason: "inject_clipboard" });
+                        }
                     }
                     else if (result.verified === false &&
                         !/soft-unverified|leak-warning/.test(String(result.injectPath || ""))) {
