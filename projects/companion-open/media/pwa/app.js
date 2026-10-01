@@ -2574,18 +2574,22 @@
         confirmBar.classList.add('hidden');
         // feed 里的待批准卡也要销——否则被取代/轮终收尸的卡片仍按未决样式
         // 挂在 feed 里（实测孤儿轮 RESOLVED 后卡仍显示「待批准」）。
+        let resolvedAny = false;
         try {
           const cid = msg.toolCallId || msg.confirmId || msg.requestId || null;
           for (const c of feed.querySelectorAll('.msg.confirm-card:not(.resolved)')) {
             if (cid && c.dataset.confirmId && c.dataset.confirmId !== cid) continue;
             c.classList.add('resolved');
+            resolvedAny = true;
             const row = c.querySelector('.confirm-btns');
             if (row) row.remove();
             const body = c.querySelector('.confirm-body');
             if (body) body.textContent = `已解决: ${msg.button || ''}`;
           }
         } catch (_) {}
-        addSys(`确认已解决: ${msg.button || ''}`);
+        // 重复 RESOLVED（如 supersede 合成件后投影器补发的轮终收尸）不再
+        // 叠提示行——只有这次真销到卡才打。
+        if (resolvedAny || !feed.querySelector('.msg.confirm-card.resolved')) addSys(`确认已解决: ${msg.button || ''}`);
         break;
       }
       case 'COPILOT_TYPING':
