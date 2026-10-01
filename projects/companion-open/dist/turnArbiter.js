@@ -68,6 +68,13 @@ class TurnArbiter {
     /** 合成待投事件（superseded DONE 等）：accept 只能回一件，附属终态件由
         桥端在广播主事件后 drain 补投。 */
     syntheticOut = [];
+    /** 最近一次 sessiondb 行内容改判：{原_ut(行 user_message), 改判后_ut, 时刻}。
+        行配对的 DONE 带同一 user_message 戳，随行改判（R109：K 行 DONE 不得
+        提前释放 L 的待答）。 */
+    lastSdbRebind = null;
+    /** 已投过的待批准确认卡 cid 键（无窗口）：回放副本不论迟到多久都丢——
+        live 卡已渲染，回放重投只会叠出第二张相同待批准卡（R109 P3）。 */
+    emittedConfirms = new Set();
     /** 会话切换/绑定变更时调用：清本轮状态，避免跨会话误杀。 */
     turnMatchesSess(t, sessBase) {
         if (!sessBase)
@@ -159,6 +166,8 @@ class TurnArbiter {
         this.toolOwnerUt.clear();
         this.streamOwnerUt.clear();
         this.emittedA2.clear();
+        this.emittedConfirms.clear();
+        this.lastSdbRebind = null;
         if (sessBase)
             this.pruneEmitted(0);
     }
@@ -282,6 +291,59 @@ class TurnArbiter {
     static tsOf(ev) {
         const v = typeof ev?.timestamp === "number" ? ev.timestamp : typeof ev?.ts === "number" ? ev.ts : null;
         return v;
+    }
+    static wordTokens(s) {
+        return new Set((s.toLowerCase().match(/[a-z0-9]{4,}/g) || []).slice(0, 400));
+    }
+    /** sessiondb 行内容自洽：行的 _ut 是 user_message 字段，上游可能把答案
+        归错行（被停在途生成的内容落到下一请求行）。答案 token 与各轮
+        user_text 比重叠分；最匹配的未获答轮显著领先 _ut 轮自身得分才改判——
+        阈值保守，不干扰「答案复述问题关键词」的正常行。 */
+    rebindSessionDbTurn(sessBase, utKey, answerText) {
+        if (!utKey || !answerText)
+            return undefined;
+        const ans = TurnArbiter.wordTokens(answerText.slice(0, 1500));
+        if (!ans.size)
+            return undefined;
+        const scoreOf = (t) => {
+            if (!t.text)
+                return 0;
+            let s = 0;
+            for (const w of TurnArbiter.wordTokens(t.text))
+                if (ans.has(w))
+                    s++;
+            return s;
+        };
+        const utTurn = this.lastTurnWithUt(sessBase, utKey);
+        const utScore = utTurn ? scoreOf(utTurn) : 0;
+        let best;
+        let bestScore = 0;
+        for (const t of this.openTurns) {
+            if (t === utTurn || t.gotAgent || !t.text)
+                continue;
+            if (!this.turnMatchesSess(t, sessBase))
+                continue;
+            const s = scoreOf(t);
+            if (s > bestScore) {
+                bestScore = s;
+                best = t;
+            }
+        }
+        if (best && bestScore >= 2 && bestScore >= utScore + 2)
+            return best;
+        return undefined;
+    }
+    /** 本会话最老的「还没归属过 AGENT_MESSAGE」的轮：sessiondb 行按轮次序
+        投影，无 _ut 的行 FIFO 归它而不是最新开放轮（R109 停轮作文族）。 */
+    oldestUnservedTurn(sessBase) {
+        for (const t of this.openTurns) {
+            if (t.gotAgent)
+                continue;
+            if (!this.turnMatchesSess(t, sessBase))
+                continue;
+            return t;
+        }
+        return undefined;
     }
     markAnswered(sessBase, utKey) {
         for (const t of this.openTurns) {
@@ -555,13 +617,41 @@ class TurnArbiter {
             }
             case "AGENT_MESSAGE": {
                 const { t, ownerUt } = this.turnForStreamEvent(sessBase, TurnArbiter.tsOf(ev), String(ev.streamId || ""));
-                if (t && (!ownerUt || t.utKey === ownerUt))
-                    t.sawStream = true;
                 if (!utKey)
                     utKey = ownerUt || (t ? t.utKey : "");
                 // 去重归属：_ut 自证优先（已答轮也能反查回自己的实例）；
                 // 无 _ut 的才落到到达序最新未答轮。
                 ownerTurn = utKey ? this.lastTurnWithUt(sessBase, utKey) ?? t : t;
+                if (String(ev.streamId || "").startsWith("sessiondb/")) {
+                    // 行内容自洽：sessiondb 行的 _ut 来自 user_message 字段，但 Copilot
+                    // 上游会把「被停在途生成」的内容写进下一请求的行（R109：K 被停后其
+                    // 作文落到 L 的行，盖 ut=L 渲在 L 泡下、L 被判已答真答再无归属）。
+                    // 答案 token 与各轮 user_text 计重叠分，最佳候选显著领先 _ut 轮时
+                    // 改判真实归属轮（该轮可能已答/已停——内容归属不因停止而改变）。
+                    const ownUt = utKey;
+                    const rebound = this.rebindSessionDbTurn(sessBase, utKey, String(ev.text || ""));
+                    if (rebound) {
+                        utKey = rebound.utKey;
+                        ownerTurn = rebound;
+                        // 行自带的错 _ut 必须改写——out._ut 只在缺失时打戳，不改写的话
+                        // 客户端拿到的还是错归属（列 user_message 原文）。
+                        ev._ut = rebound.utKey;
+                        if (ownUt && ownUt !== rebound.utKey) {
+                            this.lastSdbRebind = { fromUt: ownUt, toUt: rebound.utKey, at: now };
+                        }
+                    }
+                    else if (!utKey) {
+                        // 无 _ut 的 sessiondb 行按轮次序 FIFO 归最老未获答轮——行即轮次
+                        // 记录、投影有序，「最新开放轮」兜底会让迟到旧行被新轮抢走。
+                        const fifo = this.oldestUnservedTurn(sessBase);
+                        if (fifo) {
+                            utKey = fifo.utKey;
+                            ownerTurn = fifo;
+                        }
+                    }
+                }
+                if (ownerTurn)
+                    ownerTurn.sawStream = true;
                 break;
             }
             case "COPILOT_DONE": {
@@ -578,6 +668,16 @@ class TurnArbiter {
                     : null;
                 const doneTs = typeof ev.ts === "number" ? ev.ts : typeof ev.timestamp === "number" ? ev.timestamp : now;
                 const immediate = ev.reason === "phone_stop" || ev.reason === "isCanceled";
+                // 行配对 DONE 随行改判：sessiondb 在 AGENT 后同刻补一条 DONE，其 _ut
+                // 与行 user_message 相同——行内容已被改判的，DONE 跟着改（R109：否则
+                // K 行的 DONE 仍盖 L 戳，把 L 的待答提前释放）。
+                if (utKey &&
+                    this.lastSdbRebind &&
+                    now - this.lastSdbRebind.at < 5_000 &&
+                    utKey === this.lastSdbRebind.fromUt) {
+                    utKey = this.lastSdbRebind.toUt;
+                    ev._ut = this.lastSdbRebind.toUt;
+                }
                 // 过期 DONE：归属旧轮次，不得释放当前在途状态。
                 // staleByTs 与 reqIdx 解耦——各通道 requestIndex 编号域不同
                 // （sessiondb 行号 / transcript turnSeq / chatSessions 请求序），
@@ -757,6 +857,14 @@ class TurnArbiter {
                 : null;
             const reprojUt = reprojKey ? this.emittedUt.get(reprojKey) : undefined;
             const reprojDup = !isSessionDb && reprojUt != null && reprojUt !== utKey;
+            // 回放副本的待批准卡：live 已投过的同卡不论隔多久都丢（emitted 120s
+            // 窗会被回放甩开）。live 卡不进此分支——30s 窗照常走 emitted 去重。
+            if (type === "AGENT_CONFIRM" &&
+                key &&
+                (ev.replayed || ev.history) &&
+                this.emittedConfirms.has(key)) {
+                return null;
+            }
             const isDup = (key && (this.emitted.get(key) ?? 0) && now - this.emitted.get(key) <= window) ||
                 altDup ||
                 reprojDup;
@@ -772,6 +880,8 @@ class TurnArbiter {
                     this.emittedA2.set(altKey, { t: now, turn: ownerTurn, ut: utKey });
                 if (reprojKey && utKey)
                     this.emittedUt.set(reprojKey, utKey);
+                if (type === "AGENT_CONFIRM" && key)
+                    this.emittedConfirms.add(key);
             }
             if (type === "AGENT_MESSAGE") {
                 this.markAnswered(sessBase, utKey);
@@ -782,6 +892,10 @@ class TurnArbiter {
                     if (tt && !tt.answerText)
                         tt.answerText = full;
                 }
+                // 归属标记：sessiondb FIFO/内容改判的「未获答轮」游标据此前移。
+                const served = ownerTurn ?? this.lastTurnWithUt(sessBase, utKey);
+                if (served)
+                    served.gotAgent = true;
             }
         }
         const out = { ...ev, _seq: ++this.seq };

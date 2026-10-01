@@ -270,6 +270,8 @@
   const OUTBOUND_QUEUE_TTL_MS = 90000;
   /** 请求进行中用户再次输入的消息队列：排队而非停轮（发送键=有文本就排队，空文本才停止） */
   const pendingSendQueue = [];
+  /** 换会话退队已回填输入框的提示：回放清屏后需补投一次。 */
+  let queueBackfillNotePending = false;
   /** 排队消息持久化：页面刷新会把内存里的 pendingSendQueue 连同泡一起蒸发，
       回放后用 sessionStorage 副本把文本回填输入框（与切会话回填同语义，不自动重发）。 */
   const QUEUED_SENDS_KEY = 'sidecar.queuedSends';
@@ -2940,6 +2942,9 @@
               input.value = cur ? cur + '\n' + texts.join('\n') : texts.join('\n');
             }
             addSys('已切换会话，排队消息已回填输入框');
+            // 紧随其后的 HISTORY_REPLAY 会 clearFeed 抹掉这条提示——回放结束
+            // 补投一次，否则用户看不到退队去向（R109 P3）。
+            queueBackfillNotePending = true;
             if (queuedHintEl) { queuedHintEl.remove(); queuedHintEl = null; }
           }
           setStatus(true, '切换会话…');
@@ -3054,6 +3059,11 @@
               if (Number.isFinite(t) && t > replayFloorTs) replayFloorTs = t;
             }
           } catch (_) {}
+          // 换会话退队的回填提示被 clearFeed 抹掉了——补投在回放尾部。
+          if (queueBackfillNotePending) {
+            queueBackfillNotePending = false;
+            addSys('已切换会话，排队消息已回填输入框');
+          }
           // 历史里不应残留「正在输入」态
           finishAllAssistantVisuals();
           if (requestDoneTimer) {
