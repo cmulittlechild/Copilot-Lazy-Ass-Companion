@@ -312,7 +312,13 @@
     const hrcSil = Date.now() - lastStreamActivityAt;
     // 有未决待批准卡的轮 parked 等桌面批准：静默 ≠ 死亡，续查不释放
     //（否则 inject-ack DONE 触发的本看门狗 15s 内就把 parked 轮杀掉）。
-    if (hrcSil >= 5000 && !parkedConfirmAlive()) {
+    // 同理豁免未超龄待答轮：例行 inject-ack DONE 也会布本看门狗，上游
+    // TTFT 慢（实测 20s+ 才首流）时 5s 静默阈会收割活轮 → rr 提前释放、
+    // 下条发送绕过排队插队。真正的死轮由 75s 死流看门狗兜底即可。
+    const hrcAwaiting =
+      sentAwaitingReply.length > 0 &&
+      sentAwaitingReply.some((e) => Date.now() - (e.at || 0) < STREAM_STALE_AWAIT_MS);
+    if (hrcSil >= 5000 && !parkedConfirmAlive() && !hrcAwaiting) {
       DBG('hrc', { act: 'release', sil: hrcSil });
       markAllToolsDone();
       finishAllAssistantVisuals();
