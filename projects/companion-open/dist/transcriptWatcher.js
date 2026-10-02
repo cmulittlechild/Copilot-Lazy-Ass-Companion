@@ -2359,7 +2359,7 @@ class TranscriptWatcher {
                     }
                 }
                 // 工具卡单独占位；正文用独立 stream，避免与 tool 交错时同一 bubble 被整段 SET 覆盖错序
-                this.toolStates.set(toolCallId, { text: name, requestIndex: this.turnSeq, complete: false });
+                this.toolStates.set(toolCallId, { text: name, requestIndex: this.turnSeq, complete: false, ut: this.turnUt || this.activeUserText || undefined });
                 this.emit({
                     type: 'TOOL_CALL',
                     text: name,
@@ -2367,6 +2367,7 @@ class TranscriptWatcher {
                     isComplete: false,
                     input,
                     requestIndex: this.turnSeq,
+                    _ut: this.turnUt || this.activeUserText || undefined,
                 });
             }
         }
@@ -2514,7 +2515,7 @@ class TranscriptWatcher {
             this.activeTurnId = keepTurn;
             this.turnSeq = keepSeq;
         }
-        this.toolStates.set(toolCallId, { text: toolName, requestIndex: this.turnSeq, complete: false });
+        this.toolStates.set(toolCallId, { text: toolName, requestIndex: this.turnSeq, complete: false, ut: this.turnUt || this.activeUserText || undefined });
         this.emit({
             type: 'TOOL_CALL',
             text: toolName,
@@ -2522,6 +2523,7 @@ class TranscriptWatcher {
             isComplete: false,
             input: data.arguments,
             requestIndex: this.turnSeq,
+            _ut: this.turnUt || this.activeUserText || undefined,
         });
     }
     /**
@@ -2546,6 +2548,7 @@ class TranscriptWatcher {
                 toolId: toolCallId,
                 isComplete: true,
                 requestIndex: this.turnSeq,
+                _ut: this.turnUt || this.activeUserText || undefined,
             });
             return;
         }
@@ -2556,6 +2559,7 @@ class TranscriptWatcher {
             toolId: toolCallId,
             isComplete: true,
             requestIndex: st.requestIndex,
+            _ut: st.ut || this.turnUt || this.activeUserText || undefined,
         });
     }
     /** 把尚未 complete 的工具全部标 done（turn 结束 / 用户新消息时） */
@@ -2570,6 +2574,7 @@ class TranscriptWatcher {
                 toolId: toolCallId,
                 isComplete: true,
                 requestIndex: st.requestIndex ?? this.turnSeq,
+                _ut: st.ut || this.turnUt || this.activeUserText || undefined,
             });
         }
     }

@@ -261,7 +261,7 @@ export class TranscriptWatcher {
   private activeStreamId: string | null = null;
   private streamAccum = '';
   private pendingReasoning: string[] = [];
-  private toolStates = new Map<string, { text: string; requestIndex?: number; complete?: boolean }>();
+  private toolStates = new Map<string, { text: string; requestIndex?: number; complete?: boolean; ut?: string }>();
   private seenMessageIds = new Set<string>();
   /** messageId → 该消息已见到的最大 content 快照（同一 messageId 重写变长 → 前缀 diff 发增量） */
   private lastContentByMessageId = new Map<string, string>();
@@ -2323,7 +2323,7 @@ export class TranscriptWatcher {
           }
         }
         // 工具卡单独占位；正文用独立 stream，避免与 tool 交错时同一 bubble 被整段 SET 覆盖错序
-        this.toolStates.set(toolCallId, { text: name, requestIndex: this.turnSeq, complete: false });
+        this.toolStates.set(toolCallId, { text: name, requestIndex: this.turnSeq, complete: false, ut: this.turnUt || this.activeUserText || undefined });
         this.emit({
           type: 'TOOL_CALL',
           text: name,
@@ -2331,6 +2331,7 @@ export class TranscriptWatcher {
           isComplete: false,
           input,
           requestIndex: this.turnSeq,
+          _ut: this.turnUt || this.activeUserText || undefined,
         });
       }
     }
@@ -2478,7 +2479,7 @@ export class TranscriptWatcher {
       this.activeTurnId = keepTurn;
       this.turnSeq = keepSeq;
     }
-    this.toolStates.set(toolCallId, { text: toolName, requestIndex: this.turnSeq, complete: false });
+    this.toolStates.set(toolCallId, { text: toolName, requestIndex: this.turnSeq, complete: false, ut: this.turnUt || this.activeUserText || undefined });
     this.emit({
       type: 'TOOL_CALL',
       text: toolName,
@@ -2486,6 +2487,7 @@ export class TranscriptWatcher {
       isComplete: false,
       input: data.arguments,
       requestIndex: this.turnSeq,
+      _ut: this.turnUt || this.activeUserText || undefined,
     });
   }
 
@@ -2510,6 +2512,7 @@ export class TranscriptWatcher {
         toolId: toolCallId,
         isComplete: true,
         requestIndex: this.turnSeq,
+        _ut: this.turnUt || this.activeUserText || undefined,
       });
       return;
     }
@@ -2520,6 +2523,7 @@ export class TranscriptWatcher {
       toolId: toolCallId,
       isComplete: true,
       requestIndex: st.requestIndex,
+      _ut: st.ut || this.turnUt || this.activeUserText || undefined,
     });
   }
 
@@ -2534,6 +2538,7 @@ export class TranscriptWatcher {
         toolId: toolCallId,
         isComplete: true,
         requestIndex: st.requestIndex ?? this.turnSeq,
+        _ut: st.ut || this.turnUt || this.activeUserText || undefined,
       });
     }
   }
