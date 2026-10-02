@@ -238,6 +238,7 @@ function buildReplayWithDbBackfill(
     const wantOrd = sameTextOrd(uKey, ri);
     if (nthUserPos(uKey, wantOrd) < 0) continue;
     let matchOrd = 0;
+    let lastBlockLo = -1;
     for (let i = 0; i < out.length; i++) {
       const e = out[i];
       const t = e?.type;
@@ -249,7 +250,19 @@ function buildReplayWithDbBackfill(
       }
       // 同文重问常配同文答案——第 ri 条 db 轮必须配第 n 个同文答案块，
       // 否则每条轮都命中同一块把它沿各序位锚逐级级联挪走，最终堆在末
-      // 锚下、前槽全部假孤儿（R121 BUG-2）。
+      // 锚下、前槽全部假孤儿（R121 BUG-2）。按「块」计序而非按元素：
+      // 一块内 SET+MESSAGE 两个同文元素各计一次会让后轮把已归位的块
+      // 再挪走（R122：答案块整体后移一锚）。
+      let blo = i;
+      while (
+        blo - 1 >= 0 &&
+        out[blo - 1]?.type !== "USER_MESSAGE" &&
+        out[blo - 1]?.type !== "AGENT_STREAM_END"
+      ) {
+        blo--;
+      }
+      if (blo === lastBlockLo) continue;
+      lastBlockLo = blo;
       matchOrd++;
       if (matchOrd !== wantOrd) continue;
       let owner = -1;

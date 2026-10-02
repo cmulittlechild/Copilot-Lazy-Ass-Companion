@@ -371,9 +371,20 @@ class TurnArbiter {
         const selfOwned = !owner && selfUt ? this.lastTurnWithUtAt(sessBase, selfUt, evTs) : undefined;
         // requestIndex 命中已跟踪轮（含已答）→ 归该轮：同文答案的迟滞重投影带
         // 原 reqIdx 到达时新轮已开启，到达序会把它盖错 _ut 渲成串位泡（D12 BUG-2）。
-        // 仅在无 _ut/无钉主时用（自证优先）。-1 等无效值由 turnForRequestIndex 挡。
-        const idxOwned = !owner && !selfUt ? this.turnForRequestIndex(sessBase, reqIdx) : undefined;
-        let t = owned ?? selfOwned ?? idxOwned ?? this.openTurnForEvent(sessBase, evTs);
+        // -1 等无效值由 turnForRequestIndex 挡。
+        const idxOwned = !owner ? this.turnForRequestIndex(sessBase, reqIdx) : undefined;
+        // _ut 自证在同文连发下失效：多个轮共享同一 utKey，ts 解析会把第二轮的
+        // 帧归到已答的首轮而被 gotAgent/answered 门整条丢（R122：同文第 2 发
+        // 答案零广播）。reqIdx 命中轮是更强身份——它在时优先；ut 无歧义或
+        // reqIdx 落空时才退回 ts 归属。上游错标 reqIdx 的情形由后面的
+        // evTs<t.ts-2s 校正兜底（R119W）。
+        const ambiguousUt = selfUt != null &&
+            selfUt !== "" &&
+            this.openTurns.filter((ot) => ot.utKey === selfUt && this.turnMatchesSess(ot, sessBase)).length > 1;
+        const selfAmbig = selfOwned && (selfOwned.answered === true || ambiguousUt);
+        let t = owned ??
+            (selfAmbig ? (idxOwned ?? selfOwned) : (selfOwned ?? idxOwned)) ??
+            this.openTurnForEvent(sessBase, evTs);
         // reqIdx 自证可被上游错标（迟到的 transcript 帧被打上新轮的 requestIndex）：
         // 解析到的开启轮竟比事件还新（evTs 早于其开启 >2s）——改归事件发生时
         // 开启的同 ut 旧轮；没有则归还孤儿让调用点按迟到件丢（R119W 实测）。
@@ -607,7 +618,10 @@ class TurnArbiter {
                 }
                 // 归属到「已答轮」的流帧 = 已收尾轮的迟到重投影（同文重问时第二轮
                 // 开启后第一轮的 transcript 副本才到）——广播会渲串位泡（R119）。
-                if (t && t.answered)
+                // 但「被 DONE 提前判答、正文从未上过线」的轮（!gotAgent && !sawStream）
+                // 其真帧不是重投影——同文连发时中间轮 DONE 先到、答案帧后到，answered
+                // 单独判死会让真答零广播（R122）。只丢「已投过内容」的轮的迟到件。
+                if (t && t.answered && (t.gotAgent || t.sawStream))
                     return null;
                 if (t && (!ownerUt || t.utKey === ownerUt)) {
                     t.sawStream = true;
@@ -787,6 +801,30 @@ class TurnArbiter {
                             utKey = fifo.utKey;
                             ownerTurn = fifo;
                         }
+                    }
+                    else {
+                        // 同文连发的 sessiondb 行：_ut 在多个轮间无判别力，ts 归属会把
+                        // 中间轮的真行盖到已投过答案的首轮 → gotAgent 判死整条丢
+                        // （R122：同文第 2 发答案零广播）。行即轮次记录按序投影——
+                        // 有同 ut 未获答轮时 FIFO 归它；全部已获答才退回 ts 结果
+                        // （那种情形本就是重投影，交给 gotAgent 门丢）。
+                        let multi = false;
+                        let unserved;
+                        for (const ot of this.openTurns) {
+                            if (ot.utKey !== utKey || !this.turnMatchesSess(ot, sessBase))
+                                continue;
+                            if (!ot.gotAgent) {
+                                if (unserved)
+                                    multi = true;
+                                else
+                                    unserved = ot;
+                            }
+                            else if (!unserved) {
+                                multi = true;
+                            }
+                        }
+                        if (multi && unserved && ownerTurn !== unserved)
+                            ownerTurn = unserved;
                     }
                 }
                 if (ownerTurn) {
