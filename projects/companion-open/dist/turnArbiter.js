@@ -754,16 +754,21 @@ class TurnArbiter {
                 // 轮）——广播必渲成重复泡（stray bubble 实测 i=98 型）。
                 if (ownerTurn && ownerTurn.gotAgent)
                     return null;
-                // _ut 落空的迟到件：本会话轮次在册而该 _ut 无轮可配 → 错归属
-                // （transcript 帧 _ut 被上游错标上一段的旧文实测——i=92 型
-                // stray），广播只能落成游离泡。限迟到 >25s 的事件且会话有在册
-                // 轮——新轮首答/无 ts 的 MSG 不误伤。
+                // 无轮可配的迟到件：本会话轮次在册而该 MSG 归不到任何轮 → 错归属
+                // （transcript 帧 _ut 被上游错标上一段的旧文实测——i=92 型 stray；
+                // transcript MSG 天生无 _ut，归不到轮时同文重问下盖到在途新轮
+                // ——R120W 复测 prairie-1 迟到 MSG 渲在 prairie-2 下实测），广播
+                // 只能落成游离/串位泡。限迟到 >25s 的事件且会话有在册轮——新轮
+                // 首答/无 ts 的 MSG、以及 arbiter 重启后无册可参照的情形不误伤。
                 const evTsMsg = TurnArbiter.tsOf(ev);
                 if (!ownerTurn &&
-                    utKey &&
                     evTsMsg != null &&
                     now - evTsMsg > 25_000 &&
-                    this.openTurns.some((ot) => this.turnMatchesSess(ot, sessBase))) {
+                    // 覆盖门：会话在册轮 OR 无 sess 轮（手机发的轮在 boundSess 未定时
+                    // sess=''，turnMatchesSess 判不归属——R120W+1 实测同文重问下迟到
+                    // transcript MSG 借此洞逃逸广播成串位泡）。轮册全非空才可能是
+                    // 上游迟到重投影；空册（重启后）放行让回放/首答正常落。
+                    this.openTurns.some((ot) => this.turnMatchesSess(ot, sessBase) || !ot.sess)) {
                     return null;
                 }
                 break;
