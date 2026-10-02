@@ -686,6 +686,11 @@ export class TurnArbiter {
       case "AGENT_STREAM_END": {
         const sid = String(ev.streamId || "");
         if (sid) {
+          // 同一 sid 的 END 在 60s 内重投 = transcript/慢通道把已收尾流再投
+          // 一遍（实测发送后 ~2s 带单数位 ridx 的游离 END，无对应 START）——
+          // 客户端再收一遍会把它当新收尾信号处理。只放行首个 END。
+          const prevEnd = this.endedStreams.get(sid);
+          if (prevEnd != null && now - prevEnd < 60_000) return null;
           this.endedStreams.set(sid, now);
           if (this.endedStreams.size > 128) {
             for (const [k, ts] of this.endedStreams) {
@@ -1082,10 +1087,19 @@ export class TurnArbiter {
       // 副指纹按「轮次实例」判重而非 ut 文本：同一条答案经双通道重投，
       // 两副本都归同一个 TrackedTurn → 压；同题重问产生新轮，同文新答的
       // ownerTurn 不同 → 放行（R92：ut 键会把第二答当重投影吞掉）。
+      // 待批准卡的异构 id 副本：transcript/sessiondb 各投一遍但 cid 不同
+      // → c|sess|cid 两键各放行 → 双卡（R132 F5）。内容指纹 c2 跨通道判重；
+      // 同文案的真实新审批 >30s 窗不受影响（文案含命令/路径，异卡不同文）。
+      const confirmBody =
+        type === "AGENT_CONFIRM"
+          ? normText(`${ev.title || ""} ${ev.message || ""} ${ev.text || ""}`)
+          : "";
       const altKey =
         type === "AGENT_MESSAGE"
           ? `a2|${sessBase}|${normText(ev.text).slice(0, 80)}`
-          : null;
+          : type === "AGENT_CONFIRM" && confirmBody
+            ? `c2|${sessBase}|${confirmBody.slice(0, 80)}`
+            : null;
       // AGENT_CONFIRM 用 30s 窗：吃双通道同刻重投，但不误杀数分钟后同文案的
       // 真实新一轮待批准（同窗口只在「真·同一张卡」上才误伤）。
       const window =
@@ -1105,6 +1119,16 @@ export class TurnArbiter {
         typeof ev.requestIndex === "number" ? ev.requestIndex : null;
       const unproven = evReqIdx == null || evReqIdx < this.latestReqIdx;
       const hadOwnUt = typeof ev._ut === "string" && normText(ev._ut) !== "";
+      // 同文新轮的真答豁免纠偏：归属已解析到一个「事件发生时已存在的开启
+      // 轮」（源 ts ≥ 该轮创建——答案不可能先于问题产生），它不是旧轮重投
+      // 影；纠偏会把真答改写归旧轮后被 altDup 整条吞（R132 F2/F3：同文×N
+      // 连发时第 N 发答案+其 DONE 永久零广播，仅回放可愈）。
+      const evTsCorr = TurnArbiter.tsOf(ev);
+      const genuineNewTurn =
+        ownerTurn != null &&
+        ownerTurn.answered !== true &&
+        evTsCorr != null &&
+        evTsCorr >= (ownerTurn.ts || 0);
       if (
         type === "AGENT_MESSAGE" &&
         unproven &&
@@ -1112,7 +1136,8 @@ export class TurnArbiter {
         altPrev &&
         altPrev.turn != null &&
         ownerTurn !== altPrev.turn &&
-        now - altPrev.t <= window
+        now - altPrev.t <= window &&
+        !genuineNewTurn
       ) {
         utKey = altPrev.ut;
         ownerTurn = altPrev.turn;
@@ -1120,7 +1145,9 @@ export class TurnArbiter {
       const altDup =
         !!altPrev &&
         now - altPrev.t <= window &&
-        (altPrev.turn === ownerTurn || (altPrev.turn == null && ownerTurn == null && altPrev.ut === utKey));
+        (type === "AGENT_CONFIRM" ||
+          altPrev.turn === ownerTurn ||
+          (altPrev.turn == null && ownerTurn == null && altPrev.ut === utKey));
       // 再配一条「同文不同轮」指纹：旧轮答案经慢通道重投影时被盖上当轮的
       // _ut（openTurnForEvent 的 ts 门挡不住无 ts 的件），ut 不同但文本同。
       // 只在事件无法自证属于当前轮时启用（无 requestIndex 或下标落后）——
@@ -1148,9 +1175,9 @@ export class TurnArbiter {
       // 窗会被回放甩开）。live 卡不进此分支——30s 窗照常走 emitted 去重。
       if (
         type === "AGENT_CONFIRM" &&
-        key &&
         (ev.replayed || ev.history) &&
-        this.emittedConfirms.has(key)
+        ((key && this.emittedConfirms.has(key)) ||
+          (altKey && this.emittedConfirms.has(altKey)))
       ) {
         return null;
       }
@@ -1168,6 +1195,7 @@ export class TurnArbiter {
         if (altKey) this.emittedA2.set(altKey, { t: now, turn: ownerTurn, ut: utKey });
         if (reprojKey && utKey) this.emittedUt.set(reprojKey, utKey);
         if (type === "AGENT_CONFIRM" && key) this.emittedConfirms.add(key);
+        if (type === "AGENT_CONFIRM" && altKey) this.emittedConfirms.add(altKey);
       }
       if (type === "AGENT_MESSAGE") {
         this.markAnswered(sessBase, utKey);
