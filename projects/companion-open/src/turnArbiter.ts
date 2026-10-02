@@ -574,12 +574,14 @@ export class TurnArbiter {
           utKey,
           ev.requestIndex,
         );
-        if (!t && !ownerUt) {
+        if (!t) {
           // 孤儿流帧：归属不到任何开启轮。CHUNK 在「全轮已答」后到达 =
           // 已收尾轮的迟到重投影——客户端会为它新建永不收尾的 ghost 卡
           // （requests/N 投影在答案落线 ~55s 后补帧实测）。ts 早于开启轮
           // 的 START/SET 同理是旧轮迟到件。openTurns 全空不可判——放行，
-          // 以免吞掉 USER 尚未登记的桌面新轮。
+          // 以免吞掉 USER 尚未登记的桌面新轮。钉主(ownerUt)存在但无轮可
+          // 配同样按孤儿判——钉可能来自被上游错标 _ut 的首帧（实测
+          // transcript 帧带上一段旧文 _ut，sid 被钉到无该文的轮上）。
           const staleVsOpen =
             evTs != null && this.newestOpenTurn(sessBase) != null;
           // noOpenButKnown 需按会话数轮（openTurns 现跨切保留——别会话的轮
@@ -796,6 +798,24 @@ export class TurnArbiter {
         if (ownerTurn) {
           ownerTurn.sawStream = true;
           ownerTurn.lastAct = now;
+        }
+        // 已答且已投过答案的轮再进 MSG = 迟到重投影（transcript/requests
+        // 文件懒写把同一份答案再投一遍，上游 _ut/reqIdx 还可能错标到他
+        // 轮）——广播必渲成重复泡（stray bubble 实测 i=98 型）。
+        if (ownerTurn && ownerTurn.gotAgent) return null;
+        // _ut 落空的迟到件：本会话轮次在册而该 _ut 无轮可配 → 错归属
+        // （transcript 帧 _ut 被上游错标上一段的旧文实测——i=92 型
+        // stray），广播只能落成游离泡。限迟到 >25s 的事件且会话有在册
+        // 轮——新轮首答/无 ts 的 MSG 不误伤。
+        const evTsMsg = TurnArbiter.tsOf(ev);
+        if (
+          !ownerTurn &&
+          utKey &&
+          evTsMsg != null &&
+          now - evTsMsg > 25_000 &&
+          this.openTurns.some((ot) => this.turnMatchesSess(ot, sessBase))
+        ) {
+          return null;
         }
         break;
       }
