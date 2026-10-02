@@ -3424,7 +3424,7 @@
                     }
                     if (!queuedHintEl || !queuedHintEl.isConnected) queuedHintEl = addSys('已排队：当前回复结束后自动发送');
                     persistQueuedSends();
-                    try { flushSendQueue(); } catch (_) {}
+                    try { flushPendingSendQueue(); } catch (_) {}
                   } else {
                     // 冷启回填只填未被手动重发的项；已重发的同步从暂存销账
                     if (requeueQ.length && !(input.value || '').trim()) {
@@ -4371,6 +4371,23 @@
     } catch (_) { return false; }
   }
 
+  function queuePendingSend(queuedText) {
+    // 入队即渲泡（半透明排队态）：出队时复用同一元素转正常，不再「提示在泡不在」。
+    const qKey = `user:queued:${Date.now()}:${userTextDedupeKey(queuedText)}`;
+    const qEl = addUser(queuedText, qKey, { force: true, ts: Date.now() });
+    if (qEl) qEl.classList.add('queued');
+    pendingSendQueue.push({ text: queuedText, mode: modeEl.value || 'agent', el: qEl, key: qKey, at: Date.now(), sess: currentSessionMeta.file || '' });
+    persistQueuedSends();
+    input.value = '';
+    input.style.height = 'auto';
+    // 二次入队复用同一提示元素——覆盖引用会把上一条提示泄漏在 DOM 里（B4）。
+    if (queuedHintEl && queuedHintEl.isConnected) queuedHintEl.remove();
+    queuedHintEl = addSys('已排队：当前回复结束后自动发送');
+    // 排队也要回焦输入框——焦点留在按钮/正文上，下一次打字会被吃
+    // （输入为空时发送键还会武装成「停止」误杀在途轮，R104 B1）。
+    try { input.focus(); } catch (_) {}
+  }
+
   function doSend() {
     // 请求进行中：发送键已变成停止；但流已静默超阈值的僵尸态直接当作空闲
     if (requestRunning && lastStreamActivityAt && !parkedConfirmAlive() && Date.now() - lastStreamActivityAt > STREAM_STALE_MS) {
@@ -4380,20 +4397,7 @@
       // 有文本 = 排队发送（杀在途轮太狠）；空文本 = 停止（需双击确认）
       const queuedText = (input.value || '').trim();
       if (queuedText) {
-        // 入队即渲泡（半透明排队态）：出队时复用同一元素转正常，不再「提示在泡不在」。
-        const qKey = `user:queued:${Date.now()}:${userTextDedupeKey(queuedText)}`;
-        const qEl = addUser(queuedText, qKey, { force: true, ts: Date.now() });
-        if (qEl) qEl.classList.add('queued');
-        pendingSendQueue.push({ text: queuedText, mode: modeEl.value || 'agent', el: qEl, key: qKey, at: Date.now(), sess: currentSessionMeta.file || '' });
-        persistQueuedSends();
-        input.value = '';
-        input.style.height = 'auto';
-        // 二次入队复用同一提示元素——覆盖引用会把上一条提示泄漏在 DOM 里（B4）。
-        if (queuedHintEl && queuedHintEl.isConnected) queuedHintEl.remove();
-        queuedHintEl = addSys('已排队：当前回复结束后自动发送');
-        // 排队也要回焦输入框——焦点留在按钮/正文上，下一次打字会被吃
-        // （输入为空时发送键还会武装成「停止」误杀在途轮，R104 B1）。
-        try { input.focus(); } catch (_) {}
+        queuePendingSend(queuedText);
         return;
       }
       if (Date.now() < stopArmUntil) {
@@ -4416,6 +4420,13 @@
     }
     const text = (input.value || '').trim();
     if (!text) return;
+    if (pendingSendQueue.length) {
+      // 队列非空时不得直发插队：回填重挂的队列其 DONE 可能已被消费，
+      // 直发会让排队项永久停放并把乱序持久化进库（R138 FIFO 倒挂）。
+      queuePendingSend(text);
+      flushPendingSendQueue();
+      return;
+    }
     sendTextNow(text, modeEl.value || 'agent');
   }
 
