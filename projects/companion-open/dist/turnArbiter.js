@@ -536,6 +536,11 @@ class TurnArbiter {
                             continue;
                         if (evReq != null && ot.reqIdx != null && evReq !== ot.reqIdx)
                             continue;
+                        // 手机轮 reqIdx=null：文件通道同文重投影判死时回填真实
+                        // requestIndex——此后 requests/N 投影帧（thinking/答案）才能
+                        // 按 idx 命中本轮，不再落到最新开启轮（思考卡错锚实测）。
+                        if (evReq != null && evReq >= 0 && ot.reqIdx == null)
+                            ot.reqIdx = evReq;
                         return null;
                     }
                 }

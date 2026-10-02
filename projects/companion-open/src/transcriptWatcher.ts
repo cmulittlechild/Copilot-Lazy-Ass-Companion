@@ -2248,7 +2248,10 @@ export class TranscriptWatcher {
         text: reasoning,
         requestIndex: this.turnSeq,
         stepId: messageId ? 'think-' + messageId : undefined,
-      });
+        // _ut 打本轮问题：缺戳则仲裁层退回最新开启轮——steering 抢占后
+        // 旧轮的思考帧会被盖到新轮下渲染（实测 15% 思考挂 20% 泡）。
+        _ut: this.turnUt || this.activeUserText || undefined,
+      } as never);
     }
 
     // 0.5.24：收到任何 assistant.message 内容 → 取消 turn_start 超时（transcript 没断流）
@@ -2282,7 +2285,8 @@ export class TranscriptWatcher {
             text: content,
             requestIndex: this.turnSeq,
             stepId: messageId ? 'mono-' + messageId : undefined,
-          });
+            _ut: this.turnUt || this.activeUserText || undefined,
+          } as never);
         }
       } else {
         // 本 turn 的待答在「开问后」才被其它通道（chatSessions gap-fill 等）
