@@ -164,6 +164,78 @@ function replayTextKey(text) {
  */
 function buildReplayWithDbBackfill(hist, dbTurns, sid) {
     const out = hist.filter(Boolean); // eslint-disable-line @typescript-eslint/no-explicit-any
+    // requestIndex 归属修复：上游 journal 偶把前轮响应并进后一请求槽（同文
+    // 重问尤甚——db 侧还把前轮记成无响应，序位纠偏无 aKey 可锚）。响应块的
+    // requestIndex 与所在 USER 槽的 requestIndex 不同、且存在 requestIndex
+    // 相同且尚无答案的 USER 槽时，把整块（流壳+正文）挪过去（R118-2）。
+    const blockHasAnswer = (e) => {
+        const t = e?.type;
+        if (t === "AGENT_MESSAGE")
+            return true;
+        if (t === "AGENT_STREAM_SET" || t === "AGENT_STREAM_CHUNK") {
+            return String(e?.text || "").trim().length > 0;
+        }
+        return false;
+    };
+    for (let i = 0; i < out.length; i++) {
+        const e = out[i];
+        const t = e?.type;
+        if (!blockHasAnswer(e))
+            continue;
+        const ridx = typeof e?.requestIndex === "number" ? e.requestIndex : null;
+        if (ridx == null || ridx < 0)
+            continue;
+        let owner = -1;
+        for (let j = i - 1; j >= 0; j--) {
+            if (out[j]?.type === "USER_MESSAGE") {
+                owner = j;
+                break;
+            }
+        }
+        if (owner < 0)
+            continue;
+        const ownerIdx = typeof out[owner]?.requestIndex === "number" ? out[owner].requestIndex : null;
+        if (ownerIdx === ridx)
+            continue;
+        // 目标：requestIndex 相同且尚无答案的 USER 槽。
+        let target = -1;
+        for (let j = 0; j < out.length; j++) {
+            const u = out[j];
+            if (u?.type !== "USER_MESSAGE" || u.requestIndex !== ridx)
+                continue;
+            let answered = false;
+            for (let k = j + 1; k < out.length && out[k]?.type !== "USER_MESSAGE"; k++) {
+                if (blockHasAnswer(out[k])) {
+                    answered = true;
+                    break;
+                }
+            }
+            if (!answered) {
+                target = j;
+                break;
+            }
+        }
+        if (target < 0 || target === owner)
+            continue;
+        let lo = i;
+        while (lo - 1 > owner &&
+            out[lo - 1]?.type !== "USER_MESSAGE" &&
+            out[lo - 1]?.type !== "AGENT_STREAM_END") {
+            lo--;
+        }
+        let hi = i;
+        while (hi + 1 < out.length &&
+            out[hi + 1]?.type !== "USER_MESSAGE" &&
+            out[hi + 1]?.type !== "AGENT_STREAM_START") {
+            hi++;
+        }
+        const block = out.splice(lo, hi - lo + 1);
+        const ut = String(out[target]?.text ?? "");
+        for (const be of block)
+            be._ut = ut;
+        out.splice(target + 1, 0, ...block);
+        i = -1; // 下标已变，重头扫
+    }
     if (!dbTurns || !dbTurns.length || !sid)
         return out;
     // db 轮次在 [0..ri] 内同文 user_message 的序位（1 起）：同文连发时纯文本

@@ -2488,24 +2488,32 @@
             Number.isFinite(evTs) && Number.isFinite(lastUserTs) && evTs < lastUserTs - 2000;
           let oldTurnReproj =
             isStaleReplayEvent(evTs) || (predatesLatestUser && !utIsLatest) || (!requestRunning && !utIsLatest);
-          if (!oldTurnReproj && msg._ut) {
+          if (msg._ut) {
+            // _ut 可能命中多个同文用户泡（同题重问）：逐个判——任一匹配轮尚无真
+            // 答案，这条迟到件就是它的答案（R118-1：A2 与 A1 全同文，旧轮已答
+            // 不能误杀新轮未答）；全部匹配轮都已答 → 确属旧轮重投影，丢。
             const utKey2 = userTextDedupeKey(String(msg._ut));
+            let sawAnswered = false;
+            let sawUnanswered = false;
             for (let i = users.length - 1; i >= 0; i--) {
               if (users[i].dataset.textKey !== utKey2) continue;
               let sib = users[i].nextElementSibling;
+              let answered = false;
               while (sib && !sib.classList.contains('user')) {
                 // 只算真答案：thinking/孤儿占位等无正文块不算「该轮已答」
                 if (sib.classList.contains('agent') && !sib.dataset.orphanPh) {
                   const sb = sib.querySelector('.body');
-                  if (sb && String(sb.dataset.raw || '').trim()) { oldTurnReproj = true; break; }
+                  if (sb && String(sb.dataset.raw || '').trim()) { answered = true; break; }
                   const ssid = sib.dataset && sib.dataset.streamId;
                   const sst = ssid ? streamingTurns.get(ssid) : null;
-                  if (sst && String(sst.markdown || '').trim()) { oldTurnReproj = true; break; }
+                  if (sst && String(sst.markdown || '').trim()) { answered = true; break; }
                 }
                 sib = sib.nextElementSibling;
               }
-              break;
+              if (answered) sawAnswered = true; else sawUnanswered = true;
             }
+            if (sawUnanswered) oldTurnReproj = false;
+            else if (sawAnswered) oldTurnReproj = true;
           }
           if (oldTurnReproj) {
             clearTyping();
