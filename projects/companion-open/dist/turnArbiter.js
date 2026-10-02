@@ -548,6 +548,24 @@ class TurnArbiter {
                             ot.reqIdx = evReq;
                         return null;
                     }
+                    // 已答轮的迟到重投影：上游懒写（实测 ~85-106s）把早已收尾的轮的
+                    // USER 再投一遍——同文未答轮匹配落空后兜底：命中同文已答轮（reqIdx
+                    // 相同，或本侧未记录索引/事件未带索引）即判死丢弃。不重开幽灵在途
+                    // 轮——幽灵轮永无答案，inFlight 压住发送队列到 120s 收尸窗（实测
+                    // 排队卡 83s）。真同文重问走新 requestIndex，不受影响。
+                    for (const ot of this.openTurns) {
+                        if (!ot.answered)
+                            continue;
+                        if (sessBase && ot.sess && ot.sess !== sessBase)
+                            continue;
+                        if (ot.utKey !== t)
+                            continue;
+                        if (evReq != null && evReq >= 0 && ot.reqIdx != null && ot.reqIdx >= 0 && evReq !== ot.reqIdx)
+                            continue;
+                        if (evReq != null && evReq >= 0 && ot.reqIdx == null)
+                            ot.reqIdx = evReq;
+                        return null;
+                    }
                 }
                 const reqIdx = typeof ev.requestIndex === "number" ? ev.requestIndex : null;
                 if (reqIdx != null && reqIdx > this.latestReqIdx)
