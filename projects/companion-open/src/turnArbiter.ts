@@ -22,6 +22,11 @@ const INJECT_ACK_WINDOW_MS = 8_000;
 /** AGENT_MESSAGE 先行判答后，本轮自己的收尾 DONE 仍须放行（客户端拿它
     释放 requestRunning/出队排队消息）——只杀「轮已答很久/从未注册」的死件。 */
 const DONE_LATE_CLOSE_MS = 45_000;
+/** 已答轮收尾 >45s 后仍到达的 MSG/END/THINKING 帧 = transcript 懒写的
+    重投影（实测被停轮 ~3min 后 transcript 冲出 stray END+MSG，fresh
+    t-sid 不在 endedStreams 册上）——渲出来必是重复/游离泡。真答帧
+    迟到的轮（DONE 先行、sawStream/gotAgent 皆假）不受此门。 */
+const LATE_REPROJ_MS = 45_000;
 const MAX_TRACKED_TURNS = 64;
 /** 「在途」活性窗：开启轮这么久没有任何流/确认活动就不再对外声明
     inFlight——同文 USER 经慢通道在轮关闭后重投影会再开一个永不作答的
@@ -706,6 +711,13 @@ export class TurnArbiter {
             utKey,
             ev.requestIndex,
           );
+          if (
+            t &&
+            t.answered &&
+            t.answeredAt != null &&
+            now - t.answeredAt > LATE_REPROJ_MS
+          )
+            return null;
           if (t && (!ownerUt || t.utKey === ownerUt)) {
             t.sawStream = true;
             t.sawEnd = true;
@@ -789,6 +801,13 @@ export class TurnArbiter {
           ev.requestIndex,
         );
         const hadStream = t?.sawStream === true;
+        if (
+          t &&
+          t.answered &&
+          t.answeredAt != null &&
+          now - t.answeredAt > LATE_REPROJ_MS
+        )
+          return null;
         if (t && (!ownerUt || t.utKey === ownerUt)) {
           t.sawStream = true;
           t.lastAct = now;
@@ -905,6 +924,19 @@ export class TurnArbiter {
         // 文件懒写把同一份答案再投一遍，上游 _ut/reqIdx 还可能错标到他
         // 轮）——广播必渲成重复泡（stray bubble 实测 i=98 型）。
         if (ownerTurn && ownerTurn.gotAgent) return null;
+        // 已答轮收尾 >45s 后的首条 MSG：stop/DONE 判答后 transcript 懒写
+        // 把已流完的残篇再以新 sid 投一遍（R134：g2 停后 ~3min 的 MSG——
+        // gotAgent 为假盖不住，因该轮内容全走流通道）。已上线过内容的轮
+        // （sawStream/gotAgent）此时收到的必是重投影；DONE 先行而正文
+        // 从未上线的轮（R122 族）不拦。
+        if (
+          ownerTurn &&
+          ownerTurn.answered &&
+          ownerTurn.answeredAt != null &&
+          now - ownerTurn.answeredAt > LATE_REPROJ_MS &&
+          (ownerTurn.sawStream === true || ownerTurn.gotAgent === true)
+        )
+          return null;
         // 无轮可配的迟到件：本会话轮次在册而该 MSG 归不到任何轮 → 错归属
         // （transcript 帧 _ut 被上游错标上一段的旧文实测——i=92 型 stray；
         // transcript MSG 天生无 _ut，归不到轮时同文重问下盖到在途新轮
