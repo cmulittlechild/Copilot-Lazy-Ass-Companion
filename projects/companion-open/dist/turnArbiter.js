@@ -280,6 +280,27 @@ class TurnArbiter {
         }
         return undefined;
     }
+    /** _ut 归属的 ts 校正：同文重问使 ut 不唯一——「最新同 ut 轮」不一定是
+        帧所属轮，事件源 ts 早于某轮开启时刻 >2s 时它必不是归属（帧先于该
+        轮发生）。取事件发生时已开启的最晚同 ut 轮；evTs 缺失退回最新轮。
+        R119：上一轮答案的 transcript 帧迟到重投（ts 早于新轮开启）经
+        selfUt/owner 命中最新同 ut 轮，被盖到在途新轮下渲成串位泡。 */
+    lastTurnWithUtAt(sessBase, utKey, evTs) {
+        if (!utKey)
+            return undefined;
+        if (evTs == null)
+            return this.lastTurnWithUt(sessBase, utKey);
+        for (let i = this.openTurns.length - 1; i >= 0; i--) {
+            const t = this.openTurns[i];
+            if (sessBase && t.sess && t.sess !== sessBase)
+                continue;
+            if (t.utKey !== utKey)
+                continue;
+            if (t.ts <= evTs + 2_000)
+                return t;
+        }
+        return undefined;
+    }
     /** 归属判定用：事件自带源时间戳且早于最新未答轮的开启时刻 >2s → 上一轮
         经慢通道迟到的重投影，不归本轮（否则盖错 _ut，客户端把旧答案当本轮
         答案渲染出串位泡）。无 ts 的事件照常归属（只能靠到达序）。 */
@@ -313,15 +334,21 @@ class TurnArbiter {
     turnForStreamEvent(sessBase, evTs, sid, selfUt = "", reqIdx = undefined) {
         const pinKey = sid && sessBase ? `${sessBase}|${sid}` : "";
         const owner = pinKey ? this.streamOwnerUt.get(pinKey) || "" : "";
-        const owned = owner ? this.lastTurnWithUt(sessBase, owner) : undefined;
-        const selfOwned = !owner && selfUt ? this.lastTurnWithUt(sessBase, selfUt) : undefined;
+        const owned = owner ? this.lastTurnWithUtAt(sessBase, owner, evTs) : undefined;
+        const selfOwned = !owner && selfUt ? this.lastTurnWithUtAt(sessBase, selfUt, evTs) : undefined;
         // requestIndex 命中已跟踪轮（含已答）→ 归该轮：同文答案的迟滞重投影带
         // 原 reqIdx 到达时新轮已开启，到达序会把它盖错 _ut 渲成串位泡（D12 BUG-2）。
         // 仅在无 _ut/无钉主时用（自证优先）。-1 等无效值由 turnForRequestIndex 挡。
         const idxOwned = !owner && !selfUt ? this.turnForRequestIndex(sessBase, reqIdx) : undefined;
-        const t = owned ?? selfOwned ?? idxOwned ?? this.openTurnForEvent(sessBase, evTs);
+        let t = owned ?? selfOwned ?? idxOwned ?? this.openTurnForEvent(sessBase, evTs);
+        // reqIdx 自证可被上游错标（迟到的 transcript 帧被打上新轮的 requestIndex）：
+        // 解析到的开启轮竟比事件还新（evTs 早于其开启 >2s）——改归事件发生时
+        // 开启的同 ut 旧轮；没有则归还孤儿让调用点按迟到件丢（R119W 实测）。
+        if (t && !t.answered && evTs != null && evTs < t.ts - 2_000) {
+            t = this.lastTurnWithUtAt(sessBase, t.utKey, evTs);
+        }
         if (pinKey && !owner) {
-            const pin = owner || selfUt || (idxOwned ? idxOwned.utKey : "") || (t ? t.utKey : "");
+            const pin = owner || selfUt || (idxOwned && idxOwned === t ? idxOwned.utKey : "") || (t ? t.utKey : "");
             if (pin)
                 this.streamOwnerUt.set(pinKey, pin);
         }
@@ -532,6 +559,10 @@ class TurnArbiter {
                     if (type === "AGENT_STREAM_CHUNK" ? staleVsOpen || noOpenButKnown : staleVsOpen)
                         return null;
                 }
+                // 归属到「已答轮」的流帧 = 已收尾轮的迟到重投影（同文重问时第二轮
+                // 开启后第一轮的 transcript 副本才到）——广播会渲串位泡（R119）。
+                if (t && t.answered)
+                    return null;
                 if (t && (!ownerUt || t.utKey === ownerUt)) {
                     t.sawStream = true;
                     t.lastAct = now;
@@ -679,8 +710,11 @@ class TurnArbiter {
                 if (!utKey)
                     utKey = ownerUt || (t ? t.utKey : "");
                 // 去重归属：_ut 自证优先（已答轮也能反查回自己的实例）；
-                // 无 _ut 的才落到到达序最新未答轮。
-                ownerTurn = utKey ? this.lastTurnWithUt(sessBase, utKey) ?? t : t;
+                // 无 _ut 的才落到到达序最新未答轮。ts 校正使同文重问的迟到副本
+                // 归回事件发生时开启的同 ut 旧轮而非在途新轮（R119）。
+                ownerTurn = utKey
+                    ? this.lastTurnWithUtAt(sessBase, utKey, TurnArbiter.tsOf(ev)) ?? t
+                    : t;
                 if (String(ev.streamId || "").startsWith("sessiondb/")) {
                     // 行内容自洽：sessiondb 行的 _ut 来自 user_message 字段，但 Copilot
                     // 上游会把「被停在途生成」的内容写进下一请求的行（R109：K 被停后其
