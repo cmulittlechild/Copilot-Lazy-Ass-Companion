@@ -141,6 +141,98 @@ function buildReplayWithDbBackfill(
 ): Array<Record<string, unknown>> {
   const out = hist.filter(Boolean) as Array<Record<string, unknown>>; // eslint-disable-line @typescript-eslint/no-explicit-any
   if (!dbTurns || !dbTurns.length || !sid) return out;
+  // db 轮次在 [0..ri] 内同文 user_message 的序位（1 起）：同文连发时纯文本
+  // 就近匹配会把答案贴错泡（D12 BUG-1：上游 journal 把后轮答案并进前一
+  // 同文请求的槽位）——序位锚让它归到第 n 个同文 USER。
+  const sameTextOrd = (key: string, ri: number): number => {
+    let n = 0;
+    for (let i = 0; i <= ri; i++) {
+      if (replayTextKey(String(dbTurns[i]?.user_message || "")) === key) n++;
+    }
+    return n;
+  };
+  const nthUserPos = (key: string, n: number): number => {
+    for (let i = 0; i < out.length; i++) {
+      if (
+        out[i]?.type === "USER_MESSAGE" &&
+        replayTextKey(String((out[i] as { text?: unknown }).text || "")) === key &&
+        --n === 0
+      ) {
+        return i;
+      }
+    }
+    return -1;
+  };
+  // db 配对权威纠偏：上游 journal 可能把响应写进错的请求槽（同文连发时
+  // transcript 把后轮答案并进前一同文请求——D12 BUG-1）。对每条 db 轮：
+  // 定位 out 中其答案所在响应块当前挂在哪个 USER 下；与序位锚 USER 不符
+  // 就把整块（TYPING→STREAM 帧→MESSAGE→END）挪到正确 USER 之后。
+  for (let ri = 0; ri < dbTurns.length; ri++) {
+    const r = dbTurns[ri];
+    const uKey = replayTextKey(String(r.user_message || ""));
+    const aKey = replayTextKey(String(r.assistant_response || ""));
+    if (!uKey || !aKey) continue;
+    if (nthUserPos(uKey, sameTextOrd(uKey, ri)) < 0) continue;
+    for (let i = 0; i < out.length; i++) {
+      const e = out[i];
+      const t = e?.type;
+      if (
+        (t !== "AGENT_MESSAGE" && t !== "AGENT_STREAM_SET") ||
+        replayTextKey(String((e as { text?: unknown }).text || "")) !== aKey
+      ) {
+        continue;
+      }
+      let owner = -1;
+      for (let j = i - 1; j >= 0; j--) {
+        if (out[j]?.type === "USER_MESSAGE") {
+          owner = j;
+          break;
+        }
+      }
+      const anchor = nthUserPos(uKey, sameTextOrd(uKey, ri));
+      if (owner === anchor) break;
+      // 含 i 的完整响应块：回溯到上一 USER/STREAM_END 之后，前进到下一
+      // USER/STREAM_START 之前——流壳与正文同搬，不留残帧在错槽。
+      let lo = i;
+      while (
+        lo - 1 > owner &&
+        out[lo - 1]?.type !== "USER_MESSAGE" &&
+        out[lo - 1]?.type !== "AGENT_STREAM_END"
+      ) {
+        lo--;
+      }
+      let hi = i;
+      while (
+        hi + 1 < out.length &&
+        out[hi + 1]?.type !== "USER_MESSAGE" &&
+        out[hi + 1]?.type !== "AGENT_STREAM_START"
+      ) {
+        hi++;
+      }
+      const block = out.splice(lo, hi - lo + 1);
+      const ap = nthUserPos(uKey, sameTextOrd(uKey, ri));
+      // 归属戳一并改写：客户端 _ut 配对/分组以 user_message 为准。
+      for (const be of block) {
+        (be as { _ut?: unknown })._ut = String(r.user_message || "");
+      }
+      out.splice(ap >= 0 ? ap + 1 : out.length, 0, ...block);
+      if (ap >= 0) {
+        // 真答案归位后，该槽先前合成的「无回复」孤儿占位即错——移除。
+        for (let k = ap + 1 + block.length; k < out.length; k++) {
+          const oe = out[k];
+          if (oe?.type === "USER_MESSAGE") break;
+          if (
+            oe?.type === "AGENT_MESSAGE" &&
+            String((oe as { streamId?: unknown }).streamId || "").startsWith("orphan/")
+          ) {
+            out.splice(k, 1);
+            k--;
+          }
+        }
+      }
+      break;
+    }
+  }
   const seen = new Set(
     out
       .filter((e) => e?.type === "AGENT_MESSAGE")
@@ -160,41 +252,36 @@ function buildReplayWithDbBackfill(
       timestamp: Date.now(),
       _ut: r.user_message || undefined,
     };
-    // 找该回答所属的用户消息位置：最后一个与该 user_message 同文的 USER_MESSAGE
+    // 找该回答所属的用户消息位置：同文消息按 db 轮次序位锚（第 n 个同文
+    // USER）——「最后一个同文」对同文连发会把前轮的答贴到后轮下。
     const uKey = replayTextKey(String(r.user_message || ""));
     let inserted = false;
     if (uKey) {
-      for (let i = out.length - 1; i >= 0; i--) {
-        const e = out[i];
-        if (
-          e?.type === "USER_MESSAGE" &&
-          replayTextKey(String((e as { text?: string }).text || "")) === uKey
-        ) {
-          // 该轮到下一条 USER 之间已有助手回复（文件投影或先补全）→ 跳过。
-          // sessiondb 与文件投影的文本形态常异构（含/不含文件名引用等），
-          // 纯文本 key 去重会漏 → 同一条答案双投成相邻两块。
-          // 只认有正文的答：失败轮只剩 START+END 空流壳，生命周期标记不算已答。
-          let answered = false;
-          for (let j = i + 1; j < out.length; j++) {
-            const t = out[j]?.type;
-            if (t === "USER_MESSAGE") break;
-            if (t === "AGENT_MESSAGE") {
-              answered = true;
-              break;
-            }
-            if (
-              (t === "AGENT_STREAM_SET" || t === "AGENT_STREAM_CHUNK") &&
-              typeof (out[j] as { text?: unknown })?.text === "string" &&
-              String((out[j] as { text?: unknown }).text).trim().length > 0
-            ) {
-              answered = true;
-              break;
-            }
+      const i = nthUserPos(uKey, sameTextOrd(uKey, ri));
+      if (i >= 0) {
+        // 该轮到下一条 USER 之间已有助手回复（文件投影或先补全）→ 跳过。
+        // sessiondb 与文件投影的文本形态常异构（含/不含文件名引用等），
+        // 纯文本 key 去重会漏 → 同一条答案双投成相邻两块。
+        // 只认有正文的答：失败轮只剩 START+END 空流壳，生命周期标记不算已答。
+        let answered = false;
+        for (let j = i + 1; j < out.length; j++) {
+          const t = out[j]?.type;
+          if (t === "USER_MESSAGE") break;
+          if (t === "AGENT_MESSAGE") {
+            answered = true;
+            break;
           }
-          if (!answered) out.splice(i + 1, 0, ev);
-          inserted = true;
-          break;
+          if (
+            (t === "AGENT_STREAM_SET" || t === "AGENT_STREAM_CHUNK") &&
+            typeof (out[j] as { text?: unknown })?.text === "string" &&
+            String((out[j] as { text?: unknown }).text).trim().length > 0
+          ) {
+            answered = true;
+            break;
+          }
         }
+        if (!answered) out.splice(i + 1, 0, ev);
+        inserted = true;
       }
     }
     if (!inserted) {

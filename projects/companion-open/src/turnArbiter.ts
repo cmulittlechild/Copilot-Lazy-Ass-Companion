@@ -317,6 +317,19 @@ export class TurnArbiter {
     return t;
   }
 
+  /** requestIndex 命中已跟踪轮（含已答/已收尾）→ 归该轮。迟到重投影不会
+      错挂到在途轮（D12 BUG-2：同文答案迟滞副本盖在途轮 _ut 逃逸出泡）。 */
+  private turnForRequestIndex(
+    sessBase: string,
+    reqIdx: unknown,
+  ): TrackedTurn | undefined {
+    if (typeof reqIdx !== "number" || reqIdx < 0) return undefined;
+    for (const t of this.openTurns) {
+      if (t.reqIdx === reqIdx && this.turnMatchesSess(t, sessBase)) return t;
+    }
+    return undefined;
+  }
+
   /**
    * sid 归属钉住：首帧把 streamId 钉到当时归属轮；之后同 sid 的帧（即使
    * 到达时更新轮已开启）一律钉回原轮。返回 {t, ownerUt}——ownerUt 是
@@ -330,14 +343,21 @@ export class TurnArbiter {
     evTs: number | null,
     sid: string,
     selfUt = "",
+    reqIdx: unknown = undefined,
   ): { t: TrackedTurn | undefined; ownerUt: string } {
     const pinKey = sid && sessBase ? `${sessBase}|${sid}` : "";
     const owner = pinKey ? this.streamOwnerUt.get(pinKey) || "" : "";
     const owned = owner ? this.lastTurnWithUt(sessBase, owner) : undefined;
     const selfOwned = !owner && selfUt ? this.lastTurnWithUt(sessBase, selfUt) : undefined;
-    const t = owned ?? selfOwned ?? this.openTurnForEvent(sessBase, evTs);
+    // requestIndex 命中已跟踪轮（含已答）→ 归该轮：同文答案的迟滞重投影带
+    // 原 reqIdx 到达时新轮已开启，到达序会把它盖错 _ut 渲成串位泡（D12 BUG-2）。
+    // 仅在无 _ut/无钉主时用（自证优先）。-1 等无效值由 turnForRequestIndex 挡。
+    const idxOwned =
+      !owner && !selfUt ? this.turnForRequestIndex(sessBase, reqIdx) : undefined;
+    const t = owned ?? selfOwned ?? idxOwned ?? this.openTurnForEvent(sessBase, evTs);
     if (pinKey && !owner) {
-      const pin = owner || selfUt || (t ? t.utKey : "");
+      const pin =
+        owner || selfUt || (idxOwned ? idxOwned.utKey : "") || (t ? t.utKey : "");
       if (pin) this.streamOwnerUt.set(pinKey, pin);
     }
     if (this.streamOwnerUt.size > 512) {
@@ -520,7 +540,13 @@ export class TurnArbiter {
         // 广播出去会重新武装 rr 并渲第二份答文——直接丢（R64/R33 同族）。
         const evTs = TurnArbiter.tsOf(ev);
         if (evTs != null && now - evTs > 30_000) return null;
-        const { t, ownerUt } = this.turnForStreamEvent(sessBase, evTs, sid, utKey);
+        const { t, ownerUt } = this.turnForStreamEvent(
+          sessBase,
+          evTs,
+          sid,
+          utKey,
+          ev.requestIndex,
+        );
         if (!t && !ownerUt) {
           // 孤儿流帧：归属不到任何开启轮。CHUNK 在「全轮已答」后到达 =
           // 已收尾轮的迟到重投影——客户端会为它新建永不收尾的 ghost 卡
@@ -563,6 +589,7 @@ export class TurnArbiter {
             TurnArbiter.tsOf(ev),
             sid,
             utKey,
+            ev.requestIndex,
           );
           if (t && (!ownerUt || t.utKey === ownerUt)) {
             t.sawStream = true;
@@ -627,6 +654,7 @@ export class TurnArbiter {
           TurnArbiter.tsOf(ev),
           String(ev.streamId || ""),
           utKey,
+          ev.requestIndex,
         );
         if (t && (!ownerUt || t.utKey === ownerUt)) {
           t.sawStream = true;
@@ -643,6 +671,7 @@ export class TurnArbiter {
           evTs,
           String(ev.streamId || ""),
           utKey,
+          ev.requestIndex,
         );
         const hadStream = t?.sawStream === true;
         if (t && (!ownerUt || t.utKey === ownerUt)) {
@@ -698,6 +727,7 @@ export class TurnArbiter {
           TurnArbiter.tsOf(ev),
           String(ev.streamId || ""),
           utKey,
+          ev.requestIndex,
         );
         if (!utKey) utKey = ownerUt || (t ? t.utKey : "");
         // 去重归属：_ut 自证优先（已答轮也能反查回自己的实例）；

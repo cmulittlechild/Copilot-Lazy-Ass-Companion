@@ -25,6 +25,10 @@ const INJECT_ACK_WINDOW_MS = 8_000;
     释放 requestRunning/出队排队消息）——只杀「轮已答很久/从未注册」的死件。 */
 const DONE_LATE_CLOSE_MS = 45_000;
 const MAX_TRACKED_TURNS = 64;
+/** 「在途」活性窗：开启轮这么久没有任何流/确认活动就不再对外声明
+    inFlight——同文 USER 经慢通道在轮关闭后重投影会再开一个永不作答的
+    幽灵轮，按它声明会让客户端发送键卡死「停止」~75s（R116 S2）。 */
+const INFLIGHT_ALIVE_MS = 120_000;
 function normText(t) {
     return String(t ?? "")
         .replace(/\s+/g, " ")
@@ -83,11 +87,15 @@ class TurnArbiter {
         return ts === sessBase;
     }
     /** 当前 sess 的未答开启轮 USER 事件（全文）：供回放尾部补投未落盘的
-        pending 轮 USER（桌面发出的轮 PWA 端无 sentAwaitingReply 备份）。 */
+        pending 轮 USER（桌面发出的轮 PWA 端无 sentAwaitingReply 备份）。
+        幽灵轮（关闭后重投影再开、永不作答）按活性窗排除，不回放幽灵泡。 */
     pendingUserEvents(sessBase) {
         const out = [];
+        const now = Date.now();
         for (const t of this.openTurns) {
             if (t.answered || !t.text)
+                continue;
+            if (!this.turnAlive(t, now))
                 continue;
             // 严格会话匹配：sess 缺失的轮（手机发出）视同属于绑定会话，
             // 只在回放目标恰是绑定会话时才补投——不再漏进别会话 feed。
@@ -139,11 +147,28 @@ class TurnArbiter {
         }
         return out;
     }
+    /** 开启轮是否「观测上仍活着」：待批准 parked 轮天然静默豁免；其余按
+        最近活动时间窗判（R116 S2：幽灵轮据此不再劫持 inFlight 声明）。 */
+    turnAlive(t, now) {
+        if (t.hasConfirm)
+            return true;
+        return now - (t.lastAct ?? t.ts) < INFLIGHT_ALIVE_MS;
+    }
     /** 该会话最新未答开启轮（在途轮）：回放据此声明 in-flight 态，让客户端
-        维持发送排队而不把在途轮当已完成（R107 BUG-1）。 */
+        维持发送排队而不把在途轮当已完成（R107 BUG-1）。只声明活着的轮。 */
     openTurnForSession(sessBase) {
-        const t = this.newestOpenTurn(sessBase);
-        return t ? { utKey: t.utKey, ts: t.ts } : null;
+        const now = Date.now();
+        for (let i = this.openTurns.length - 1; i >= 0; i--) {
+            const t = this.openTurns[i];
+            if (t.answered)
+                continue;
+            if (sessBase && t.sess && t.sess !== sessBase)
+                continue;
+            if (!this.turnAlive(t, now))
+                continue;
+            return { utKey: t.utKey, ts: t.ts };
+        }
+        return null;
     }
     /** 取出并清空合成待投事件队列。 */
     drainSynthetic() {
@@ -266,18 +291,40 @@ class TurnArbiter {
             return undefined;
         return t;
     }
+    /** requestIndex 命中已跟踪轮（含已答/已收尾）→ 归该轮。迟到重投影不会
+        错挂到在途轮（D12 BUG-2：同文答案迟滞副本盖在途轮 _ut 逃逸出泡）。 */
+    turnForRequestIndex(sessBase, reqIdx) {
+        if (typeof reqIdx !== "number" || reqIdx < 0)
+            return undefined;
+        for (const t of this.openTurns) {
+            if (t.reqIdx === reqIdx && this.turnMatchesSess(t, sessBase))
+                return t;
+        }
+        return undefined;
+    }
     /**
      * sid 归属钉住：首帧把 streamId 钉到当时归属轮；之后同 sid 的帧（即使
      * 到达时更新轮已开启）一律钉回原轮。返回 {t, ownerUt}——ownerUt 是
      * 钉住的 ut（归属轮可能已被修剪只剩 ut 戳），用它盖戳优先于 t.utKey。
+     * selfUt：事件自带的 _ut 自证——比到达序最新轮更可信，钉 sid 时优先
+     * （R116 S1：停轮后上游续生成的流帧经 transcript 迟到，AGENT_MESSAGE
+     * 自证 ut=K 却把 sid 钉到了刚开启的 L，同 sid 后续 END 帧被盖错 L 戳）。
      */
-    turnForStreamEvent(sessBase, evTs, sid) {
+    turnForStreamEvent(sessBase, evTs, sid, selfUt = "", reqIdx = undefined) {
         const pinKey = sid && sessBase ? `${sessBase}|${sid}` : "";
         const owner = pinKey ? this.streamOwnerUt.get(pinKey) || "" : "";
         const owned = owner ? this.lastTurnWithUt(sessBase, owner) : undefined;
-        const t = owned ?? this.openTurnForEvent(sessBase, evTs);
-        if (t && pinKey && !owner)
-            this.streamOwnerUt.set(pinKey, t.utKey);
+        const selfOwned = !owner && selfUt ? this.lastTurnWithUt(sessBase, selfUt) : undefined;
+        // requestIndex 命中已跟踪轮（含已答）→ 归该轮：同文答案的迟滞重投影带
+        // 原 reqIdx 到达时新轮已开启，到达序会把它盖错 _ut 渲成串位泡（D12 BUG-2）。
+        // 仅在无 _ut/无钉主时用（自证优先）。-1 等无效值由 turnForRequestIndex 挡。
+        const idxOwned = !owner && !selfUt ? this.turnForRequestIndex(sessBase, reqIdx) : undefined;
+        const t = owned ?? selfOwned ?? idxOwned ?? this.openTurnForEvent(sessBase, evTs);
+        if (pinKey && !owner) {
+            const pin = owner || selfUt || (idxOwned ? idxOwned.utKey : "") || (t ? t.utKey : "");
+            if (pin)
+                this.streamOwnerUt.set(pinKey, pin);
+        }
         if (this.streamOwnerUt.size > 512) {
             let n = 0;
             for (const k of this.streamOwnerUt.keys()) {
@@ -409,6 +456,7 @@ class TurnArbiter {
                     reqIdx,
                     answered: false,
                     text: typeof ev.text === "string" ? ev.text : undefined,
+                    lastAct: now,
                 };
                 // sess 缺失 = 手机发出的轮（watcher 事件恒带文件戳）——归到绑定会话，
                 // 否则 openTurns 里 sess='' 的轮跨会话泄漏（pendingUserEvents/R96）。
@@ -469,7 +517,7 @@ class TurnArbiter {
                 const evTs = TurnArbiter.tsOf(ev);
                 if (evTs != null && now - evTs > 30_000)
                     return null;
-                const { t, ownerUt } = this.turnForStreamEvent(sessBase, evTs, sid);
+                const { t, ownerUt } = this.turnForStreamEvent(sessBase, evTs, sid, utKey, ev.requestIndex);
                 if (!t && !ownerUt) {
                     // 孤儿流帧：归属不到任何开启轮。CHUNK 在「全轮已答」后到达 =
                     // 已收尾轮的迟到重投影——客户端会为它新建永不收尾的 ghost 卡
@@ -484,8 +532,10 @@ class TurnArbiter {
                     if (type === "AGENT_STREAM_CHUNK" ? staleVsOpen || noOpenButKnown : staleVsOpen)
                         return null;
                 }
-                if (t && (!ownerUt || t.utKey === ownerUt))
+                if (t && (!ownerUt || t.utKey === ownerUt)) {
                     t.sawStream = true;
+                    t.lastAct = now;
+                }
                 if (!utKey)
                     utKey = ownerUt || (t ? t.utKey : "");
                 break;
@@ -502,10 +552,11 @@ class TurnArbiter {
                     }
                 }
                 {
-                    const { t, ownerUt } = this.turnForStreamEvent(sessBase, TurnArbiter.tsOf(ev), sid);
+                    const { t, ownerUt } = this.turnForStreamEvent(sessBase, TurnArbiter.tsOf(ev), sid, utKey, ev.requestIndex);
                     if (t && (!ownerUt || t.utKey === ownerUt)) {
                         t.sawStream = true;
                         t.sawEnd = true;
+                        t.lastAct = now;
                     }
                     if (!utKey)
                         utKey = ownerUt || (t ? t.utKey : "");
@@ -549,6 +600,7 @@ class TurnArbiter {
                 const t = this.openTurnForEvent(sessBase, evTs);
                 if (t) {
                     t.sawStream = true;
+                    t.lastAct = now;
                     if (!utKey)
                         utKey = t.utKey;
                     if (tidPin && sessBase && !evComplete) {
@@ -561,9 +613,11 @@ class TurnArbiter {
             case "THINKING_START":
             case "THINKING_END":
             case "COPILOT_TYPING": {
-                const { t, ownerUt } = this.turnForStreamEvent(sessBase, TurnArbiter.tsOf(ev), String(ev.streamId || ""));
-                if (t && (!ownerUt || t.utKey === ownerUt))
+                const { t, ownerUt } = this.turnForStreamEvent(sessBase, TurnArbiter.tsOf(ev), String(ev.streamId || ""), utKey, ev.requestIndex);
+                if (t && (!ownerUt || t.utKey === ownerUt)) {
                     t.sawStream = true;
+                    t.lastAct = now;
+                }
                 if (!utKey)
                     utKey = ownerUt || (t ? t.utKey : "");
                 break;
@@ -571,10 +625,12 @@ class TurnArbiter {
             case "THINKING_STEP":
             case "PROGRESS_STEP": {
                 const evTs = TurnArbiter.tsOf(ev);
-                const { t, ownerUt } = this.turnForStreamEvent(sessBase, evTs, String(ev.streamId || ""));
+                const { t, ownerUt } = this.turnForStreamEvent(sessBase, evTs, String(ev.streamId || ""), utKey, ev.requestIndex);
                 const hadStream = t?.sawStream === true;
-                if (t && (!ownerUt || t.utKey === ownerUt))
+                if (t && (!ownerUt || t.utKey === ownerUt)) {
                     t.sawStream = true;
+                    t.lastAct = now;
+                }
                 if (!utKey)
                     utKey = ownerUt || (t ? t.utKey : "");
                 if (!t && !ownerUt && evTs != null && this.newestOpenTurn(sessBase)) {
@@ -611,6 +667,7 @@ class TurnArbiter {
                 const t = this.openTurnForEvent(sessBase, TurnArbiter.tsOf(ev));
                 if (t) {
                     t.hasConfirm = true;
+                    t.lastAct = now;
                     t.confirmId = String(ev.toolCallId || ev.confirmId || ev.requestId || ev.id || "") || t.confirmId;
                     if (!utKey)
                         utKey = t.utKey;
@@ -618,7 +675,7 @@ class TurnArbiter {
                 break;
             }
             case "AGENT_MESSAGE": {
-                const { t, ownerUt } = this.turnForStreamEvent(sessBase, TurnArbiter.tsOf(ev), String(ev.streamId || ""));
+                const { t, ownerUt } = this.turnForStreamEvent(sessBase, TurnArbiter.tsOf(ev), String(ev.streamId || ""), utKey, ev.requestIndex);
                 if (!utKey)
                     utKey = ownerUt || (t ? t.utKey : "");
                 // 去重归属：_ut 自证优先（已答轮也能反查回自己的实例）；
@@ -652,8 +709,10 @@ class TurnArbiter {
                         }
                     }
                 }
-                if (ownerTurn)
+                if (ownerTurn) {
                     ownerTurn.sawStream = true;
+                    ownerTurn.lastAct = now;
+                }
                 break;
             }
             case "COPILOT_DONE": {
