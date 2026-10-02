@@ -945,16 +945,54 @@
     return false;
   }
 
+  /** _ut 命中的同文 user 泡可能不止一个（同题重问）：归属选「最早尚无真答案」
+      的同文轮——与服务端 FIFO 收尾同序（markAnswered 只关最老匹配轮）。
+      evTs（事件源 ts）做窗口约束：
+        - 活着的未答轮：事件早于它开启 (>2s) → 不归它，跳过；
+        - 已挂孤儿占位的「判死」轮：上游静默取代后答案会迟到——事件 ts 落在
+          它窗口内（自己的 ts ≤ evTs < 下一个 user 的 ts）仍可认领该答案。
+      已答轮一律跳过（同文答案重投影归到最早未答轮）。全落选时回退最新
+      同文泡（迟到重投影照旧走上层判死/去重路）。 */
+  function pickUtOwner(users, want, evTs) {
+    const ev = Number(evTs);
+    const hasEv = Number.isFinite(ev) && ev > 0;
+    let last = null, firstOpen = null;
+    for (let i = 0; i < users.length; i++) {
+      const u = users[i];
+      if (u.dataset.textKey !== want) continue;
+      last = u;
+      if (turnHasOtherAnswer(u, undefined)) continue;
+      let dead = false;
+      for (let n = u.nextElementSibling; n && !n.classList.contains('user'); n = n.nextElementSibling) {
+        if (n.classList && n.classList.contains('agent') && n.dataset.orphanPh) { dead = true; break; }
+      }
+      const uts = Number(u.dataset.ts);
+      if (dead) {
+        if (hasEv && Number.isFinite(uts) && ev >= uts - 2000) {
+          let nxt = NaN;
+          for (let j = i + 1; j < users.length; j++) {
+            const t2 = Number(users[j].dataset.ts);
+            if (Number.isFinite(t2) && t2 > 0) { nxt = t2; break; }
+          }
+          if (!Number.isFinite(nxt) || ev < nxt - 2000) return u;
+        }
+        continue;
+      }
+      if (hasEv && Number.isFinite(uts) && uts > ev + 2000) continue;
+      if (!firstOpen) firstOpen = u;
+    }
+    return firstOpen || last;
+  }
+
   /** 归属 user 泡（与 appendFeedChronological 的 owner 判定一致）：
-      ut 文本键优先（最后一条同文 user），否则最后一个 ts ≤ t 的 user，
+      ut 文本键优先（最早未答同文 user），否则最后一个 ts ≤ t 的 user，
       均无则取末尾 user。 */
   function ownerUserFor(ut, ts) {
     const users = feed.querySelectorAll('.msg.user');
     if (ut) {
       const want = userTextDedupeKey(String(ut));
-      for (let i = users.length - 1; i >= 0; i--) {
-        if (users[i].dataset.textKey === want) return users[i];
-      }
+      const o = pickUtOwner(users, want, ts);
+      if (o) return o;
     }
     const t = Number(ts);
     if (Number.isFinite(t) && t > 0) {
@@ -997,6 +1035,31 @@
       if (st && String(st.markdown || '').trim() === want) return true;
     }
     return false;
+  }
+
+  /** ansText 已渲染于某个 user 轮下时，同问（同 textKey）轮里是否还有待答者：
+      返回最早未答且未死的同文 user 泡，无则 null。同题重问时新一轮的同文答案
+      不是重投影——上游同题合并语义会原样重发同文答案，压制让新轮裸奔
+      （R122W-3：t1m097 被 answerUnderUser/agentTextRendered 吞 → U2 空槽 →
+      U3 的流错锚到 U2）。仅判同问轮，异问的同文答案（"ok"式）照旧去重。 */
+  function sameQuestionAwaiting(ansText, evTs) {
+    const want = String(ansText || '').trim();
+    if (!want) return null;
+    const keys = new Set();
+    feed.querySelectorAll('.msg.agent .body').forEach((b) => {
+      if (String(b.dataset.raw || '') !== want) return;
+      let u = b.closest('.msg.agent');
+      while (u && !u.classList.contains('user')) u = u.previousElementSibling;
+      if (u && u.dataset && u.dataset.textKey) keys.add(u.dataset.textKey);
+    });
+    if (!keys.size) return null;
+    const users = feed.querySelectorAll('.msg.user');
+    for (const k of keys) {
+      const o = pickUtOwner(users, k, evTs);
+      // pickUtOwner 全落选时回退末位同文泡——那不算「待答」，须再验它无真答案
+      if (o && !turnHasOtherAnswer(o, undefined)) return o;
+    }
+    return null;
   }
 
 
@@ -1101,7 +1164,7 @@
    * R93：agent/tool 元素可携带 _ut（归属用户文）——同题重问时 ts 会归属错轮
    * （事件源 ts 与客户端泡 ts 不同时钟），按 ut 文本键锁到最后一条同名用户泡。
    */
-  function appendFeedChronological(el, ts, ut) {
+  function appendFeedChronological(el, ts, ut, ownerEl) {
     if (!el || !feed) return;
     const t = typeof ts === 'number' && Number.isFinite(ts) ? ts : Number(ts);
     // ts 戳与插入顺序无关——回放元素也打：全 feed 无 ts 节点时，后续 live 事件
@@ -1109,19 +1172,17 @@
     // sessiondb 迟到对永久挂底）。
     if (Number.isFinite(t) && t > 0) el.dataset.ts = String(t);
     // 回放期间：projectHistory 已排好顺序，直接 append
-    if (replaying || replayingInstant) {
+    if (replaying || replayingInstant) {
       feed.appendChild(el);
       return;
     }
     const isAgent = el.classList && (el.classList.contains('agent') || el.classList.contains('tool-card'));
     if (isAgent) {
       const users = feed.querySelectorAll('.msg.user');
-      let owner = null;
-      if (ut) {
+      let owner = ownerEl || null;
+      if (!owner && ut) {
         const want = userTextDedupeKey(String(ut));
-        for (let i = users.length - 1; i >= 0; i--) {
-          if (users[i].dataset.textKey === want) { owner = users[i]; break; }
-        }
+        owner = pickUtOwner(users, want, t);
       }
       if (!owner && Number.isFinite(t) && t > 0) {
         for (let i = users.length - 1; i >= 0; i--) {
@@ -1142,10 +1203,17 @@
         }
         if (at.nextSibling) feed.insertBefore(el, at.nextSibling);
         else feed.appendChild(el);
+        // 判死轮回魂：真答案锚到挂了孤儿占位的轮下时，占位作废摘除
+        // （上游静默取代后答案迟到——占位画完答案才到）。
+        if (el.classList.contains('agent') && !el.classList.contains('typing-row')) {
+          for (let m = owner.nextElementSibling; m && !m.classList.contains('user'); m = m.nextElementSibling) {
+            if (m !== el && m.classList.contains('agent') && m.dataset.orphanPh) { try { m.remove(); } catch (_) {} }
+          }
+        }
         return;
       }
     }
-    if (!Number.isFinite(t) || t <= 0) {
+    if (!Number.isFinite(t) || t <= 0) {
       feed.appendChild(el);
       return;
     }
@@ -1160,7 +1228,7 @@
         // 继续向前，找到第一个 <= t 的后面
         continue;
       }
-      // n.ts <= t → 插到 n 后面
+      // n.ts <= t → 插到 n 后面
       if (n.nextSibling) feed.insertBefore(el, n.nextSibling);
       else feed.appendChild(el);
       return;
@@ -1246,7 +1314,7 @@
     content.append(meta, bubble);
     row.append(avatar, content);
     el.appendChild(row);
-    appendFeedChronological(el, opts && (opts.ts != null ? opts.ts : opts.timestamp), opts && opts.ut);
+    appendFeedChronological(el, opts && (opts.ts != null ? opts.ts : opts.timestamp), opts && opts.ut, opts && opts.anchorUser);
 
     entry = {
       id,
@@ -1374,13 +1442,15 @@
     // 同文——后者兜住「归属泡是未答排队泡」的盲区：旧轮帧按 ts 归到最新未答
     // 泡下，owner 轮无答案 → 漏压制 → 旧答案建成新卡（实测僵尸流双渲+重挂
     // rr 顶队列 ~80s）。带 _ut 的帧照旧只查归属轮，同题重问的新轮不误杀。
+    const waiting = sameQuestionAwaiting(text, ts);
     if (!streamingTurns.get(sid) && !replaying && !replayingInstant &&
         (answerUnderUser(ownerUserFor(ut, ts), text) ||
-         (!ut && agentTextRendered(String(text || '').trim())))) {
+         (!ut && agentTextRendered(String(text || '').trim()))) &&
+        !waiting) {
       suppressedStreams.set(sid, String(text || ''));
       return;
     }
-    const entry = startAssistantTurn(sid, { ts: ts, ut: ut });
+    const entry = startAssistantTurn(sid, { ts: ts, ut: ut, anchorUser: waiting });
     entry.markdown = String(text || '');
     if (ts != null && entry.element) entry.element.dataset.ts = String(ts);
     renderEntryBody(entry);
@@ -1393,13 +1463,15 @@
       suppressedStreams.set(sid, (suppressedStreams.get(sid) || '') + String(chunk || ''));
       return;
     }
+    let waiting = null;
     if (!streamingTurns.get(sid) && !replaying && !replayingInstant &&
         (answerUnderUser(ownerUserFor(ut, ts), chunk) ||
-         (!ut && agentTextRendered(String(chunk || '').trim())))) {
+         (!ut && agentTextRendered(String(chunk || '').trim()))) &&
+        !(waiting = sameQuestionAwaiting(chunk, ts))) {
       suppressedStreams.set(sid, String(chunk || ''));
       return;
     }
-    const entry = startAssistantTurn(sid, { ts: ts, ut: ut });
+    const entry = startAssistantTurn(sid, { ts: ts, ut: ut, anchorUser: waiting });
     if (ts != null && entry.element && !entry.element.dataset.ts) entry.element.dataset.ts = String(ts);
     entry.markdown += String(chunk || '');
     scheduleStreamFlush(entry);
@@ -2856,6 +2928,58 @@
                 if (bd && String(bd.dataset.raw || bd.textContent || '').trim()) { hasContent = true; break; }
               }
             }
+            // 答案倒挂修复：排队/回声滞后让 user 泡比答案晚渲时，答案会堆到
+            // 前面的同问轮间隙里——同文×3 实测 U1/U3 各得了「答案堆在上方间隙
+            // + 孤儿占位」。向上跨同问 user 逐个间隙找：间隙里第 1 个答案是
+            // 该问前轮自己的，第 2 个起才是富余——只偷富余里事件 ts ≥ 本论
+            // 发送时刻的（更早轮不可能产生晚于本论开启的事件），挪回回合区
+            // 末尾顶替占位。遇异问 user 或仍挂 queued 的未发送泡即停。
+            if (!hasContent) {
+              const ownTs = Number(ownerEl.dataset.ts);
+              const wantKey = ownerEl.dataset.textKey;
+              let stray = null;
+              let gapAnswers = [];
+              for (let n = ownerEl.previousSibling; n; n = n.previousSibling) {
+                if (n.classList && n.classList.contains('user')) {
+                  if (n.dataset.textKey !== wantKey || n.classList.contains('queued')) break;
+                  if (gapAnswers.length >= 2) {
+                    for (let k = 0; k <= gapAnswers.length - 2; k++) {
+                      const nt = Number(gapAnswers[k].dataset.ts);
+                      if (Number.isFinite(ownTs) && Number.isFinite(nt) && nt < ownTs - 2000) continue;
+                      stray = gapAnswers[k];
+                      break;
+                    }
+                    break;
+                  }
+                  gapAnswers = [];
+                  continue;
+                }
+                if (!(n.classList && n.classList.contains('agent')) || n.classList.contains('typing-row')) continue;
+                if (n.dataset.orphanPh || n.dataset.utCopy) continue;
+                const bd = n.querySelector('.body');
+                if (!(bd && String(bd.dataset.raw || bd.textContent || '').trim())) continue;
+                gapAnswers.push(n);
+              }
+              if (!stray && gapAnswers.length >= 2) {
+                for (let k = 0; k <= gapAnswers.length - 2; k++) {
+                  const nt = Number(gapAnswers[k].dataset.ts);
+                  if (Number.isFinite(ownTs) && Number.isFinite(nt) && nt < ownTs - 2000) continue;
+                  stray = gapAnswers[k];
+                  break;
+                }
+              }
+              if (stray) {
+                let at = ownerEl;
+                for (let n = ownerEl.nextSibling; n; n = n.nextSibling) {
+                  if (n.classList && n.classList.contains('user')) break;
+                  if (n === stray) continue;
+                  at = n;
+                }
+                if (at.nextSibling) feed.insertBefore(stray, at.nextSibling);
+                else feed.appendChild(stray);
+                hasContent = true;
+              }
+            }
             if (!hasContent) {
               const ob2 = ownerEl.querySelector('.user-bubble');
               const ph = addAgentFinal(
@@ -2867,7 +2991,7 @@
                 },
               );
               if (ph) {
-                ph.dataset.orphanPh = '1';
+                ph.dataset.orphanPh = '1';
                 // 裸 DONE（phone_stop 等无 _ut）时 addAgentFinal 的 ts 归属会把
                 // 占位落到最新 user 泡下——以已判定的 ownerEl 为准，插回其回合
                 // 区末尾（下一个 user 泡之前），别跑到别人轮子里。
