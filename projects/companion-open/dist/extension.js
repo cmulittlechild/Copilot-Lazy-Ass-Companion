@@ -170,8 +170,11 @@ function buildReplayWithDbBackfill(hist, dbTurns, sid) {
     // 相同且尚无答案的 USER 槽时，把整块（流壳+正文）挪过去（R118-2）。
     const blockHasAnswer = (e) => {
         const t = e?.type;
-        if (t === "AGENT_MESSAGE")
-            return true;
+        if (t === "AGENT_MESSAGE") {
+            // 「该轮无回复」孤儿占位不是答案——把它算作已答会让 ridx 修复
+            // 找不到未答 USER 槽（target=-1），真答案滞留在错锚下（R121 BUG-2）。
+            return !String(e?.streamId || "").startsWith("orphan/");
+        }
         if (t === "AGENT_STREAM_SET" || t === "AGENT_STREAM_CHUNK") {
             return String(e?.text || "").trim().length > 0;
         }
@@ -269,8 +272,10 @@ function buildReplayWithDbBackfill(hist, dbTurns, sid) {
         const aKey = replayTextKey(String(r.assistant_response || ""));
         if (!uKey || !aKey)
             continue;
-        if (nthUserPos(uKey, sameTextOrd(uKey, ri)) < 0)
+        const wantOrd = sameTextOrd(uKey, ri);
+        if (nthUserPos(uKey, wantOrd) < 0)
             continue;
+        let matchOrd = 0;
         for (let i = 0; i < out.length; i++) {
             const e = out[i];
             const t = e?.type;
@@ -278,6 +283,12 @@ function buildReplayWithDbBackfill(hist, dbTurns, sid) {
                 replayTextKey(String(e.text || "")) !== aKey) {
                 continue;
             }
+            // 同文重问常配同文答案——第 ri 条 db 轮必须配第 n 个同文答案块，
+            // 否则每条轮都命中同一块把它沿各序位锚逐级级联挪走，最终堆在末
+            // 锚下、前槽全部假孤儿（R121 BUG-2）。
+            matchOrd++;
+            if (matchOrd !== wantOrd)
+                continue;
             let owner = -1;
             for (let j = i - 1; j >= 0; j--) {
                 if (out[j]?.type === "USER_MESSAGE") {
@@ -285,7 +296,7 @@ function buildReplayWithDbBackfill(hist, dbTurns, sid) {
                     break;
                 }
             }
-            const anchor = nthUserPos(uKey, sameTextOrd(uKey, ri));
+            const anchor = nthUserPos(uKey, wantOrd);
             if (owner === anchor)
                 break;
             // 含 i 的完整响应块：回溯到上一 USER/STREAM_END 之后，前进到下一
@@ -303,7 +314,7 @@ function buildReplayWithDbBackfill(hist, dbTurns, sid) {
                 hi++;
             }
             const block = out.splice(lo, hi - lo + 1);
-            const ap = nthUserPos(uKey, sameTextOrd(uKey, ri));
+            const ap = nthUserPos(uKey, wantOrd);
             // 归属戳一并改写：客户端 _ut 配对/分组以 user_message 为准。
             for (const be of block) {
                 be._ut = String(r.user_message || "");

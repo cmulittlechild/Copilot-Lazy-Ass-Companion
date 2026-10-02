@@ -429,8 +429,10 @@ class TurnArbiter {
                 continue;
             t.answered = true;
             t.answeredAt = Date.now();
-            if (!utKey)
-                break;
+            // utKey 命中也只关「最老一个」匹配轮：同文连发的各轮共享 utKey，
+            // 一条 DONE/MSG 全量标记会把尚未作答的后续同文轮错关（其真答再被
+            // gotAgent/altDup 吞）。FIFO 与答案到达序一致。
+            break;
         }
         while (this.openTurns.length > MAX_TRACKED_TURNS)
             this.openTurns.shift();
@@ -462,14 +464,23 @@ class TurnArbiter {
                 // +430s 重投 → 客户端同文用户泡二次渲染）。判定：live 事件与同会话
                 // 「未答开启轮」同文 = 该轮本身，不是新轮——整件丢弃（用户泡早已渲）。
                 // 真同文重问发生在前轮 answered 之后，不受影响；回放/历史事件放行。
-                if (t && !ev.replayed && !ev.history) {
+                // fromPhone 豁免：手机 USER 只在真实发送时产生，绝不可能是文件通道
+                // 的重投影——上轮未答时同文再发是合法新轮（排队/steering），判死会
+                // 让该轮永不注册：广播端 `accept||ev` 仍放行泡，但答案归到已答旧
+                // 轮被 altDup/gotAgent 吞（R121 BUG-1：同文第 3 发问答案零广播）。
+                // requestIndex 同理：与开启轮索引不同的 file 通道事件是不同请求。
+                if (t && !ev.replayed && !ev.history && ev.fromPhone !== true) {
+                    const evReq = typeof ev.requestIndex === "number" ? ev.requestIndex : null;
                     for (const ot of this.openTurns) {
                         if (ot.answered)
                             continue;
                         if (sessBase && ot.sess && ot.sess !== sessBase)
                             continue;
-                        if (ot.utKey === t)
-                            return null;
+                        if (ot.utKey !== t)
+                            continue;
+                        if (evReq != null && ot.reqIdx != null && evReq !== ot.reqIdx)
+                            continue;
+                        return null;
                     }
                 }
                 const reqIdx = typeof ev.requestIndex === "number" ? ev.requestIndex : null;
