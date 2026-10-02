@@ -36,6 +36,10 @@ interface TrackedTurn {
   /** 该轮是否已见过流活动（STREAM/THINKING/TOOL）。注入回执 DONE 的特征是
       发送后 ~2s 即达且此刻该轮还没任何流——用它而不是「无 _ut」判 ack。 */
   sawStream?: boolean;
+  /** 该轮主流已 END（收到过 AGENT_STREAM_END）。DONE 收尾判定用：流结束后
+      到达的 DONE 是真收尾件而非工具边界——R112H 纯流轮（无 AGENT_MESSAGE
+      判答）的收尾 DONE 曾被 interim 规则误吞，队列停滞 ~170s。 */
+  sawEnd?: boolean;
   /** 开启轮 USER 原文：回放时若该 pending 轮还没落盘（kind:2 惰性写），
       用它补投 USER_MESSAGE——否则切走→切回后在途轮泡+卡整条消失（R66 B1）。 */
   text?: string;
@@ -523,7 +527,10 @@ export class TurnArbiter {
             TurnArbiter.tsOf(ev),
             sid,
           );
-          if (t && (!ownerUt || t.utKey === ownerUt)) t.sawStream = true;
+          if (t && (!ownerUt || t.utKey === ownerUt)) {
+            t.sawStream = true;
+            t.sawEnd = true;
+          }
           if (!utKey) utKey = ownerUt || (t ? t.utKey : "");
         }
         break;
@@ -745,7 +752,8 @@ export class TurnArbiter {
           !immediate &&
           ev.reason !== "result" &&
           doneTurn &&
-          doneTurn.sawStream === true
+          doneTurn.sawStream === true &&
+          doneTurn.sawEnd !== true
         ) {
           ev.interim = true;
           return null;

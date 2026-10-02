@@ -634,6 +634,19 @@ export class BridgeServer {
                         .slice(0, 80),
                     ),
                 );
+                // 答案文本前缀键：同一答案经 transcript+sessiondb 双通道投影时
+                // 两份的 _ut 可能不同（归属改判）——只按 _ut 查会漏成回放双渲
+                // （R112 P2），正文前缀同则视为同一条答案。
+                const haveAText = new Set(
+                  replay
+                    .filter((e: any) => e?.type === 'AGENT_MESSAGE')
+                    .map((e: any) =>
+                      String(e.text || '')
+                        .replace(/\s+/g, ' ')
+                        .trim()
+                        .slice(0, 80),
+                    ),
+                );
                 const haveUByText = new Set(
                   replay
                     .filter((e: any) => e?.type === 'USER_MESSAGE')
@@ -660,7 +673,12 @@ export class BridgeServer {
                       .replace(/\s+/g, ' ')
                       .trim()
                       .slice(0, 80);
-                    if (ak && !haveA.has(ak)) replay.push(ce);
+                    const atk = String(ce.text || '')
+                      .replace(/\s+/g, ' ')
+                      .trim()
+                      .slice(0, 80);
+                    if (ak && !haveA.has(ak) && !(atk && haveAText.has(atk)))
+                      replay.push(ce);
                   }
                 }
               }
@@ -884,6 +902,18 @@ export class BridgeServer {
                 .slice(0, 120),
             ),
         );
+        // 答案文本前缀键：transcript+sessiondb 双通道投影同一份答案时 _ut
+        // 可能不一致（归属改判），正文同前缀即重复（R112 P2 回放双渲）。
+        const haveAText = new Set(
+          this.history
+            .filter((e: any) => e && e.type === 'AGENT_MESSAGE')
+            .map((e: any) =>
+              String(e.text || '')
+                .replace(/\s+/g, ' ')
+                .trim()
+                .slice(0, 80),
+            ),
+        );
         for (const ce of donePairs) {
           if (ce.type === 'USER_MESSAGE') {
             const k = String(ce._ut || '');
@@ -897,7 +927,12 @@ export class BridgeServer {
               .replace(/\s+/g, ' ')
               .trim()
               .slice(0, 80);
-            if (ak && !haveA.has(ak)) this.history.push(ce);
+            const atk = String(ce.text || '')
+              .replace(/\s+/g, ' ')
+              .trim()
+              .slice(0, 80);
+            if (ak && !haveA.has(ak) && !(atk && haveAText.has(atk)))
+              this.history.push(ce);
           }
         }
       }

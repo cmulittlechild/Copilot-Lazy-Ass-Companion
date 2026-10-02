@@ -453,8 +453,32 @@ export async function checkInjectEverLanded(
   return false;
 }
 
+/** 清空 chat composer 草稿：chat.open 的 query 是往现有输入框里【插入】
+    而非替换——phone_stop/取消后 VS Code 会把被停轮的原文恢复成草稿，
+    此时直接注入会把新文本拼接进旧草稿再自动提交（R112 实测乱码合并）。
+    selectAll+delete 是 best-effort（命令不可用时静默跳过）。 */
+async function clearComposerDraft(): Promise<void> {
+  try {
+    await vscode.commands.executeCommand("workbench.action.chat.focusInput");
+  } catch {
+    /* ignore */
+  }
+  try {
+    await vscode.commands.executeCommand("editor.action.selectAll");
+  } catch {
+    /* ignore */
+  }
+  try {
+    await vscode.commands.executeCommand("deleteLeft");
+  } catch {
+    /* ignore */
+  }
+}
+
 async function submitFocusedQuery(text: string): Promise<boolean> {
   try {
+    await clearComposerDraft();
+    await delay(80);
     await vscode.commands.executeCommand("workbench.action.chat.open", {
       query: text,
       isPartialQuery: false,

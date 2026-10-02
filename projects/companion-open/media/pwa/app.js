@@ -1990,12 +1990,19 @@
     const confirmId = msg.confirmId || msg.requestId || msg.toolCallId || null;
     // 同一张卡的第二份（双通道重投/回放重post）：已有同 id 或同标题+正文的
     // 未决卡时不再建第二张——否则 feed 出现双份待批准卡（R96）。
+    // 候选 id 全集判重：仲裁器取 toolCallId||confirmId||requestId，这里取
+    // confirmId||requestId||toolCallId——双通道副本字段齐全度不同时两个
+    // 通道算出的 confirmId 不一致，单一 sameId 漏拦（R112 P3 瞬态双卡）。
+    const candIds = [msg.confirmId, msg.requestId, msg.toolCallId, msg.id]
+      .filter((x) => x != null && x !== '')
+      .map(String);
     try {
       const cards = feed.querySelectorAll('.msg.confirm-card');
       for (const c of cards) {
         // 同 id 一律拦（含已决卡：回放重投不得把已答确认复活成新卡）；
         // 无 id 的只拦未决卡同标题+正文（已决卡 body 已被改写，按内容对不上）。
-        const sameId = confirmId && c.dataset.confirmId === confirmId;
+        const cIds = String(c.dataset.confirmIds || '').split('|');
+        const sameId = candIds.length > 0 && candIds.some((i) => cIds.includes(i));
         const sameBody =
           !c.classList.contains('resolved') &&
           (c.querySelector('.confirm-title')?.textContent || '') === (msg.title || 'Confirm') &&
@@ -2009,6 +2016,7 @@
     let resolved = false;
     const el = document.createElement('div');
     if (confirmId) el.dataset.confirmId = confirmId;
+    if (candIds.length) el.dataset.confirmIds = candIds.join('|');
     el.className = 'msg confirm-card';
     const title = document.createElement('div');
     title.className = 'confirm-title';
@@ -2601,9 +2609,12 @@
         // 挂在 feed 里（实测孤儿轮 RESOLVED 后卡仍显示「待批准」）。
         let resolvedAny = false;
         try {
-          const cid = msg.toolCallId || msg.confirmId || msg.requestId || null;
+          const rIds = [msg.toolCallId, msg.confirmId, msg.requestId, msg.id]
+            .filter((x) => x != null && x !== '')
+            .map(String);
           for (const c of feed.querySelectorAll('.msg.confirm-card:not(.resolved)')) {
-            if (cid && c.dataset.confirmId && c.dataset.confirmId !== cid) continue;
+            const cIds = String(c.dataset.confirmIds || c.dataset.confirmId || '').split('|');
+            if (rIds.length && cIds[0] && !rIds.some((i) => cIds.includes(i))) continue;
             c.classList.add('resolved');
             resolvedAny = true;
             const row = c.querySelector('.confirm-btns');

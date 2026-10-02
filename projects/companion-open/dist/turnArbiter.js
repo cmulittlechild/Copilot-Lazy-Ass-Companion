@@ -503,8 +503,10 @@ class TurnArbiter {
                 }
                 {
                     const { t, ownerUt } = this.turnForStreamEvent(sessBase, TurnArbiter.tsOf(ev), sid);
-                    if (t && (!ownerUt || t.utKey === ownerUt))
+                    if (t && (!ownerUt || t.utKey === ownerUt)) {
                         t.sawStream = true;
+                        t.sawEnd = true;
+                    }
                     if (!utKey)
                         utKey = ownerUt || (t ? t.utKey : "");
                 }
@@ -710,7 +712,8 @@ class TurnArbiter {
                 if (!immediate &&
                     ev.reason !== "result" &&
                     doneTurn &&
-                    doneTurn.sawStream === true) {
+                    doneTurn.sawStream === true &&
+                    doneTurn.sawEnd !== true) {
                     ev.interim = true;
                     return null;
                 }
