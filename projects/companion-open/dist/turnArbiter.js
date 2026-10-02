@@ -86,6 +86,14 @@ class TurnArbiter {
         const ts = String(t.sess || this.boundSess);
         return ts === sessBase;
     }
+    /** PWA 显式选会话只走 unicast reply（不 broadcast），boundSess 始终
+        不更新——sess='' 的手机轮 turnMatchesSess 恒败，pending/近完成轮
+        补投静默全丢（R122W：停止后轮在懒写窗内切走切回，整泡消失）。
+        PHONE_SESSION_SELECT 调用此方法同步绑定。 */
+    noteSessionSelected(sessBase) {
+        if (sessBase)
+            this.boundSess = sessBase;
+    }
     /** 当前 sess 的未答开启轮 USER 事件（全文）：供回放尾部补投未落盘的
         pending 轮 USER（桌面发出的轮 PWA 端无 sentAwaitingReply 备份）。
         幽灵轮（关闭后重投影再开、永不作答）按活性窗排除，不回放幽灵泡。 */
@@ -120,11 +128,18 @@ class TurnArbiter {
         const out = [];
         const now = Date.now();
         for (const t of this.openTurns) {
-            if (!t.answered || !t.text || !t.answerText)
+            if (!t.answered || !t.text)
                 continue;
             if (!t.answeredAt || now - t.answeredAt > withinMs)
                 continue;
             if (!this.turnMatchesSess(t, sessBase))
+                continue;
+            // 无答复收尾的轮（停止/失败——answered 但无 answerText）：有可视内容的
+            // 轮（gotAgent/sawStream——流式先行答）不补占位；零内容的补孤儿占位，
+            // 否则懒写窗口内切会话/刷新后该轮整泡消失（R122W 实测：phone_stop 后
+            // ~15s 切走切回，回放无此行 → live 渲的 U+占位被冲掉）。
+            const noAnswer = !t.answerText;
+            if (noAnswer && (t.gotAgent || t.sawStream))
                 continue;
             const sess = t.sess || sessBase;
             out.push({
@@ -136,14 +151,27 @@ class TurnArbiter {
                 _seq: ++this.seq,
                 pendingTurn: false,
             });
-            out.push({
-                type: "AGENT_MESSAGE",
-                text: t.answerText,
-                timestamp: t.answeredAt,
-                _ut: t.utKey,
-                _sess: sess,
-                _seq: ++this.seq,
-            });
+            if (noAnswer) {
+                out.push({
+                    type: "AGENT_MESSAGE",
+                    streamId: `orphan/${t.reqIdx ?? t.utKey}`,
+                    text: "*（该轮无回复——已停止或请求失败）*",
+                    timestamp: t.answeredAt,
+                    _ut: t.utKey,
+                    _sess: sess,
+                    _seq: ++this.seq,
+                });
+            }
+            else {
+                out.push({
+                    type: "AGENT_MESSAGE",
+                    text: t.answerText,
+                    timestamp: t.answeredAt,
+                    _ut: t.utKey,
+                    _sess: sess,
+                    _seq: ++this.seq,
+                });
+            }
         }
         return out;
     }
@@ -181,7 +209,12 @@ class TurnArbiter {
         // 否则「在途轮切走→切回」后 pendingUserEvents 拿不到该轮记录，
         // 回放无法补投未落盘的 pending USER（R66 B1）。只修剪过老/已答轮。
         const now0 = Date.now();
-        this.openTurns = this.openTurns.filter((t) => !t.answered && now0 - t.ts < 30 * 60_000);
+        this.openTurns = this.openTurns.filter(
+        // 刚收尾的轮（含停止/无答复）保留 2min：切会话/刷新回放靠
+        // recentCompletedEvents 补投未落盘的 U+答/占位；此刻剪除该轮
+        // 整泡从 feed 消失（R122W 实测）。已答轮迟到帧反查也要在册。
+        (t) => (!t.answered || (t.answeredAt != null && now0 - t.answeredAt < 120_000)) &&
+            now0 - t.ts < 30 * 60_000);
         this.latestUserLiveTs = 0;
         this.latestReqIdx = -1;
         // 位置型 streamId（requests/N/…）每个会话文件从 0 重新计数——换会话必须清

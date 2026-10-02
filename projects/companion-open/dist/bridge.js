@@ -826,6 +826,10 @@ class BridgeServer {
             this.lastReplayAt.set(file, now);
             if (this.lastReplayAt.size > 64)
                 this.lastReplayAt.clear();
+            // PWA 点选只走 unicast reply 不经 broadcast，SESSION_SELECTED 永远
+            // 不进裁决器 → boundSess 恒 ''，sess='' 的手机轮补投全丢。回放=绑定，
+            // 在此同步裁决器的绑定会话。
+            this.arbiter.noteSessionSelected(path.basename(file).replace(/\.jsonl$/i, ''));
         }
         this.history = [];
         this.offlineQueue = [];
