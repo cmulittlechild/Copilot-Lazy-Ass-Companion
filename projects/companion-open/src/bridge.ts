@@ -597,6 +597,10 @@ export class BridgeServer {
               const sessB = replayFile
                 ? path.basename(replayFile).replace(/\.jsonl$/i, '')
                 : '';
+              // 连接路回放也是一次会话绑定：不登记则 boundSess 恒 ''，
+              // 此间发出的手机轮 sess=''，下次换绑时被新会话追认，
+              // pending/近完成轮补投会跨会话泄漏进别会话回放。
+              if (sessB) this.arbiter.noteSessionSelected(sessB);
               const pend = this.arbiter.pendingUserEvents(sessB);
               if (pend.length) {
                 const have = new Set(

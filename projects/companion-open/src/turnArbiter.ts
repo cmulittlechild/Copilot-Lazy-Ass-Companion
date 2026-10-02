@@ -126,7 +126,18 @@ export class TurnArbiter {
       补投静默全丢（R122W：停止后轮在懒写窗内切走切回，整泡消失）。
       PHONE_SESSION_SELECT 调用此方法同步绑定。 */
   noteSessionSelected(sessBase: string) {
-    if (sessBase) this.boundSess = sessBase;
+    if (!sessBase || sessBase === this.boundSess) return;
+    const prev = this.boundSess;
+    // 换绑前把仍无 sess 戳的轮冻结到旧绑定：手机轮在 boundSess 尚未
+    // 记录的窗口发出时 sess=''，不冻结则按换绑后的新 boundSess 追认，
+    // 跨会话补投进别会话回放尾部（幽灵轮跨会话泄漏）。prev='' 为首绑
+    // ——那些轮本就发生在该会话，按 boundSess 兜底照常归属。
+    if (prev) {
+      for (const t of this.openTurns) {
+        if (!(t as any).sess) (t as any).sess = prev;
+      }
+    }
+    this.boundSess = sessBase;
   }
 
   /** 当前 sess 的未答开启轮 USER 事件（全文）：供回放尾部补投未落盘的
@@ -530,7 +541,8 @@ export class TurnArbiter {
 
     const sessBase = sessBaseOf(ev);
     const type = String(ev.type || "");
-    if (type === "SESSION_SELECTED" && sessBase) this.boundSess = sessBase;
+    if (type === "SESSION_SELECTED" && sessBase)
+      this.noteSessionSelected(sessBase);
 
     // 轮次归属键：服务端下发的 _ut 优先；否则归到最新未答轮
     let utKey = typeof ev._ut === "string" ? normText(ev._ut) : "";
