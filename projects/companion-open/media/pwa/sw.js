@@ -1,4 +1,4 @@
-const CACHE = 'sidecar-pwa-v41';
+const CACHE = 'sidecar-pwa-v42';
 const ASSETS = [
   '/app.js',
   '/styles.css',
