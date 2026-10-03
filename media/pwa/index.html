@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#1e1e1e" />
+  <meta name="referrer" content="no-referrer" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="/icon-192.png" />
+  <link rel="apple-touch-icon" sizes="512x512" href="/icon-512.png" />
+  <title>Copilot Lazy Ass</title>
+  <link rel="stylesheet" href="/codicon.css" />
+  <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/vendor/vs2015.min.css" />
+  <noscript>
+    <style>.codicon::before { display: none !important; }</style>
+  </noscript>
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <div class="dot" id="statusDot"></div>
+      <div class="brand-text">
+        <div class="title" id="sessionTitle">Copilot Lazy Ass</div>
+        <div class="sub" id="statusText" data-i18n="connecting">connecting…</div>
+      </div>
+    </div>
+    <div class="top-actions">
+      <button id="btnSessions" type="button" class="icon-btn codicon codicon-menu" data-i18n-attr="aria-label=ar.sessions;title=ar.sessions"></button>
+      <button id="btnTerminal" type="button" class="icon-btn codicon codicon-terminal" data-i18n-attr="aria-label=ar.terminal;title=ar.terminal"></button>
+      <button id="btnInstances" type="button" class="icon-btn codicon codicon-server" data-i18n-attr="aria-label=ar.instances;title=ar.instances"></button>
+    </div>
+  </header>
+
+  <main id="feed" class="feed" aria-live="polite"></main>
+
+  <button id="btnScrollBottom" type="button" class="fab-scroll-bottom codicon codicon-arrow-down" data-i18n-attr="aria-label=ar.bottom;title=ar.bottom"></button>
+
+  <section id="confirmBar" class="confirm hidden"></section>
+
+  <footer class="composer">
+    <!-- 控件条：mode（agent/ask/edit）+ 模型选择 + 审批模式，三者为独立维度 -->
+    <div id="composerControls" class="composer-controls">
+      <select id="mode" class="ctrl-select" aria-label="mode">
+        <option value="agent">Agent</option>
+        <option value="ask">Ask</option>
+        <option value="edit">Edit</option>
+      </select>
+      <button id="btnModel" type="button" class="ctrl-pill" aria-haspopup="dialog" data-i18n-attr="aria-label=ar.model;title=ar.model">
+        <span class="codicon codicon-sparkle ctrl-pill-icon"></span>
+        <span id="btnModelLabel" class="ctrl-pill-text" data-i18n="model">模型</span>
+        <span class="codicon codicon-chevron-down ctrl-caret"></span>
+      </button>
+      <button id="btnPermission" type="button" class="ctrl-pill" aria-haspopup="dialog" data-i18n-attr="aria-label=ar.perm;title=ar.perm">
+        <span class="codicon codicon-shield ctrl-pill-icon"></span>
+        <span id="btnPermissionLabel" class="ctrl-pill-text" data-i18n="approve">审批</span>
+        <span class="codicon codicon-chevron-down ctrl-caret"></span>
+      </button>
+    </div>
+    <textarea id="input" rows="1" data-i18n-attr="placeholder=ph.composer" enterkeyhint="send"></textarea>
+    <button id="send" type="button" data-i18n="send">发送</button>
+  </footer>
+
+  <!-- 会话列表抽屉（右侧滑入） -->
+  <div id="drawerOverlay" class="drawer-overlay hidden"></div>
+  <aside id="sessionDrawer" class="session-drawer" data-i18n-attr="aria-label=ar.sessions">
+    <div class="drawer-header">
+      <span class="drawer-title" data-i18n="hdr.sessions">会话</span>
+      <button id="btnLang" type="button" class="icon-btn lang-btn" title="Language / 语言">中/EN</button>
+      <button id="drawerClose" type="button" class="icon-btn codicon codicon-close" data-i18n-attr="aria-label=ar.close"></button>
+    </div>
+    <div class="drawer-search">
+      <span class="codicon codicon-search drawer-search-icon"></span>
+      <input id="sessionSearch" type="search" data-i18n-attr="placeholder=ph.sessionSearch;aria-label=ar.sessionSearch" autocomplete="off" />
+    </div>
+    <div id="sessionList" class="session-list"></div>
+  </aside>
+
+  <!-- VS Code 实例抽屉（右侧滑入，复用会话抽屉模式） -->
+  <div id="instanceOverlay" class="drawer-overlay hidden"></div>
+  <aside id="instanceDrawer" class="session-drawer" data-i18n-attr="aria-label=hdr.instances">
+    <div class="drawer-header">
+      <span class="drawer-title" data-i18n="hdr.instances">VS Code 实例</span>
+      <button id="instanceClose" type="button" class="icon-btn codicon codicon-close" data-i18n-attr="aria-label=ar.close"></button>
+    </div>
+    <div id="instanceList" class="session-list"></div>
+  </aside>
+
+  <!-- 终端面板（底部滑入） -->
+  <section id="terminalPanel" class="terminal-panel" data-i18n-attr="aria-label=ar.terminal">
+    <div class="terminal-header">
+      <span class="terminal-title" data-i18n="hdr.terminal">终端</span>
+      <div class="terminal-tools">
+        <select id="terminalSelect" class="terminal-select" data-i18n-attr="aria-label=ar.terminalSelect"></select>
+        <button id="terminalClose" type="button" class="icon-btn codicon codicon-close" data-i18n-attr="aria-label=ar.close"></button>
+      </div>
+    </div>
+    <div class="terminal-row">
+      <input id="terminalInput" type="text" data-i18n-attr="placeholder=ph.cmd" autocomplete="off" enterkeyhint="send" />
+      <button id="terminalExec" type="button" data-i18n="btn.run">执行</button>
+    </div>
+    <pre id="terminalOutput" class="terminal-output"></pre>
+  </section>
+
+  <!-- 底部 sheet 共用遮罩（模型 / 审批模式） -->
+  <div id="sheetOverlay" class="sheet-overlay hidden"></div>
+
+  <!-- 模型选择 sheet（底部滑入） -->
+  <section id="modelSheet" class="bottom-sheet" data-i18n-attr="aria-label=hdr.model" role="dialog">
+    <div class="sheet-grabber"></div>
+    <div class="sheet-header">
+      <span class="sheet-title" data-i18n="hdr.model">选择模型</span>
+      <button id="modelSheetClose" type="button" class="icon-btn codicon codicon-close" data-i18n-attr="aria-label=ar.close"></button>
+    </div>
+    <div class="sheet-search">
+      <span class="codicon codicon-search sheet-search-icon"></span>
+      <input id="modelSearch" type="search" data-i18n-attr="placeholder=ph.modelSearch;aria-label=ar.modelSearch" autocomplete="off" />
+    </div>
+    <div id="modelError" class="sheet-error hidden"></div>
+    <div id="modelList" class="sheet-list"></div>
+  </section>
+
+  <!-- 审批模式 sheet（底部滑入） -->
+  <section id="permissionSheet" class="bottom-sheet" data-i18n-attr="aria-label=hdr.perm" role="dialog">
+    <div class="sheet-grabber"></div>
+    <div class="sheet-header">
+      <span class="sheet-title" data-i18n="hdr.perm">运行模式（审批）</span>
+      <button id="permissionSheetClose" type="button" class="icon-btn codicon codicon-close" data-i18n-attr="aria-label=ar.close"></button>
+    </div>
+    <div id="permissionError" class="sheet-error hidden"></div>
+    <div id="permissionList" class="sheet-list"></div>
+  </section>
+
+  <script src="/vendor/marked.min.js"></script>
+  <script src="/vendor/highlight.min.js"></script>
+  <script src="/i18n.js"></script>
+  <!-- 版本戳：扩展升级后强制浏览器/SW 取新 app.js，防旧缓存跑旧逻辑 -->
+  <script src="/app.js?v=1.0.0"></script>
+</body>
+</html>

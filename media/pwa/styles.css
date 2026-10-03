@@ -1,0 +1,1523 @@
+/* ================================================================
+   Copilot Lazy Ass PWA — VS Code Copilot Chat 视觉体系复刻
+   （对齐 VS Code dark+：--vscode-* 变量 + chat-row 消息行结构 + codicon 图标）
+   ================================================================ */
+
+:root {
+  color-scheme: dark;
+
+  /* ---- VS Code dark+ 主题变量 ---- */
+  --vscode-editor-background: #1e1e1e;
+  --vscode-editor-foreground: #cccccc;
+  --vscode-sideBar-background: #252526;
+  --vscode-sideBar-border: #2d2d2d;
+  --vscode-foreground: #cccccc;
+  --vscode-descriptionForeground: #9d9d9d;
+  --vscode-focusBorder: #007fd4;
+  --vscode-input-background: #3c3c3c;
+  --vscode-input-foreground: #cccccc;
+  --vscode-input-border: #3c3c3c;
+  --vscode-button-background: #0e639c;
+  --vscode-button-foreground: #ffffff;
+  --vscode-button-hoverBackground: #1177bb;
+  --vscode-list-activeSelectionBackground: #04395e;
+  --vscode-list-hoverBackground: #2a2d2e;
+  --vscode-list-activeSelectionForeground: #ffffff;
+  --vscode-textCodeBlock-background: #2b2b2b;
+  --vscode-textLink-foreground: #3794ff;
+  --vscode-badge-background: #4d4d4d;
+  --vscode-badge-foreground: #ffffff;
+  --vscode-chat-requestBorder: rgba(255, 255, 255, 0.08);
+  --vscode-chat-avatarBackground: #3c3c3c;
+  --vscode-chat-avatarForeground: #cccccc;
+  --vscode-chat-list-background: #1e1e1e;
+  --vscode-chat-font-size-body-s: 13px;
+  --vscode-terminal-background: #1e1e1e;
+  --vscode-terminal-foreground: #cccccc;
+  --vscode-panel-background: #1e1e1e;
+  --vscode-panel-border: #2d2d2d;
+  --vscode-dropdown-background: #3c3c3c;
+  --vscode-dropdown-foreground: #cccccc;
+  --vscode-dropdown-border: #3c3c3c;
+  --vscode-toolbar-hoverBackground: rgba(90, 93, 94, 0.31);
+
+  /* ---- 字体 ---- */
+  --font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", system-ui, "Ubuntu", "Droid Sans", sans-serif;
+  --font-size: 13px;
+  --code-font-family: "Cascadia Code", "Fira Code", Menlo, Monaco, "Courier New", monospace;
+  --code-font-size: 12px;
+
+  /* ---- 安全区 ---- */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+
+  /* Copilot 品牌色 */
+  --copilot-purple: #c084fc;
+  --copilot-gradient: linear-gradient(135deg, #6e40c9 0%, #8957e5 100%);
+  --thinking-border: #5b84c4;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--vscode-editor-background);
+  color: var(--vscode-foreground);
+  font-family: var(--font-family);
+  font-size: var(--font-size);
+}
+
+body {
+  display: grid;
+  grid-template-rows: auto 1fr auto auto;
+  max-width: 720px;
+  margin: 0 auto;
+  min-height: 100dvh;
+  height: var(--viewport-height, 100dvh);
+  overflow: hidden;
+}
+
+/* ================================================================
+   顶部栏（VS Code chat header）
+   ================================================================ */
+.top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: calc(10px + env(safe-area-inset-top, 0px)) 12px 8px;
+  border-bottom: 1px solid var(--vscode-chat-requestBorder);
+  background: var(--vscode-editor-background);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+.brand { display: flex; gap: 10px; align-items: center; min-width: 0; flex: 1; }
+.brand-text { min-width: 0; flex: 1; }
+.dot {
+  width: 10px; height: 10px; border-radius: 50%;
+  background: var(--vscode-badge-background);
+  flex-shrink: 0;
+}
+.dot.ok { background: #73c991; }
+.dot.bad { background: #f48771; }
+.title,
+#sessionTitle {
+  font-weight: 600;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.sub {
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* 与控件条上的 .ctrl-pill 胶囊对齐（同高同圆角） */
+#mode {
+  background: var(--vscode-dropdown-background);
+  color: var(--vscode-dropdown-foreground);
+  border: 1px solid var(--vscode-dropdown-border);
+  border-radius: 12px;
+  padding: 3px 8px;
+  font-family: var(--font-family);
+  font-size: 11px;
+  height: 24px;
+  outline: none;
+  flex-shrink: 0;
+}
+#mode:focus { border-color: var(--vscode-focusBorder); }
+.top-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+/* VS Code 扁平 icon button（移动端触控目标 ≥40px） */
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  background: transparent;
+  color: var(--vscode-foreground);
+  border: none;
+  border-radius: 4px;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.icon-btn:hover { background: var(--vscode-list-hoverBackground); }
+.icon-btn:active { background: var(--vscode-toolbar-hoverBackground); }
+
+/* 通用隐藏 */
+.hidden { display: none !important; }
+
+/* ================================================================
+   消息流
+   ================================================================ */
+.feed {
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  /* 切会话/回放由 JS 强制 auto；CSS 默认 auto 避免 smooth 把整段时间 scrollTop 动画 */
+  padding: 4px 16px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  scroll-behavior: auto;
+  overscroll-behavior-y: contain;
+}
+
+/* 回放/切会话期间禁用逐条 fade-in，避免「从头拉到尾」的逐条动画 */
+.feed.no-anim .msg {
+  animation: none !important;
+}
+.msg { max-width: 100%; animation: fade-in 0.18s ease; }
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* 消息行分隔（官方 requestBorder 细线，仅 user/agent 行） */
+.msg.user, .msg.agent {
+  border-top: 1px solid var(--vscode-chat-requestBorder);
+}
+.msg.user:first-child,
+.msg.agent:first-child,
+.feed > .msg.sys:first-child + .msg.user,
+.feed > .msg.sys:first-child + .msg.agent {
+  border-top: none;
+}
+
+/* ---- chat-row：avatar 列 + 内容列（官方消息行结构） ---- */
+.chat-row {
+  display: flex;
+  gap: 10px;
+  padding: 10px 0;
+  min-width: 0;
+}
+.chat-avatar {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--vscode-chat-avatarBackground);
+  color: var(--vscode-chat-avatarForeground);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 2px;
+}
+.chat-avatar svg { width: 16px; height: 16px; display: block; }
+.chat-avatar.copilot-avatar {
+  background: var(--copilot-gradient);
+  color: #ffffff;
+}
+.chat-content {
+  flex: 1;
+  min-width: 0;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+/* sender header：用户名 + 流式指示 */
+.sender-name,
+.meta-name {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--vscode-foreground);
+  margin-bottom: 2px;
+}
+.copilot-name,
+.sender-name.copilot { color: var(--copilot-purple); }
+.agent-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 2px;
+}
+.meta-sub {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+}
+/* 流式 "•••" 动画省略号（官方 streaming 指示） */
+.typing-label {
+  display: inline-flex;
+  align-items: center;
+}
+.typing-ellipsis {
+  display: inline-flex;
+  gap: 3px;
+}
+.typing-ellipsis i {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--vscode-descriptionForeground);
+  animation: typing-dot 1.2s infinite ease-in-out;
+}
+.typing-ellipsis i:nth-child(2) { animation-delay: 0.2s; }
+.typing-ellipsis i:nth-child(3) { animation-delay: 0.4s; }
+@keyframes typing-dot {
+  0%, 60%, 100% { opacity: 0.25; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-2px); }
+}
+
+/* ---- 用户消息：右侧气泡（对齐 VS Code Copilot Chat 桌面） ---- */
+.msg.user {
+  align-self: flex-end;
+  width: auto;
+  max-width: min(85%, 520px);
+  border-top: none !important;
+}
+.msg.user .chat-row {
+  flex-direction: row-reverse;
+  gap: 8px;
+  padding: 6px 0;
+}
+.msg.user .chat-avatar {
+  display: none; /* 桌面右侧气泡不显示头像列 */
+}
+.msg.user .chat-content {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+.msg.user .sender-name {
+  display: none; /* 右侧气泡不需要 "You" 标签 */
+}
+.user-bubble {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: var(--vscode-chat-font-size-body-s, 13px);
+  color: var(--vscode-button-foreground, #fff);
+  background: var(--vscode-button-background, #0e639c);
+  border: none;
+  border-radius: 14px 14px 4px 14px;
+  padding: 8px 12px;
+  box-shadow: none;
+  text-align: left;
+}
+
+/* 排队待发消息：半透明 + 斜体提示，出队后移除 .queued */
+.msg.user.queued .user-bubble {
+  opacity: 0.6;
+  font-style: italic;
+}
+
+/* ---- 助手消息：sender header + 行内内容 ---- */
+.msg.agent { align-self: flex-start; width: 100%; }
+/* 同一用户回合内的续写片段：折叠 Copilot 头像/名字，只留正文 */
+.msg.agent.agent-continued {
+  border-top: none;
+}
+.msg.agent.agent-continued .chat-row {
+  padding-top: 2px;
+}
+/* 0.5.19：头像彻底不占位不绘制（visibility:hidden 仍显眼）；整列 meta 默认藏 */
+.msg.agent.agent-continued .chat-avatar {
+  display: none;
+}
+.msg.agent.agent-continued .chat-row {
+  /* 无头像后内容左缘与首条正文对齐（首条有 28px 头像+间隙） */
+  padding-left: 0;
+}
+.msg.agent.agent-continued .agent-meta {
+  display: none;
+}
+.msg.agent.agent-continued.streaming .agent-meta-continued {
+  /* 仅流式时显示行内 •••，不显示 Copilot 名 */
+  display: flex;
+}
+.msg.agent.agent-continued .agent-meta-continued:not(:has(.typing-label:not(.is-done))) {
+  display: none;
+}
+.msg.agent.agent-continued .meta-name {
+  display: none;
+}
+.agent-bubble {
+  /* 无气泡卡片，内容直接渲染 */
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  box-shadow: none;
+}
+.typing-label.is-done { display: none !important; }
+.msg.agent.streaming .bubble .body.md {
+  white-space: pre-wrap;
+}
+/* 流式光标（官方 ▍ 闪烁） */
+.msg.agent.streaming .bubble .body.md::after {
+  content: '▍';
+  display: inline;
+  color: var(--vscode-foreground);
+  animation: blink-cursor 0.7s step-end infinite;
+  font-weight: 300;
+}
+@keyframes blink-cursor { 50% { opacity: 0; } }
+
+/* ---- Typing row（COPILOT_TYPING 时） ---- */
+.typing-bubble {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+}
+
+/* ---- 消息 footer 操作栏（助手消息底部，官方工具栏精简版） ---- */
+.msg-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+  padding: 0 0 8px;
+  margin-top: -4px;
+}
+.footer-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+  font-family: inherit;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+.footer-btn:hover {
+  background: var(--vscode-list-hoverBackground);
+  color: var(--vscode-foreground);
+}
+.footer-btn:active { background: var(--vscode-toolbar-hoverBackground); }
+.footer-btn .codicon { font-size: 12px; }
+
+/* ---- 系统消息（居中细字） ---- */
+.msg.sys {
+  align-self: center;
+  text-align: center;
+  padding: 4px 0;
+}
+.sys-pill {
+  display: inline-block;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  background: rgba(45, 45, 45, 0.6);
+  padding: 2px 10px;
+  border-radius: 4px;
+}
+
+/* ================================================================
+   Markdown 内容（VS Code chat markdown）
+   ================================================================ */
+.msg .body.md {
+  display: block;
+  white-space: normal;
+  word-break: break-word;
+  font-size: var(--vscode-chat-font-size-body-s);
+}
+.msg .body.md p { margin: 0 0 8px; }
+.msg .body.md p:last-child { margin-bottom: 0; }
+.msg .body.md h1,
+.msg .body.md h2,
+.msg .body.md h3,
+.msg .body.md h4 {
+  margin: 16px 0 8px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+.msg .body.md h1 { font-size: 20px; }
+.msg .body.md h2 { font-size: 17px; }
+.msg .body.md h3 { font-size: 15px; }
+.msg .body.md h4 { font-size: 13px; }
+.msg .body.md ul,
+.msg .body.md ol {
+  margin: 4px 0 8px;
+  padding-left: 24px;
+}
+.msg .body.md li { margin: 2px 0; }
+.msg .body.md hr {
+  border: none;
+  border-top: 1px solid var(--vscode-sideBar-border);
+  margin: 8px 0;
+}
+.msg .body.md a {
+  color: var(--vscode-textLink-foreground);
+  text-decoration: none;
+}
+.msg .body.md a:hover { text-decoration: underline; }
+.msg .body.md strong { color: var(--vscode-foreground); font-weight: 600; }
+.msg .body.md blockquote {
+  border-left: 3px solid var(--vscode-sideBar-border);
+  padding-left: 12px;
+  margin: 4px 0 8px;
+  color: var(--vscode-descriptionForeground);
+}
+.msg .body.md table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 12.5px;
+  margin: 4px 0 8px;
+}
+.msg .body.md th,
+.msg .body.md td {
+  border: 1px solid var(--vscode-sideBar-border);
+  padding: 6px 8px;
+  text-align: left;
+}
+.msg .body.md th { background: var(--vscode-sideBar-background); }
+
+/* 行内代码 */
+.msg .body.md :not(pre) > code {
+  font-family: var(--code-font-family);
+  font-size: var(--code-font-size);
+  background: var(--vscode-textCodeBlock-background);
+  color: #ce9178;
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+/* 代码块（VS Code: bg #2b2b2b + code-header） */
+.msg .body.md pre {
+  margin: 8px 0;
+  border-radius: 4px;
+  overflow: hidden;
+  border: 1px solid var(--vscode-sideBar-border);
+  background: var(--vscode-textCodeBlock-background);
+  position: relative;
+}
+.msg .body.md pre code {
+  display: block;
+  padding: 12px 16px;
+  overflow-x: auto;
+  background: transparent;
+  font-size: var(--code-font-size);
+  line-height: 1.45;
+  font-family: var(--code-font-family);
+  white-space: pre;
+}
+
+/* code-header（语言小写标签 + Copy） */
+.code-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 8px 4px 12px;
+  background: #2d2d2d;
+  border-bottom: 1px solid var(--vscode-sideBar-border);
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+}
+.code-language {
+  text-transform: lowercase;
+  font-family: var(--code-font-family);
+  font-size: 11px;
+}
+.copy-code {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+  padding: 2px 6px;
+  min-height: 32px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.copy-code:hover {
+  background: var(--vscode-list-hoverBackground);
+  color: var(--vscode-foreground);
+}
+
+/* 降级代码块（marked 不可用时） */
+.md-fallback-pre {
+  margin: 8px 0;
+  padding: 12px 16px;
+  border-radius: 4px;
+  border: 1px solid var(--vscode-sideBar-border);
+  background: var(--vscode-textCodeBlock-background);
+  overflow: auto;
+  font-family: var(--code-font-family);
+  font-size: var(--code-font-size);
+  line-height: 1.45;
+  white-space: pre;
+  color: var(--vscode-foreground);
+}
+
+/* ================================================================
+   thinking 折叠块（官方 .chat-thinking-box）
+   ================================================================ */
+.assistant-status-host {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.assistant-thinking-block {
+  border: 1px solid color-mix(in srgb, var(--thinking-border) 55%, transparent);
+  border-left: 3px solid var(--thinking-border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--thinking-border) 8%, transparent);
+  font-size: 12px;
+  overflow: hidden;
+  margin: 2px 0 6px;
+}
+.assistant-thinking-summary {
+  cursor: pointer;
+  padding: 7px 12px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  font-weight: 700;
+  color: color-mix(in srgb, var(--vscode-descriptionForeground) 85%, var(--thinking-border));
+  user-select: none;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  transition: background 0.15s ease;
+}
+.assistant-thinking-summary:hover {
+  background: color-mix(in srgb, var(--thinking-border) 10%, transparent);
+}
+.assistant-thinking-summary::-webkit-details-marker { display: none; }
+.assistant-thinking-block[open] .assistant-thinking-summary {
+  border-bottom: 1px dashed color-mix(in srgb, var(--thinking-border) 35%, transparent);
+}
+/* 官方 codicon 图标：流式时 circle-filled 旋转，结束后 check（由 app.js 切换） */
+.thinking-icon { font-size: 13px; color: var(--thinking-border); flex-shrink: 0; }
+.msg.agent.streaming .thinking-icon { animation: spin 1.2s linear infinite; }
+.assistant-thinking-content {
+  margin: 0;
+  padding: 8px 12px 10px;
+  font-family: var(--code-font-family);
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--vscode-descriptionForeground);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 260px;
+  overflow-y: auto;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* 进度条目（PROGRESS_STEP） */
+.assistant-status-item {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 12px;
+  padding: 2px 0 2px 10px;
+  border-left: 2px solid color-mix(in srgb, var(--vscode-descriptionForeground) 30%, transparent);
+}
+.assistant-status-kind {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 700;
+  color: var(--vscode-descriptionForeground);
+  min-width: 56px;
+}
+.assistant-status-text { color: var(--vscode-descriptionForeground); }
+
+/* ================================================================
+   工具调用卡（官方 tool-invocation：左侧竖线 + 图标 + 名称 + 状态）
+   ================================================================ */
+/* 「已完成 N 个步骤」折叠组（对齐桌面 Copilot progress） */
+.msg.step-group {
+  align-self: flex-start;
+  width: 100%;
+  margin: 4px 0 8px;
+}
+.step-group-details {
+  border: none;
+  background: transparent;
+}
+.step-group-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  padding: 2px 0;
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground);
+}
+.step-group-summary::-webkit-details-marker { display: none; }
+.step-group-summary:hover { color: var(--vscode-foreground); }
+.step-group-icon {
+  font-size: 12px;
+  color: #73c991;
+}
+.step-group-label {
+  font-size: 12px;
+}
+.step-group-chevron {
+  font-size: 11px;
+  opacity: 0.7;
+  transition: transform 0.15s ease;
+}
+.step-group-details[open] > .step-group-summary .step-group-chevron {
+  transform: rotate(180deg);
+}
+.step-group-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+  padding-left: 4px;
+  border-left: 2px solid color-mix(in srgb, var(--vscode-descriptionForeground) 25%, transparent);
+}
+.step-group-body .msg.tool-card {
+  margin: 0;
+}
+
+.msg.tool-card { align-self: flex-start; width: 100%; }
+.tool-details {
+  background: color-mix(in srgb, var(--vscode-input-background) 40%, transparent);
+  border: 1px solid color-mix(in srgb, var(--vscode-sideBar-border) 70%, transparent);
+  border-left: 3px solid var(--vscode-chat-requestBorder);
+  border-radius: 8px;
+  overflow: hidden;
+  font-size: 12px;
+  margin: 2px 0 6px;
+}
+.tool-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  transition: background 0.15s ease;
+}
+.tool-summary::-webkit-details-marker { display: none; }
+.tool-summary:hover { background: var(--vscode-list-hoverBackground); }
+.tool-gear {
+  font-size: 13px;
+  color: var(--vscode-symbolIcon-methodForeground, var(--vscode-descriptionForeground));
+  flex-shrink: 0;
+}
+.tool-details[open] .tool-summary {
+  border-bottom: 1px dashed color-mix(in srgb, var(--vscode-sideBar-border) 60%, transparent);
+}
+.tool-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--vscode-foreground);
+  font-family: var(--code-font-family);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tool-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  padding: 2px 9px;
+  border-radius: 10px;
+  font-family: var(--font-family);
+  flex-shrink: 0;
+}
+.tool-badge .codicon { font-size: 10px; }
+.tool-badge.running {
+  background: color-mix(in srgb, #e8b339 18%, transparent);
+  color: #e8b339;
+}
+.tool-badge.running .codicon { animation: spin 1s linear infinite; }
+.tool-badge.done {
+  background: color-mix(in srgb, #73c991 18%, transparent);
+  color: #73c991;
+}
+.tool-badge.confirmed {
+  background: color-mix(in srgb, #73c991 20%, transparent);
+  color: #73c991;
+  border: 1px solid color-mix(in srgb, #73c991 45%, transparent);
+}
+.tool-body { background: var(--vscode-editor-background); }
+.tool-pend-hint {
+  padding: 8px 10px;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  border-top: 1px dashed var(--vscode-sideBar-border);
+}
+.tool-section { padding: 8px 10px 10px; }
+.tool-section.border { border-top: 1px solid var(--vscode-sideBar-border); }
+.tool-label {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  margin-bottom: 4px;
+  font-family: var(--font-family);
+}
+.tool-pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-size: 11px;
+  color: var(--vscode-foreground);
+  font-family: var(--code-font-family);
+  line-height: 1.4;
+}
+
+/* ================================================================
+   确认卡（AGENT_CONFIRM）
+   ================================================================ */
+.msg.confirm-card {
+  align-self: stretch;
+  background: color-mix(in srgb, var(--vscode-input-background) 60%, transparent);
+  border: 1px solid var(--vscode-sideBar-border);
+  border-radius: 4px;
+  padding: 10px 12px;
+  margin: 4px 0;
+}
+.msg.confirm-card.resolved { opacity: 0.6; }
+.confirm-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--vscode-foreground);
+  margin-bottom: 4px;
+}
+.confirm-body {
+  font-size: 13px;
+  color: var(--vscode-descriptionForeground);
+  line-height: 1.45;
+  white-space: pre-wrap;
+  margin-bottom: 10px;
+}
+.confirm-btns { display: flex; flex-wrap: wrap; gap: 8px; }
+.confirm-btns .btn-primary {
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+  border: none;
+  border-radius: 4px;
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  min-height: 40px;
+  cursor: pointer;
+}
+.confirm-btns .btn-primary:active { background: var(--vscode-button-hoverBackground); }
+.confirm-btns .btn-cancel {
+  background: transparent;
+  color: var(--vscode-foreground);
+  border: 1px solid var(--vscode-sideBar-border);
+  border-radius: 4px;
+  padding: 6px 14px;
+  font-size: 13px;
+  min-height: 40px;
+  cursor: pointer;
+}
+.confirm-btns .btn-cancel:active { background: var(--vscode-list-hoverBackground); }
+
+/* Sticky confirm bar */
+.confirm {
+  margin: 0 12px 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--vscode-sideBar-border);
+  border-radius: 4px;
+  background: var(--vscode-sideBar-background);
+}
+.confirm.hidden { display: none; }
+.confirm h3 { margin: 0 0 4px; font-size: 13px; color: var(--vscode-foreground); }
+.confirm p { margin: 0 0 10px; color: var(--vscode-descriptionForeground); font-size: 12px; white-space: pre-wrap; }
+.confirm .btns { display: flex; flex-wrap: wrap; gap: 8px; }
+.confirm button {
+  border: 1px solid var(--vscode-sideBar-border);
+  background: transparent;
+  color: var(--vscode-foreground);
+  border-radius: 4px;
+  padding: 8px 14px;
+  min-height: 40px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.confirm button.primary {
+  background: var(--vscode-button-background);
+  border-color: transparent;
+  color: var(--vscode-button-foreground);
+}
+
+/* ================================================================
+   Composer（VS Code chat composer）
+   ================================================================ */
+.composer {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--vscode-chat-requestBorder);
+  background: var(--vscode-editor-background);
+}
+#input {
+  resize: none;
+  min-height: 40px;
+  max-height: 140px;
+  border-radius: 4px;
+  border: 1px solid var(--vscode-input-border);
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  padding: 10px 12px;
+  font: inherit;
+  font-size: var(--vscode-chat-font-size-body-s);
+  outline: none;
+}
+#input:focus { border-color: var(--vscode-focusBorder); }
+#input::placeholder { color: var(--vscode-descriptionForeground); }
+#send {
+  border: none;
+  border-radius: 4px;
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+  font-weight: 600;
+  font-size: 13px;
+  padding: 0 16px;
+  min-width: 64px;
+  min-height: 40px;
+  cursor: pointer;
+}
+#send:active { background: var(--vscode-button-hoverBackground); }
+#send:disabled { opacity: 0.5; }
+/* 请求进行中：发送 → 停止（对齐 VS Code composer stop） */
+#send.is-stop {
+  background: color-mix(in srgb, var(--vscode-errorForeground, #f14c4c) 85%, #000);
+  color: #fff;
+}
+#send.is-stop:active {
+  filter: brightness(0.92);
+}
+
+/* ================================================================
+   会话列表抽屉（VS Code sidebar）
+   ================================================================ */
+.drawer-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 40;
+}
+.session-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(80vw, 320px);
+  background: var(--vscode-sideBar-background);
+  border-left: 1px solid var(--vscode-sideBar-border);
+  z-index: 50;
+  transform: translateX(100%);
+  transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+  display: flex;
+  flex-direction: column;
+  box-shadow: -12px 0 32px rgba(0, 0, 0, 0.35);
+}
+.session-drawer.open { transform: translateX(0); }
+.drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--vscode-sideBar-border);
+}
+.drawer-title {
+  font-weight: 700;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--vscode-descriptionForeground);
+}
+.session-list {
+  overflow-y: auto;
+  padding: 4px 0;
+  display: flex;
+  flex-direction: column;
+}
+/* VS Code 扁平列表项（hover/active 高亮，无圆角卡片） */
+.session-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  background: transparent;
+  border: none;
+  border-left: 2px solid transparent;
+  color: var(--vscode-foreground);
+  padding: 8px 12px;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+.session-item:hover { background: var(--vscode-list-hoverBackground); }
+.session-item:active {
+  background: var(--vscode-list-activeSelectionBackground);
+  border-left-color: var(--vscode-focusBorder);
+}
+.session-item.bound {
+  background: var(--vscode-list-inactiveSelectionBackground, rgba(90, 140, 220, 0.14));
+  border-left-color: var(--vscode-focusBorder);
+}
+.session-item.bound .session-name::after {
+  content: " ·";
+  color: var(--vscode-focusBorder);
+}
+.session-name {
+  font-size: 13px;
+  font-weight: 600;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.session-meta {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  font-family: var(--font-family);
+}
+.drawer-empty {
+  color: var(--vscode-descriptionForeground);
+  font-size: 13px;
+  text-align: center;
+  padding: 24px 0;
+}
+
+/* ---- 工作区分组（会话按「主机:文件夹」归组） ---- */
+.ws-group {
+  display: flex;
+  flex-direction: column;
+}
+/* 组标题行：sticky 吸顶，点击折叠/展开 */
+.ws-group-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--vscode-sideBarSectionHeader-background, #252526);
+  border: none;
+  border-bottom: 1px solid var(--vscode-chat-requestBorder);
+  color: var(--vscode-descriptionForeground);
+  padding: 6px 10px;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.ws-group-header:hover { background: var(--vscode-list-hoverBackground); }
+/* 折叠箭头：展开时旋转 90° */
+.ws-caret {
+  flex: 0 0 auto;
+  font-size: 14px;
+  transition: transform 0.15s ease;
+}
+.ws-group.open .ws-caret { transform: rotate(90deg); }
+.ws-remote-icon {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground);
+}
+.ws-group-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--vscode-foreground);
+}
+/* 计数：与组名之间留出间距，避免粘连 */
+.ws-group-count {
+  flex: 0 0 auto;
+  margin-left: 6px;
+  font-variant-numeric: tabular-nums;
+  color: var(--vscode-descriptionForeground);
+}
+.ws-badge {
+  flex: 0 0 auto;
+  margin-left: 4px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+.ws-badge.current {
+  background: var(--vscode-badge-background, #4d4d4d);
+  color: var(--vscode-badge-foreground, #fff);
+}
+.ws-badge.remote {
+  background: transparent;
+  border: 1px solid var(--vscode-chat-requestBorder);
+  color: var(--vscode-descriptionForeground);
+}
+/* 组内容：折叠时隐藏 */
+.ws-group-body { display: none; flex-direction: column; }
+.ws-group.open .ws-group-body { display: flex; }
+
+/* ---- VS Code 实例列表项（复用会话抽屉扁平列表风格） ---- */
+.instance-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  background: transparent;
+  border: none;
+  border-left: 2px solid transparent;
+  color: var(--vscode-foreground);
+  padding: 8px 12px;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+.instance-item:hover { background: var(--vscode-list-hoverBackground); }
+.instance-item:active {
+  background: var(--vscode-list-activeSelectionBackground);
+  border-left-color: var(--vscode-focusBorder);
+}
+.instance-item.current { border-left-color: var(--vscode-focusBorder); }
+.instance-name-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-width: 0;
+}
+.instance-name {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* "主"徽标（isPrimary） */
+.instance-badge {
+  flex-shrink: 0;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: var(--vscode-badge-background);
+  color: var(--vscode-badge-foreground);
+}
+.instance-badge.primary {
+  background: color-mix(in srgb, var(--copilot-purple) 25%, transparent);
+  color: var(--copilot-purple);
+}
+.instance-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  font-family: var(--font-family);
+}
+.instance-current {
+  font-size: 11px;
+  color: #73c991;
+}
+
+/* ================================================================
+   终端面板（VS Code terminal 配色）
+   ================================================================ */
+.terminal-panel {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 35;
+  max-width: 720px;
+  margin: 0 auto;
+  background: var(--vscode-terminal-background);
+  border: 1px solid var(--vscode-sideBar-border);
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+  transform: translateY(105%);
+  transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+  padding: 10px 12px calc(12px + env(safe-area-inset-bottom));
+  box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.45);
+}
+.terminal-panel.open { transform: translateY(0); }
+.terminal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.terminal-title {
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--vscode-descriptionForeground);
+}
+.terminal-tools { display: flex; align-items: center; gap: 4px; }
+.terminal-select {
+  background: var(--vscode-dropdown-background);
+  color: var(--vscode-dropdown-foreground);
+  border: 1px solid var(--vscode-dropdown-border);
+  border-radius: 4px;
+  padding: 5px 8px;
+  font-size: 12px;
+  max-width: 180px;
+  height: 28px;
+}
+.terminal-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+#terminalInput {
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  border: 1px solid var(--vscode-input-border);
+  border-radius: 4px;
+  padding: 9px 12px;
+  font: inherit;
+  font-size: 12px;
+  font-family: var(--code-font-family);
+  outline: none;
+  min-height: 40px;
+}
+#terminalInput:focus { border-color: var(--vscode-focusBorder); }
+#terminalExec {
+  border: none;
+  border-radius: 4px;
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+  font-weight: 600;
+  padding: 0 16px;
+  min-height: 40px;
+  cursor: pointer;
+}
+#terminalExec:disabled { opacity: 0.5; }
+.terminal-output {
+  margin: 0;
+  max-height: 35dvh;
+  overflow: auto;
+  background: var(--vscode-terminal-background);
+  border: 1px solid var(--vscode-sideBar-border);
+  border-radius: 4px;
+  padding: 10px 12px;
+  font-family: var(--code-font-family);
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--vscode-terminal-foreground);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.term-ok { color: #73c991; }
+.term-error { color: #f48771; }
+
+/* ================================================================
+   会话抽屉 / sheet 搜索框
+   ================================================================ */
+.drawer-search,
+.sheet-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--vscode-sideBar-border);
+}
+.drawer-search-icon,
+.sheet-search-icon {
+  position: absolute;
+  left: 20px;
+  font-size: 13px;
+  color: var(--vscode-descriptionForeground);
+  pointer-events: none;
+}
+.drawer-search input,
+.sheet-search input {
+  flex: 1;
+  min-width: 0;
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  border: 1px solid var(--vscode-input-border);
+  border-radius: 4px;
+  padding: 7px 8px 7px 28px;
+  font: inherit;
+  font-size: 12px;
+  outline: none;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.drawer-search input:focus,
+.sheet-search input:focus { border-color: var(--vscode-focusBorder); }
+
+/* ================================================================
+   composer 控件条（mode / 模型 / 审批模式）
+   ================================================================ */
+.composer-controls {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.composer-controls::-webkit-scrollbar { display: none; }
+.ctrl-select {
+  background: var(--vscode-dropdown-background);
+  color: var(--vscode-dropdown-foreground);
+  border: 1px solid var(--vscode-dropdown-border);
+  border-radius: 12px;
+  padding: 3px 8px;
+  font-family: var(--font-family);
+  font-size: 11px;
+  height: 24px;
+  outline: none;
+  flex-shrink: 0;
+}
+.ctrl-select:focus { border-color: var(--vscode-focusBorder); }
+/* 小胶囊 trigger（模型 / 审批模式） */
+.ctrl-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 40vw;
+  min-height: 24px;
+  padding: 3px 8px;
+  border: 1px solid var(--vscode-chat-requestBorder);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--vscode-foreground);
+  font-family: var(--font-family);
+  font-size: 11px;
+  line-height: 1.4;
+  cursor: pointer;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.ctrl-pill:hover { background: var(--vscode-list-hoverBackground); }
+.ctrl-pill:active { background: var(--vscode-toolbar-hoverBackground); }
+.ctrl-pill-icon { font-size: 12px; flex-shrink: 0; }
+.ctrl-pill-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ctrl-caret {
+  font-size: 11px;
+  flex-shrink: 0;
+  color: var(--vscode-descriptionForeground);
+}
+
+/* ================================================================
+   底部 sheet（模型选择 / 审批模式）
+   ================================================================ */
+.sheet-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 55;
+}
+.bottom-sheet {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 60;
+  max-height: 80vh;
+  overflow-y: auto;
+  background: var(--vscode-sideBar-background);
+  border-top: 1px solid var(--vscode-chat-requestBorder);
+  border-top-left-radius: 12px;
+  border-top-right-radius: 12px;
+  transform: translateY(100%);
+  transition: transform 0.25s ease;
+  padding-bottom: env(safe-area-inset-bottom);
+  box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.45);
+}
+.bottom-sheet.open { transform: translateY(0); }
+/* iOS 风格顶部抓取条 */
+.sheet-grabber {
+  width: 36px;
+  height: 4px;
+  margin: 8px auto 2px;
+  border-radius: 2px;
+  background: var(--vscode-descriptionForeground);
+  opacity: 0.4;
+}
+.sheet-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  background: var(--vscode-sideBar-background);
+  border-bottom: 1px solid var(--vscode-sideBar-border);
+}
+.sheet-title {
+  font-weight: 700;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--vscode-descriptionForeground);
+}
+.sheet-list {
+  display: flex;
+  flex-direction: column;
+  padding: 4px 0 8px;
+}
+.sheet-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 8px 14px;
+  border-left: 2px solid transparent;
+  cursor: pointer;
+  color: var(--vscode-foreground);
+}
+.sheet-row:hover { background: var(--vscode-list-hoverBackground); }
+.sheet-row.current {
+  border-left-color: var(--vscode-focusBorder);
+  background: rgba(0, 127, 212, 0.08);
+}
+.sheet-row.disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.sheet-row.disabled:hover { background: transparent; }
+.sheet-check {
+  width: 16px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  color: #73c991;
+}
+.sheet-row-body { min-width: 0; flex: 1; }
+.sheet-row-title {
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sheet-row-sub {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  margin-top: 2px;
+}
+.sheet-error {
+  padding: 8px 14px;
+  font-size: 12px;
+  color: #f48771;
+  background: rgba(244, 135, 113, 0.12);
+  border-bottom: 1px solid rgba(244, 135, 113, 0.3);
+}
+.sheet-empty {
+  padding: 16px 14px;
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground);
+  text-align: center;
+}
+
+/* ================================================================
+   移动端适配
+   ================================================================ */
+@media (max-width: 640px) {
+  #input, #terminalInput, .drawer-search input, .sheet-search input {
+    font-size: 16px !important;
+  }
+  .feed {
+    padding: 2px 14px 10px;
+  }
+  .chat-row {
+    gap: 8px;
+    padding: 8px 0;
+  }
+  .top {
+    padding: calc(8px + env(safe-area-inset-top, 0px)) 10px 8px;
+  }
+  .composer {
+    gap: 6px;
+    padding: 8px 10px calc(10px + env(safe-area-inset-bottom));
+  }
+}
+
+/* ================================================================
+   Visual Viewport 键盘与辅助控件
+   ================================================================ */
+:root {
+  --viewport-height: 100dvh;
+}
+
+body {
+  min-height: var(--viewport-height, 100dvh);
+}
+
+.fab-scroll-bottom {
+  position: fixed;
+  right: 16px;
+  bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--vscode-sideBar-background);
+  color: var(--vscode-foreground);
+  border: 1px solid var(--vscode-sideBar-border);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 10;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  transform: translateY(8px);
+}
+
+.fab-scroll-bottom.visible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+.fab-scroll-bottom:active {
+  background: var(--vscode-list-hoverBackground);
+}
+
+.lang-btn {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 10px;
+  opacity: 0.8;
+}
