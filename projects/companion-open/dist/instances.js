@@ -150,12 +150,16 @@ class InstanceDiscovery {
                     finish(normalizeStatus(msg, port));
                     return;
                 }
-                // 允许 bridge 连接时预推送的已知消息类型（如 AGENT_LIST / TUNNEL_URL / SYSTEM_MESSAGE）
-                if (msg.type === 'AGENT_LIST' || msg.type === 'TUNNEL_URL' || msg.type === 'SYSTEM_MESSAGE') {
+                // 握手后 bridge 会顺推 HISTORY_REPLAY / AGENT_STREAM_SET 等广播帧——
+                // 这些不是探测协议的一部分，继续等 INSTANCE_STATUS；曾经按
+                // 「非预期类型即终止」把每条探测都在 HISTORY_REPLAY 上掐死，
+                // 发现列表恒为空。只有 AUTH_FAILED（认证错误=不值得重试）
+                // 才真正终止；foreign WS 交由 PROBE_TIMEOUT 兜底。
+                if (msg.type === 'AUTH_FAILED') {
+                    finish(undefined);
                     return;
                 }
-                // 收到非预期的其它消息类型或错误响应（如 AUTH_FAILED / foreign WS），立即终止探测
-                finish(undefined);
+                // 其余带 type 的 JSON 一律忽略继续等（含 AGENT_LIST/HISTORY_REPLAY 等）
             });
             ws.on('error', () => finish(undefined));
             ws.on('close', () => finish(undefined));

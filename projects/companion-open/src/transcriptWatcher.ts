@@ -33,8 +33,12 @@ export interface TranscriptWatcherOptions {
   chatSessionsDir?: string;
   /** 轮询兜底间隔 ms，默认 100 */
   pollMs?: number;
-  /** 投影出的 PhoneEvent 回调 */
-  onEvent: (ev: PhoneEvent) => void;
+  /** 投影出的 PhoneEvent 回调；返回 false 表示该事件最终未被投递
+      （回声/去重/仲裁器丢弃）——emit() 据此不记「已投」指纹，避免
+      首通道被丢后后续通道的同答案被误判重投影而净丢。 */
+  onEvent: (ev: PhoneEvent) => boolean | void;
+  /** 诊断日志（接到扩展 QR 面板）；压制类丢弃必须可观测 */
+  onLog?: (line: string) => void;
   /** 兜底轮询 chatSessions 兜底源的最短间隔（ms），默认 2000 */
   fallbackPollMs?: number;
   /** Copilot 会话库（globalStorage/github.copilot-chat/session-store.db）：
@@ -208,6 +212,8 @@ export class TranscriptWatcher {
   private gapFilledRequestIds = new Set<string>();
   /** 已经从 transcript 得到完整助手回复的用户文，避免 chatSessions 再 gap */
   private completedGapUserTexts = new Set<string>();
+  /** 本问题开问时 ut 是否已在 completedGapUserTexts（同题重问基线）。 */
+  private utCompletedBeforeTurn = false;
   /**
    * 0.5.26：待补全的用户请求有序队列（FIFO）。
    * 确保多个 in-flight 请求按时间序确定性匹配，取代无序集合迭代。
@@ -242,10 +248,20 @@ export class TranscriptWatcher {
   // ---- 事件 → PhoneEvent 映射状态 ----
   private activeTurnId: string | null = null;
   private turnSeq = 0;
+  /** 轮级归属：turn_start 时捕获的当时问题文本。轮内事件归属用它而非按
+   * 记录 ts 找最近问题——并发/乱序轮里 +2s 宽限会把旧轮正文错盖到后开的
+   * 问题下（实测 BURST3 的 assistant 记录被归到 BURST1 轮、答案贴错泡）。 */
+  private turnUt = '';
+  private turnStartTsMs = NaN;
+  /** 下一条 turn_start 应归属的问题：transcript 的 user.message 处理时记录。
+   *  不用 activeUserText——注入侧 addPendingPhoneUserText 会随时覆盖它，
+   *  在轮次交错/乱序时把 turn_start 错挂到新问题上（实测 BURST3 轮被归
+   *  到 BURST1）。 */
+  private pendingTurnUt = '';
   private activeStreamId: string | null = null;
   private streamAccum = '';
   private pendingReasoning: string[] = [];
-  private toolStates = new Map<string, { text: string; requestIndex?: number; complete?: boolean }>();
+  private toolStates = new Map<string, { text: string; requestIndex?: number; complete?: boolean; ut?: string }>();
   private seenMessageIds = new Set<string>();
   /** messageId → 该消息已见到的最大 content 快照（同一 messageId 重写变长 → 前缀 diff 发增量） */
   private lastContentByMessageId = new Map<string, string>();
@@ -362,6 +378,9 @@ export class TranscriptWatcher {
     this.updatePollInterval();
     // 周期 rescan：新会话文件出现时切换（双源：transcripts + chatSessions）
     this.rescanTimer = setInterval(() => this.scanNewestBoth(), RESCAN_MS);
+    // sessiondb 全局轮询独立启动：不依赖任何 transcript 绑定——切到无
+    // transcript 的会话（或切换竞态中）快通道也必须在线，否则整轮静默丢答。
+    this.ensureSessionDbPoll();
   }
 
   dispose() {
@@ -377,6 +396,8 @@ export class TranscriptWatcher {
     // 兜底源清理：解绑 + 清投影器内部 debounce 定时器
     this.unbindFallback();
     this.fallbackProjector.dispose();
+    if (this.sessionDbTimer) clearInterval(this.sessionDbTimer);
+    this.sessionDbTimer = undefined;
     this.closeWatchers();
     this.closeSessionDbWatcher();
   }
@@ -399,6 +420,7 @@ export class TranscriptWatcher {
   addPendingPhoneUserText(text: string) {
     const ut = this.normUserText(text);
     if (!ut) return;
+    this.utCompletedBeforeTurn = this.completedGapUserTexts.has(ut);
     this.activeUserText = ut;
     this.pushPendingGap(ut, true);
     this.capCollections();
@@ -497,14 +519,17 @@ export class TranscriptWatcher {
 
     // 会话基名 + chatSessions 兜底源联动
     this.boundSessionBase = path.basename(file);
-    // session-store.db：换会话时重置 turns 游标到当前末尾（只跟新增）
+    // session-store.db：turns 轮询是全局的（不按绑定 sid 过滤），这里只更新
+    // 「当前会话」归属（回放兜底 sessionDbRecentTurns 的默认 sid）+ 补种在途
+    // 悬挂行。行 id 是全局游标：换会话不再重置水位/已投集合——否则绑定瞬间
+    // 已插入未完成的在途行被水位盖过，答案落库后永远不再投（切换竞态静默丢答）。
     const sid = this.boundSessionBase.replace(/\.jsonl$/, '');
     if (this.sessionDbSessionId !== sid) {
       this.sessionDbSessionId = sid;
-      this.sessionDbLastRow = this.querySessionDbMaxId();
       this.sessionDbPendingRows.clear();
-      this.sessionDbUserEmittedIds.clear();
+      this.seedPendingSessionDbRows();
     }
+    this.ensureSessionDbPoll();
     if (this.opts.chatSessionsDir) {
       const csFile = path.join(this.opts.chatSessionsDir, this.boundSessionBase);
       if (fs.existsSync(csFile)) {
@@ -898,10 +923,19 @@ export class TranscriptWatcher {
 
   private sessionDbSessionId: string | undefined;
   private sessionDbLastRow = 0;
+  private sessionDbWatermarked = false;
+  /** 独立轮询表：不再寄生于 fallbackTimer（chatSessions 缺位会被解绑连带清掉） */
+  private sessionDbTimer: ReturnType<typeof setInterval> | undefined;
   /** 当前正在分发的 transcript 行的事件 ts(ms)：emit() 给未带 timestamp 的事件
    *  盖上真实记录时刻，PWA 的按 ts 排序才有意义（否则全塌成到达序）。
    *  仅 handleEvent 内有效，分发结束即清——定时器/轮询通道的事件必须自带 ts。 */
   private evTsMs = NaN;
+  /** 行链归属：transcript 每行带 id+parentId 链（id → 该行所属轮次的归一用户文）。
+   *  晚到落盘的记录沿 parentId 找回本 turn，不靠 ts/activeUserText 猜（B1：
+   *  alpha 的 assistant.message 迟写落在 beta 轮期间被盖错 _ut 重投）。 */
+  private idToTurnUt = new Map<string, string>();
+  /** 当前处理行的谱系 ut（dispatch 期间有效，同 evTsMs 语义）。 */
+  private evLineageUt: string | undefined = undefined;
   /** sessiondb 悬挂行：首取时 assistant_response 为空（先插 user 行后 UPDATE），
    *  `id>` 游标已越过 → 每轮显式重查直到补全或超过 TTL。行 id → 首见时间。 */
   private sessionDbPendingRows = new Map<number, number>();
@@ -934,16 +968,14 @@ export class TranscriptWatcher {
     }
   }
 
-  /** 当前绑定会话在 turns 表里的最大行号（换会话时调用；失败视为 0 从头跟） */
-  private querySessionDbMaxId(): number {
-    const sid = this.sessionDbSessionId;
-    if (!sid) return 0;
+  /** turns 表全局最大行号（首启水位；失败视为 0 从头跟） */
+  private querySessionDbGlobalMaxId(): number {
     const db = this.openSessionDb();
     if (!db) return 0;
     try {
-      const row = db
-        .prepare('SELECT MAX(id) AS m FROM turns WHERE session_id = ?')
-        .get(sid) as { m?: number } | undefined;
+      const row = db.prepare('SELECT MAX(id) AS m FROM turns').get() as
+        | { m?: number }
+        | undefined;
       return row?.m ?? 0;
     } catch {
       return 0;
@@ -952,15 +984,92 @@ export class TranscriptWatcher {
     }
   }
 
+  /** sessiondb 全局轮询启动 + 一次性水位播种（只跟新增行） */
+  private ensureSessionDbPoll() {
+    if (!this.opts.sessionStoreDb || this.disposed) return;
+    if (!this.sessionDbWatermarked) {
+      this.sessionDbLastRow = this.querySessionDbGlobalMaxId();
+      this.sessionDbWatermarked = true;
+      this.seedPendingSessionDbRows();
+    }
+    if (!this.sessionDbTimer) {
+      this.sessionDbTimer = setInterval(() => this.pollSessionStoreDb(), this.fallbackPollMs);
+    }
+  }
+
+  /**
+   * 把「已插入但 assistant_response 仍为空」的近期 turns 行补进悬挂重查：
+   * 轮询靠 `id > 水位` 抓新行，而在水位播种/换会话之前就已存在的在途行
+   * 永远够不到水位 → 答案落库无人察觉 = 静默丢答（R18 BUG-1 根因之一）。
+   */
+  private seedPendingSessionDbRows() {
+    if (!this.opts.sessionStoreDb || this.disposed) return;
+    const db = this.openSessionDb();
+    if (!db) return;
+    try {
+      const rows = db
+        .prepare(
+          "SELECT id, timestamp FROM turns WHERE assistant_response IS NULL OR TRIM(assistant_response) = '' ORDER BY id DESC LIMIT 64",
+        )
+        .all() as Array<{ id?: number; timestamp?: string }>;
+      const now = Date.now();
+      for (const r of rows) {
+        if (typeof r.id !== 'number') continue;
+        if (this.sessionDbEmittedIds.has(r.id)) continue;
+        const ts = Date.parse(String(r.timestamp || '')) || 0;
+        // 只跟近期在途行：陈旧的空答案行是停止/失败轮的死行，不补种
+        if (!ts || now - ts > 10 * 60_000) continue;
+        this.sessionDbPendingRows.set(r.id, now);
+      }
+    } catch {
+      /* 库被锁/结构变化：下轮再试 */
+    } finally {
+      db.close();
+    }
+  }
+
+  /** 无 transcript 可绑定时，让 sessiondb 归属/兜底仍跟随所选会话。 */
+  noteSession(sessionBase: string) {
+    const sid = String(sessionBase || '').replace(/\.jsonl$/i, '');
+    if (!sid) return;
+    if (this.sessionDbSessionId !== sid) {
+      this.sessionDbSessionId = sid;
+      this.sessionDbPendingRows.clear();
+      this.seedPendingSessionDbRows();
+    }
+    this.ensureSessionDbPoll();
+  }
+
+  /** 当前双源目录里最新的会话文件路径（跟随压制重放前的有效性校验用）。 */
+  newestSessionFile(): string | undefined {
+    const t = this.newestInDir(this.opts.dir);
+    const cs = this.opts.chatSessionsDir ? this.newestInDir(this.opts.chatSessionsDir) : undefined;
+    let name: string | undefined;
+    let m = -1;
+    if (t && t.mtimeMs > m) {
+      m = t.mtimeMs;
+      name = t.name;
+    }
+    if (cs && cs.mtimeMs > m) {
+      m = cs.mtimeMs;
+      name = cs.name;
+    }
+    if (!name) return undefined;
+    const tf = path.join(this.opts.dir, name);
+    if (fs.existsSync(tf)) return tf;
+    const cp = this.opts.chatSessionsDir ? path.join(this.opts.chatSessionsDir, name) : undefined;
+    return cp && fs.existsSync(cp) ? cp : undefined;
+  }
+
   /** 轮询 turns 新行：响应完成即落库 → 立即 emit AGENT_MESSAGE（ut 键去重 chatSessions 迟到的重复投影） */
   private pollSessionStoreDb() {
-    const sid = this.sessionDbSessionId;
-    if (!this.opts.sessionStoreDb || !sid || this.disposed) return;
+    if (!this.opts.sessionStoreDb || this.disposed) return;
     // 目录在激活时可能尚未创建（db 由 Copilot 登录/首会话后才出现）：
     // bindSessionDbWatcher 对缺目录早退且绑定期仅一次 → 这里每次轮询重试挂 watch。
     if (!this.sessionDbWatcher) this.bindSessionDbWatcher();
     let rows: Array<{
       id: number;
+      session_id?: string;
       user_message: string | null;
       assistant_response: string | null;
       timestamp?: string;
@@ -968,11 +1077,14 @@ export class TranscriptWatcher {
     const db = this.openSessionDb();
     if (!db) return;
     try {
+      // 全局轮询（不按 session_id 过滤）：绑定/切换竞态中归属会话可能反复易主，
+      // 按 sid 过滤会把真实会话的新行整段漏掉（R18 BUG-1：切会话后首发零直播帧）。
+      // 事件打 _sess=行.session_id，客户端按展示会话过滤，别会话轮次不误显。
       rows = db
         .prepare(
-          'SELECT id, user_message, assistant_response, timestamp FROM turns WHERE session_id = ? AND id > ? ORDER BY id',
+          'SELECT id, session_id, user_message, assistant_response, timestamp FROM turns WHERE id > ? ORDER BY id',
         )
-        .all(sid, this.sessionDbLastRow) as typeof rows;
+        .all(this.sessionDbLastRow) as typeof rows;
       // 悬挂行重查：turns 行可能先只写 user_message（插入）稍后 UPDATE 补
       // assistant_response —— `id >` 游标已越过它，不显示重查这行，
       // 在 transcript/chatSessions 两通道都滞后的场景（Windows 慢盘实测）
@@ -988,9 +1100,9 @@ export class TranscriptWatcher {
           const ph = ids.map(() => '?').join(',');
           const again = db
             .prepare(
-              `SELECT id, user_message, assistant_response, timestamp FROM turns WHERE session_id = ? AND id IN (${ph})`,
+              `SELECT id, session_id, user_message, assistant_response, timestamp FROM turns WHERE id IN (${ph})`,
             )
-            .all(sid, ...ids) as typeof rows;
+            .all(...ids) as typeof rows;
           if (Array.isArray(again) && again.length) rows.push(...again);
         }
       }
@@ -1019,7 +1131,12 @@ export class TranscriptWatcher {
           this.userTsByUt.set(utT, rowTs);
           this.activeUserText = utT;
         }
-        this.emit({ type: 'USER_MESSAGE', text: uText, timestamp: rowTs } as PhoneEvent);
+        this.emit({
+          type: 'USER_MESSAGE',
+          text: uText,
+          timestamp: rowTs,
+          _sess: String(r.session_id || ''),
+        } as PhoneEvent);
       }
       const text = String(r.assistant_response || '').trim();
       if (!text) {
@@ -1037,10 +1154,11 @@ export class TranscriptWatcher {
         {
           type: 'AGENT_MESSAGE',
           text,
-          streamId: `sessiondb/${sid}/${r.id}`,
+          streamId: `sessiondb/${r.session_id}/${r.id}`,
           requestIndex: -1,
           timestamp: rowTs,
           _ut: r.user_message || undefined,
+          _sess: String((r as any).session_id || ''),
         } as PhoneEvent,
       ]);
       // turns 行落库=该轮已完成：补一个 DONE 收尾，否则 typing/••• 占位要等到
@@ -1051,6 +1169,7 @@ export class TranscriptWatcher {
         requestIndex: -1,
         timestamp: rowTs,
         _ut: r.user_message || undefined,
+        _sess: String(r.session_id || ''),
       } as PhoneEvent);
     }
   }
@@ -1204,6 +1323,46 @@ export class TranscriptWatcher {
         // 0.5.26 phone gap-fill：只投影「有待补用户文」且带完整 response 的 request
         if (this.suppressFallbackAgent) {
           if (rid) this.fallbackSeenRequestIds.add(rid);
+          // reqerr/取消终态：errorDetails 落在 result 上，response 常为空或只剩
+          // mcpServersStarting 占位——response 长度闸会把它跳过，requestId 又被
+          // 记成 seen 永不重查 → 整轮零事件，手机端卡「正在输入」到硬超时。
+          // 有待补用户文的错误请求直接合成 ⚠️ 正文 + DONE（带 _ut 归属）。
+          const res = asRecord(r?.result);
+          const errMsg =
+            asString(asRecord(res?.errorDetails)?.message) ||
+            asString(asRecord(res?.error)?.message) ||
+            asString(asRecord(r?.errorDetails)?.message);
+          const errored = !!errMsg || (r as any)?.isCanceled === true || (r as any)?.isCanceled === 1;
+          if (
+            errored &&
+            rid &&
+            userText &&
+            this.hasPendingGap(userText) &&
+            !this.gapFilledRequestIds.has(rid)
+          ) {
+            const ets = typeof (r as any)?.timestamp === 'number' ? (r as any).timestamp : undefined;
+            const ee: PhoneEvent[] = [];
+            if (errMsg) {
+              ee.push({
+                type: 'AGENT_MESSAGE',
+                streamId: `reqerr/${rid}`,
+                text: `⚠️ ${errMsg}`,
+                requestIndex: gi,
+                timestamp: ets,
+                _ut: userText,
+                gapFill: true,
+              } as PhoneEvent);
+            }
+            ee.push({
+              type: 'COPILOT_DONE',
+              requestIndex: gi,
+              // DONE 用当下时刻：它是终态信号不是内容——带请求起始 ts 会被仲裁器
+              // stale 判定误杀（doneTs 早于最近 live USER → 丢件 → typing 不消）。
+              timestamp: Date.now(),
+              _ut: userText,
+            } as PhoneEvent);
+            this.emitAgentSide(ee);
+          }
           if (!r || !Array.isArray(r.response) || !r.response.length) continue;
           if (rid && this.gapFilledRequestIds.has(rid)) continue;
           if (!userText || !this.hasPendingGap(userText)) continue;
@@ -1283,6 +1442,16 @@ export class TranscriptWatcher {
    * 不再因全局 transcriptHadGap 重扫整文件把旧回复贴到新气泡。
    */
   private emitAgentSide(evs: PhoneEvent[]) {
+    // fallback 通道事件按其源文件会话打标：fallbackFile 与 boundSessionBase 在
+    // 换绑窗口内可能不是同一会话，投影自哪个文件就属于哪个会话。
+    const fbSess = this.fallbackFile
+      ? path.basename(this.fallbackFile).replace(/\.jsonl$/i, '')
+      : '';
+    if (fbSess) {
+      for (const ev of evs) {
+        if (ev && !(ev as any)._sess) (ev as any)._sess = fbSess;
+      }
+    }
     // sessiondb 行是「完成才入库」的新轮次，不是 catch-up 洪水，不走 suppress/pending 门槛
     const forceLive = evs.some(
       (e) => typeof (e as any)?.streamId === 'string' && (e as any).streamId.startsWith('sessiondb/'),
@@ -1353,11 +1522,13 @@ export class TranscriptWatcher {
               }
             };
             if (this.hasEmittedAgentText(text, { requestIndex: reqIdx, streamId, rid, userText: ut })) {
+              this.opts.onLog?.(`[watch] 压制已投同文 sid=${streamId} len=${text.length}`);
               suppressLiveStream();
               continue;
             }
             // 自轮重投影：同一答案文本经另一流形态再投（requests/N 重放）→ 双气泡
             if (this.isReplayedFor(text, ut)) {
+              this.opts.onLog?.(`[watch] 压制重投影 sid=${streamId} len=${text.length}`);
               suppressLiveStream();
               continue;
             }
@@ -1372,13 +1543,25 @@ export class TranscriptWatcher {
                 (cur.slice(0, 40).length >= 12 && cur.slice(0, 40) === prev.slice(0, 40)) ||
                 (cur.slice(-40).length >= 12 && cur.slice(-40) === prev.slice(-40))
               ) {
+                this.opts.onLog?.(`[watch] 压制文本变体 sid=${streamId} len=${text.length}`);
                 suppressLiveStream();
                 continue;
               }
             }
           }
         }
-        this.emit(ev);
+        const delivered = this.emit(ev);
+        // 投递成功的答案销掉其 pendingGap 账：不销的话该 ut 永久挂起，
+        // isStalePendingReplay 用旧账把后续「不同问题同答案」的真答误杀
+        // （R14：M14V2 答案与 M14V 逐字相同，被 V1 的残留 pending 条目压死）。
+        if (
+          delivered !== false &&
+          evUt &&
+          (ev.type === 'AGENT_MESSAGE' || ev.type === 'AGENT_STREAM_SET')
+        ) {
+          const q = this.normUserText(String(evUt));
+          if (this.removePendingGap(q)) this.completedGapUserTexts.add(q);
+        }
       }
       return;
     }
@@ -1386,7 +1569,14 @@ export class TranscriptWatcher {
     // 但流收尾事件仍放行——否则已开流的「…」占位泡/停止按钮会卡死
     if (!this.hasPendingGap()) {
       for (const ev of evs) {
-        if (ev.type === 'AGENT_STREAM_END' || ev.type === 'COPILOT_DONE') {
+        // 待批准卡属控制事件：投影器 pendingToolConfirms 是一次性锁存——
+        // 首投被吞就永不重投，卡永远到不了手机端（实测 SLEPT96/PEND97）。
+        if (
+          ev.type === 'AGENT_STREAM_END' ||
+          ev.type === 'COPILOT_DONE' ||
+          ev.type === 'AGENT_CONFIRM' ||
+          ev.type === 'AGENT_CONFIRM_RESOLVED'
+        ) {
           const doneUt = this.resolveUtForFallbackEv(ev);
           if (doneUt && !(ev as any)._ut) (ev as any)._ut = doneUt;
           this.emit(ev);
@@ -1413,6 +1603,11 @@ export class TranscriptWatcher {
       if (ev.type === 'COPILOT_DONE') {
         const doneUt = this.resolveUtForFallbackEv(ev);
         if (doneUt && !(ev as any)._ut) (ev as any)._ut = doneUt;
+        this.emit(ev);
+        continue;
+      }
+      // 待批准卡同上属控制事件，gap 期也要放行（与 DONE 同权）。
+      if (ev.type === 'AGENT_CONFIRM' || ev.type === 'AGENT_CONFIRM_RESOLVED') {
         this.emit(ev);
         continue;
       }
@@ -1457,6 +1652,19 @@ export class TranscriptWatcher {
             // 多个 in-flight 时按 FIFO 取第一个在 fallbackRequestUserText 中匹配或队列头
             matchedUser = this.pendingGapQueue[0]?.userText;
           }
+          // 时序门：队列兜底纯属到达序猜测——事件自带时刻早于候选问题的
+          // 开问时刻 >15s = 旧轮经慢通道迟到的重投影（chatSessions 整文件
+          // 重投可迟数分钟），不可能是该 pending 的答案。错配会把 _ut 错盖
+          // 到在途新轮上：客户端渲染成新轮答案、销账待答、提前放队（实测旧
+          // 答案挂在作文轮下）。rid/_ut 自证匹配的不进此分支不受影响。
+          if (matchedUser && !matchedRid) {
+            const evTs0 =
+              typeof (ev as any).timestamp === 'number' ? (ev as any).timestamp : NaN;
+            const askTs = this.userTsByUt.get(this.normUserText(String(matchedUser)));
+            if (Number.isFinite(evTs0) && askTs != null && evTs0 + 15_000 < askTs) {
+              matchedUser = undefined;
+            }
+          }
           if (matchedUser && !matchedRid) {
             for (const [rid, ut] of this.fallbackRequestUserText) {
               if (ut === matchedUser) {
@@ -1472,12 +1680,9 @@ export class TranscriptWatcher {
 
         if (this.hasEmittedAgentText(text, { requestIndex: reqIdx, streamId, rid: matchedRid, userText: matchedUser })) continue;
 
-        this.noteEmittedAgentText(text, { requestIndex: reqIdx, streamId, rid: matchedRid || undefined, userText: matchedUser });
-        if (matchedRid) this.gapFilledRequestIds.add(matchedRid);
-        this.removePendingGap(matchedUser);
-        this.completedGapUserTexts.add(matchedUser);
-
-        this.emit({
+        // 投递成功才销账：emit() 内部可能因去重/压制返回 false——提前销账
+        // 会让「上游丢了但 pending 已清」的轮次永远补不上（reqerr 轮实测）。
+        const ok = this.emit({
           ...ev,
           type: 'AGENT_MESSAGE',
           text,
@@ -1486,6 +1691,10 @@ export class TranscriptWatcher {
           timestamp: ts,
           _ut: matchedUser,
         } as PhoneEvent);
+        if (!ok) continue;
+        if (matchedRid) this.gapFilledRequestIds.add(matchedRid);
+        this.removePendingGap(matchedUser);
+        this.completedGapUserTexts.add(matchedUser);
         continue;
       }
     }
@@ -1500,7 +1709,7 @@ export class TranscriptWatcher {
 
   /** 当前 turn 缺可见正文 → 登记待补用户文（不重扫全文） */
   private markCurrentTurnGap() {
-    const ut = this.normUserText(this.activeUserText);
+    const ut = this.normUserText(this.turnUt || this.activeUserText);
     if (ut && !this.completedGapUserTexts.has(ut)) {
       this.pushPendingGap(ut);
     }
@@ -1524,7 +1733,10 @@ export class TranscriptWatcher {
     const b = sess + base;
     const keys: string[] = [];
     if (ctx?.rid) keys.push(`${b}::rid=${ctx.rid}`);
-    if (ctx?.requestIndex != null) keys.push(`${b}::idx=${ctx.requestIndex}`);
+    // 负数 idx = 未知下标（sessiondb 恒为 -1）：出的键跨轮共享，会把
+    // 「不同问题同答案」误杀（R15：M15B 撞 M15A 的 idx=-1 键被压）。
+    if (ctx?.requestIndex != null && ctx.requestIndex >= 0)
+      keys.push(`${b}::idx=${ctx.requestIndex}`);
     if (ctx?.streamId) keys.push(`${b}::sid=${ctx.streamId}`);
     // 用户文键：同一用户轮次的回复在 transcript 与 chatSessions 双通道下发时互斥，
     // 不同轮次得到同文字回复仍可各显一次（test_gapfill_pending F 段语义）。
@@ -1534,8 +1746,18 @@ export class TranscriptWatcher {
     return keys;
   }
 
+  /** 该 ut 对应一个「真实问过且尚未答」的轮次：本条文本就是它的正当答案，
+   *  哪怕与别轮答案同文（不同问题得到同答案：R14 M14V2/C2 实测被误杀）
+   *  也不得按重投影压制。 */
+  private isLiveUnansweredUt(userText?: string): boolean {
+    if (!userText) return false;
+    const q = this.normUserText(userText);
+    if (!q) return false;
+    return this.userSeqByUt.has(q) && !this.isUtAnswered(q);
+  }
+
   private hasEmittedAgentText(text: string, ctx?: { requestIndex?: number; streamId?: string; rid?: string; userText?: string }): boolean {
-    if (this.isStalePendingReplay(text)) return true;
+    if (this.isStalePendingReplay(text) && !this.isLiveUnansweredUt(ctx?.userText)) return true;
     for (const k of this.dedupeKeys(text, ctx)) {
       if (k.includes('::ut=')) {
         // 永久 ut 键：该问题已发过同文回复且此后没重问同题 → 迟到重复，压制
@@ -1812,13 +2034,33 @@ export class TranscriptWatcher {
     if (!type) return;
     const data = asRecord(rec.data);
     const id = asString(rec.id);
+    const parentId = asString(rec.parentId);
     const tsStr = asString(rec.timestamp);
     const tsMs = tsStr ? Date.parse(tsStr) : NaN;
     this.evTsMs = tsMs;
+    // 谱系归属：沿 parentId 找回本行所属轮次；user.message 行本身就是问题。
+    const lineageUt =
+      type === 'user.message' && data
+        ? this.normUserText(asString(data.content) || '') || undefined
+        : parentId
+          ? this.idToTurnUt.get(parentId)
+          : undefined;
+    this.evLineageUt = lineageUt;
     try {
       this.dispatchEvent(type, data, id, tsMs);
     } finally {
       this.evTsMs = NaN;
+      this.evLineageUt = undefined;
+    }
+    if (id) {
+      // turn_start 的 parentId 常是上一轮的 turn_end——优先用它自己解析的
+      // turnUt；无用户行的延续轮（工具循环）才退回谱系（= 延续上一问题，合理）。
+      const recUt =
+        type === 'assistant.turn_start' ? this.turnUt || lineageUt || undefined : lineageUt;
+      if (recUt) {
+        this.idToTurnUt.set(id, recUt);
+        this.capMap(this.idToTurnUt, 2000);
+      }
     }
   }
 
@@ -1848,6 +2090,9 @@ export class TranscriptWatcher {
         }
         this.turnSeq += 1;
         this.activeTurnId = turnId;
+        this.turnUt = this.pendingTurnUt || this.activeUserText;
+        this.pendingTurnUt = '';
+        this.turnStartTsMs = tsMs;
         this.streamAccum = '';
         this.pendingReasoning = [];
         this.turnEmittedVisibleAgent = false;
@@ -1911,7 +2156,12 @@ export class TranscriptWatcher {
     this.endActiveStream(); // 新用户输入：结束上一轮未结束的流
     this.clearTurnGapTimer();
     this.clearTurnHardTimer();
-    this.activeUserText = this.normUserText(content);
+    const newUt = this.normUserText(content);
+    // 快照「本问题开问前是否已答过」：同题重问时 completedGapUserTexts 仍有
+    // 旧答案——本轮的新答不能按「跨通道已答」丢弃；orphan 检查要用这个基线。
+    this.utCompletedBeforeTurn = !!newUt && this.completedGapUserTexts.has(newUt);
+    this.activeUserText = newUt;
+    this.pendingTurnUt = newUt;
     const messageId = asString(data.messageId);
     this.emit({
       type: 'USER_MESSAGE',
@@ -1944,6 +2194,23 @@ export class TranscriptWatcher {
     return best ?? this.activeUserText;
   }
 
+  /** 轮内事件归属：activeTurn 开启期间的记录属于本 turn——归属取 turn_start
+   *  捕获的问题；明显早于轮开启的迟到件（乱序追加到文件尾的旧轮记录）按
+   *  记录 ts 找回旧轮。无在途轮时按 ts 归属。 */
+  private resolveTurnUt(tsMs: number): string {
+    if (this.activeTurnId && this.turnUt) {
+      if (
+        !Number.isNaN(tsMs) &&
+        Number.isFinite(this.turnStartTsMs) &&
+        tsMs < this.turnStartTsMs - 2000
+      ) {
+        return this.resolveUtForTs(tsMs);
+      }
+      return this.turnUt;
+    }
+    return this.resolveUtForTs(tsMs);
+  }
+
   private handleAssistantMessage(data: Record<string, unknown>, tsMs = NaN) {
     const messageId = asString(data.messageId);
     const reasoning = asString(data.reasoningText);
@@ -1962,6 +2229,9 @@ export class TranscriptWatcher {
     if (!this.activeTurnId && (reasoning || toolReqs.length)) {
       this.turnSeq += 1;
       this.activeTurnId = 'auto';
+      this.turnUt = this.pendingTurnUt;
+      this.pendingTurnUt = '';
+      this.turnStartTsMs = NaN;
       this.streamAccum = '';
       this.turnEmittedVisibleAgent = false;
       this.pendingReasoning = [];
@@ -1978,7 +2248,10 @@ export class TranscriptWatcher {
         text: reasoning,
         requestIndex: this.turnSeq,
         stepId: messageId ? 'think-' + messageId : undefined,
-      });
+        // _ut 打本轮问题：缺戳则仲裁层退回最新开启轮——steering 抢占后
+        // 旧轮的思考帧会被盖到新轮下渲染（实测 15% 思考挂 20% 泡）。
+        _ut: this.turnUt || this.activeUserText || undefined,
+      } as never);
     }
 
     // 0.5.24：收到任何 assistant.message 内容 → 取消 turn_start 超时（transcript 没断流）
@@ -2012,10 +2285,24 @@ export class TranscriptWatcher {
             text: content,
             requestIndex: this.turnSeq,
             stepId: messageId ? 'mono-' + messageId : undefined,
-          });
+            _ut: this.turnUt || this.activeUserText || undefined,
+          } as never);
         }
       } else {
-        this.emitAssistantContent(content, messageId, tsMs);
+        // 本 turn 的待答在「开问后」才被其它通道（chatSessions gap-fill 等）
+        // 销账——turn 仍开着但答案已投，此后挂到本 turn 的首段 content 是
+        // 迟到的重投影/孤儿行（test_live_123_789：orphan-789 挂进 turn-123）。
+        // utCompletedBeforeTurn=true 说明这是同题重问：completed 是上一轮的
+        // 旧账，本轮新答照常放行。
+        const turnUt = this.normUserText(this.activeUserText);
+        const answeredElsewhere =
+          !this.turnEmittedVisibleAgent &&
+          !!turnUt &&
+          !this.utCompletedBeforeTurn &&
+          this.completedGapUserTexts.has(turnUt);
+        if (!answeredElsewhere) {
+          this.emitAssistantContent(content, messageId, tsMs);
+        }
       }
     }
 
@@ -2036,7 +2323,7 @@ export class TranscriptWatcher {
           }
         }
         // 工具卡单独占位；正文用独立 stream，避免与 tool 交错时同一 bubble 被整段 SET 覆盖错序
-        this.toolStates.set(toolCallId, { text: name, requestIndex: this.turnSeq, complete: false });
+        this.toolStates.set(toolCallId, { text: name, requestIndex: this.turnSeq, complete: false, ut: this.turnUt || this.activeUserText || undefined });
         this.emit({
           type: 'TOOL_CALL',
           text: name,
@@ -2044,6 +2331,7 @@ export class TranscriptWatcher {
           isComplete: false,
           input,
           requestIndex: this.turnSeq,
+          _ut: this.turnUt || this.activeUserText || undefined,
         });
       }
     }
@@ -2063,7 +2351,7 @@ export class TranscriptWatcher {
     // 迟到重投影：上一轮 assistant.message 延迟落盘到达时，内容已是发过的答案 → 不开流。
     // ut 归属：按记录时间戳找回它所属的问题（activeUserText 可能已被新问覆盖）；
     // 同时查 stale pending 兜底。
-    const resolvedUt = this.resolveUtForTs(tsMs);
+    const resolvedUt = this.evLineageUt || this.resolveTurnUt(tsMs);
     if (this.isReplayedFor(content, resolvedUt) || this.isStalePendingReplay(content)) return;
     // 同问题答案文本变体压制：迟到记录的正文与已投版本形态不同（markdown/db 差异）
     // 键未命中时按「该问题已投答案」的前/后 40 字比对——前缀因工具引用缺失异、
@@ -2191,7 +2479,7 @@ export class TranscriptWatcher {
       this.activeTurnId = keepTurn;
       this.turnSeq = keepSeq;
     }
-    this.toolStates.set(toolCallId, { text: toolName, requestIndex: this.turnSeq, complete: false });
+    this.toolStates.set(toolCallId, { text: toolName, requestIndex: this.turnSeq, complete: false, ut: this.turnUt || this.activeUserText || undefined });
     this.emit({
       type: 'TOOL_CALL',
       text: toolName,
@@ -2199,6 +2487,7 @@ export class TranscriptWatcher {
       isComplete: false,
       input: data.arguments,
       requestIndex: this.turnSeq,
+      _ut: this.turnUt || this.activeUserText || undefined,
     });
   }
 
@@ -2223,6 +2512,7 @@ export class TranscriptWatcher {
         toolId: toolCallId,
         isComplete: true,
         requestIndex: this.turnSeq,
+        _ut: this.turnUt || this.activeUserText || undefined,
       });
       return;
     }
@@ -2233,6 +2523,7 @@ export class TranscriptWatcher {
       toolId: toolCallId,
       isComplete: true,
       requestIndex: st.requestIndex,
+      _ut: st.ut || this.turnUt || this.activeUserText || undefined,
     });
   }
 
@@ -2247,6 +2538,7 @@ export class TranscriptWatcher {
         toolId: toolCallId,
         isComplete: true,
         requestIndex: st.requestIndex ?? this.turnSeq,
+        _ut: st.ut || this.turnUt || this.activeUserText || undefined,
       });
     }
   }
@@ -2264,21 +2556,48 @@ export class TranscriptWatcher {
     // 0.5.24：turn_end 到了，取消超时定时器
     this.clearTurnGapTimer();
     this.clearTurnHardTimer();
+    // 时序纠偏：本 turn_end 记录自身的时刻早于「当前活跃问题」的开问时刻
+    // >15s → 上游懒写把旧轮记录排到新 USER 之后（chatSessions 尾部乱序可
+    // 迟数分钟），该收尾属于旧轮而非在途轮：归属 _ut 按「开问时刻 ≤ 本记录
+    // 时刻的最新用户」纠偏、completed/pending 簿记对纠偏后的归属做，且不得
+    // 清 activeUserText——它记在途轮的账，清了会让真收尾 _ut 全丢（实测旧轮
+    // 收尾把旧答案 _ut 错盖到在途作文轮下渲染+销账待答+提前放队）。
+    let staleOwner = false;
+    // 谱系归属优先：turn_end 的 parentId 链回自己轮次——晚到收尾按链归属，
+    // 不走 15s 偏差启发式（链在就是权威）。
+    let doneUt = this.evLineageUt || (this.turnUt || this.activeUserText) || undefined;
+    if (!this.evLineageUt && doneUt && Number.isFinite(this.evTsMs)) {
+      const askTs = this.userTsByUt.get(this.normUserText(doneUt));
+      if (askTs != null && this.evTsMs + 15_000 < askTs) {
+        staleOwner = true;
+        doneUt = undefined;
+        let best = 0;
+        for (const [ut0, ts0] of this.userTsByUt) {
+          if (ts0 <= this.evTsMs && ts0 > best) {
+            best = ts0;
+            doneUt = ut0;
+          }
+        }
+      }
+    }
     // 0.5.28：如果已发出过可见正文，把用户文记入 completed，并从 pending 中移除，避免 chatSessions 兜底再 gap 出重复回复
-    if (this.turnEmittedVisibleAgent && this.activeUserText) {
-      const ut = this.normUserText(this.activeUserText);
-      this.completedGapUserTexts.add(ut);
-      this.removePendingGap(ut);
+    {
+      const bookUt = staleOwner ? doneUt : this.activeUserText || undefined;
+      if (this.turnEmittedVisibleAgent && bookUt) {
+        const ut = this.normUserText(bookUt);
+        this.completedGapUserTexts.add(ut);
+        this.removePendingGap(ut);
+      }
     }
     // 0.5.23：本 turn 从未发出用户可见正文（空 content / 仅 monologue / 仅 tool）→ gap
-    // 注意：工具切断会清 streamAccum，不能用 streamAccum 空判断
-    if (!this.turnEmittedVisibleAgent) {
+    // 注意：工具切断会清 streamAccum，不能用 streamAccum 空判断。
+    // 旧轮迟到的收尾不登记——markCurrentTurnGap 记的是在途轮的账。
+    if (!this.turnEmittedVisibleAgent && !staleOwner) {
       this.markCurrentTurnGap();
     }
     // 收尾事件必须先取本轮 ut 再清：AGENT_MESSAGE/DONE 按 _ut 归属到本题，
     // 客户端按 ut 释放「已发未答」条目与去重键（兜底 activeUserText 已清会归空键）。
-    const doneUt = this.activeUserText || undefined;
-    this.activeUserText = '';
+    if (!staleOwner) this.activeUserText = '';
     if (this.streamAccum && !isInternalMonologue(this.streamAccum)) {
       this.emit({
         type: 'AGENT_MESSAGE',
@@ -2294,6 +2613,8 @@ export class TranscriptWatcher {
     this.emit({ type: 'COPILOT_DONE', requestIndex: this.turnSeq, _ut: doneUt });
     this.activeStreamId = null;
     this.activeTurnId = null;
+    this.turnUt = '';
+    this.turnStartTsMs = NaN;
     this.streamAccum = '';
     this.pendingReasoning = [];
     this.turnEmittedVisibleAgent = false;
@@ -2311,6 +2632,7 @@ export class TranscriptWatcher {
           streamId,
           text: this.streamAccum,
           requestIndex: this.turnSeq,
+          _ut: this.turnUt || undefined,
         });
       }
       if (this.activeStreamId || this.streamAccum || this.lastEmittedTextByStream.has(streamId)) {
@@ -2318,6 +2640,7 @@ export class TranscriptWatcher {
           type: 'AGENT_STREAM_END',
           streamId,
           requestIndex: this.turnSeq,
+          _ut: this.turnUt || undefined,
         });
       }
       this.lastEmittedTextByStream.delete(streamId);
@@ -2384,7 +2707,7 @@ export class TranscriptWatcher {
           streamId,
           text: this.streamAccum,
           requestIndex: this.turnSeq,
-          _ut: this.activeUserText || undefined,
+          _ut: this.turnUt || this.activeUserText || undefined,
         });
       }
       if (this.activeStreamId || this.streamAccum || this.lastEmittedTextByStream.has(streamId)) {
@@ -2392,7 +2715,7 @@ export class TranscriptWatcher {
           type: 'AGENT_STREAM_END',
           streamId,
           requestIndex: this.turnSeq,
-          _ut: this.activeUserText || undefined,
+          _ut: this.turnUt || this.activeUserText || undefined,
         });
       }
       this.lastEmittedTextByStream.delete(streamId);
@@ -2402,10 +2725,12 @@ export class TranscriptWatcher {
     this.emit({
       type: 'COPILOT_DONE',
       requestIndex: this.turnSeq,
-      _ut: this.activeUserText || undefined,
+      _ut: this.turnUt || this.activeUserText || undefined,
     });
     this.activeTurnId = null;
     this.activeStreamId = null;
+    this.turnUt = '';
+    this.turnStartTsMs = NaN;
     this.streamAccum = '';
     this.pendingReasoning = [];
     this.turnEmittedVisibleAgent = false;
@@ -2420,6 +2745,9 @@ export class TranscriptWatcher {
   private resetState(preserveDedupe = false) {
     this.activeTurnId = null;
     this.turnSeq = 0;
+    this.turnUt = '';
+    this.turnStartTsMs = NaN;
+    this.pendingTurnUt = '';
     this.activeStreamId = null;
     this.streamAccum = '';
     this.pendingReasoning = [];
@@ -2430,6 +2758,7 @@ export class TranscriptWatcher {
     this.clearTurnHardTimer();
     this.toolStates.clear();
     this.seenMessageIds.clear();
+    this.idToTurnUt.clear();
     this.lastContentByMessageId.clear();
     this.lastEmittedTextByStream.clear();
     this.lastUserTsMs = null;
@@ -2441,6 +2770,7 @@ export class TranscriptWatcher {
       this.gapFilledRequestIds.clear();
       this.pendingGapQueue = [];
       this.completedGapUserTexts.clear();
+      this.utCompletedBeforeTurn = false;
       this.activeUserText = '';
       this.fallbackRequestUserText.clear();
       this.fallbackRequestTs.clear();
@@ -2458,15 +2788,17 @@ export class TranscriptWatcher {
   /** catch-up 静默播种：emit() 照常走去重记账但不广播（见 bindFallback） */
   private catchUpQuiet = false;
 
-  private emit(ev: PhoneEvent) {
-    if (this.disposed) return;
+  private emit(ev: PhoneEvent): boolean {
+    if (this.disposed) return false;
     // transcript 通道事件盖上真实记录时间：Windows 慢落盘下 chatSessions/sessiondb
     // 与 transcript 互错数十秒，到达序 != 真实序，靠 ts 在 PWA 侧插回正确位置。
     if (ev && (ev as any).timestamp === undefined && Number.isFinite(this.evTsMs)) {
       (ev as any).timestamp = this.evTsMs;
     }
-    // 会话标签：客户端按绑定会话过滤，任何通道的跨会话事件不得投影到当前 feed
-    if (ev && this.boundSessionBase) {
+    // 会话标签：客户端按绑定会话过滤，任何通道的跨会话事件不得投影到当前 feed。
+    // 事件自带 _sess（sessiondb 行 session_id 等权威来源）优先——换绑滞后期间
+    // boundSessionBase 还是旧会话，无条件覆盖会把别会话真答案错标被滤掉（R19）。
+    if (ev && !(ev as any)._sess && this.boundSessionBase) {
       (ev as any)._sess = this.boundSessionBase.replace(/\.jsonl$/, '');
     }
     if (ev && ev.type === 'USER_MESSAGE') {
@@ -2482,11 +2814,11 @@ export class TranscriptWatcher {
         // requestId 级永久去重：Windows 上 transcript/chatSessions 可滞后分钟级，
         // 120s 重影窗过期后迟到副本仍会带同一 rid 重投 → 先按 rid 拦，迟到再久也吞。
         // 真实重发是同文本新 rid → 放行。
-        if (uRid && this.fallbackSeenRequestIds.has(uRid)) return;
+        if (uRid && this.fallbackSeenRequestIds.has(uRid)) return false;
         const lastAt = this.recentUserEmitAt.get(utText) ?? 0;
         const lastRid = this.recentUserEmitRid.get(utText) ?? '';
         const freshRid = uRid !== '' && lastRid !== '' && uRid !== lastRid;
-        if (utNow - lastAt < USER_COPY_WINDOW_MS && !freshRid) return;
+        if (utNow - lastAt < USER_COPY_WINDOW_MS && !freshRid) return false;
         this.recentUserEmitAt.set(utText, utNow);
         if (uRid) {
           this.recentUserEmitRid.set(utText, uRid);
@@ -2497,6 +2829,10 @@ export class TranscriptWatcher {
       this.userEmitSeq += 1;
       this.userSeqByUt.set(utText, this.userEmitSeq);
     }
+    // 正文类事件：通过门后先交给下游投递，投递成功才记「已投」指纹——
+    // 先记名再投递会让桥端/仲裁器的丢弃变成假阳性「已投」，后续通道
+    // 的同答案再被 isReplayedFor/已投去重压制 → 净丢一条答案（玻尔轮实测）。
+    let pendingMark: { text: string; ctx: { requestIndex?: number; streamId?: string; rid?: string; userText?: string }; wkey: string; curSeq: number } | null = null;
     if (ev && (ev.type === 'AGENT_MESSAGE' || ev.type === 'AGENT_STREAM_SET')) {
       const text = String((ev as { text?: string }).text || '');
       if (text.trim() && !isInternalMonologue(text)) {
@@ -2517,7 +2853,7 @@ export class TranscriptWatcher {
         const now = Date.now();
         const lastE = this.recentAgentEmits.get(wkey);
         if (lastE && now - lastE.t < 120_000 && lastE.seq === curSeq) {
-          return;
+          return false;
         }
         // 归属错位副本：live 侧 _ut 解析失败时同一条答案被记进空 ut 桶（键 `|key`），
         // 迟到通道随后带着真 _ut 到达（或反向）→ 与另一形态键撞车即同一回答重投影。
@@ -2525,7 +2861,7 @@ export class TranscriptWatcher {
         if (ut) {
           const bare = this.recentAgentEmits.get(`|${akey}`);
           if (bare && now - bare.t < 120_000 && (this.userSeqByUt.get('') ?? 0) <= bare.seq) {
-            return;
+            return false;
           }
         } else {
           const suffix = `|${akey}`;
@@ -2533,7 +2869,7 @@ export class TranscriptWatcher {
             if (k === `|${akey}` || !k.endsWith(suffix) || now - e.t >= 120_000) continue;
             const recUt = k.slice(0, k.length - suffix.length);
             if ((this.userSeqByUt.get(recUt) ?? 0) <= e.seq) {
-              return;
+              return false;
             }
           }
         }
@@ -2547,23 +2883,44 @@ export class TranscriptWatcher {
             (cur.slice(0, 40).length >= 12 && cur.slice(0, 40) === prev.slice(0, 40)) ||
             (cur.slice(-40).length >= 12 && cur.slice(-40) === prev.slice(-40))
           ) {
-            return;
+            return false;
           }
         }
-        this.recentAgentEmits.set(wkey, { t: Date.now(), seq: curSeq });
-        if (this.recentAgentEmits.size > 300) {
-          const cutoff = Date.now() - 150_000;
-          for (const [k, e] of this.recentAgentEmits) if (e.t < cutoff) this.recentAgentEmits.delete(k);
-        }
-        this.noteEmittedAgentText(text, {
-          requestIndex: (ev as any).requestIndex,
-          streamId: (ev as any).streamId,
-          rid: (ev as any).requestId,
-          userText: resolvedEvUt,
-        });
+        pendingMark = {
+          text,
+          ctx: {
+            requestIndex: (ev as any).requestIndex,
+            streamId: (ev as any).streamId,
+            rid: (ev as any).requestId,
+            userText: resolvedEvUt,
+          },
+          wkey,
+          curSeq,
+        };
       }
     }
-    if (!this.catchUpQuiet) this.opts.onEvent(ev);
+    if (this.catchUpQuiet) {
+      // 静默播种语义：内容已在回放里投递过，照记「已投」防 live 重投。
+      if (pendingMark) {
+        this.noteEmittedAgentText(pendingMark.text, pendingMark.ctx);
+        this.recentAgentEmits.set(pendingMark.wkey, { t: Date.now(), seq: pendingMark.curSeq });
+      }
+      return true;
+    }
+    const delivered = this.opts.onEvent(ev);
+    if (delivered !== false && pendingMark) {
+      this.noteEmittedAgentText(pendingMark.text, pendingMark.ctx);
+      this.recentAgentEmits.set(pendingMark.wkey, { t: Date.now(), seq: pendingMark.curSeq });
+      if (this.recentAgentEmits.size > 300) {
+        const cutoff = Date.now() - 150_000;
+        for (const [k, e] of this.recentAgentEmits) if (e.t < cutoff) this.recentAgentEmits.delete(k);
+      }
+    } else if (delivered === false && pendingMark) {
+      this.opts.onLog?.(
+        `[watch] 投递被拒（回声/去重/仲裁器丢弃）未记已投 sid=${pendingMark.ctx.streamId || '-'}`,
+      );
+    }
+    return delivered !== false;
   }
 
   /** (用户文,正文) 键是否已发过且此后没同题重问（迟到重投影判定） */
@@ -2571,6 +2928,9 @@ export class TranscriptWatcher {
     // 按「答案文本」查所有已投键：正文同一问题发出的答案只许出现一次。
     // 对每条匹配键用它自己的 ut 比较 seq——同题重问会抬 userSeqByUt[ut]，放行真重答；
     // 迟到重投影（无论归属到哪个 ut/哪个 sess）统一压制。
+    // 豁免：本条 _ut 指向一个已问未答的轮次 → 这就是该轮的正当答案，
+    // 与别轮同文也不算重投影。
+    if (this.isLiveUnansweredUt(userText)) return false;
     const prefix = `${this.agentTextKey(text)}::ut=`;
     if (!prefix || prefix === '::ut=') return false;
     for (const [k, v] of this.emittedAgentUtKeys) {

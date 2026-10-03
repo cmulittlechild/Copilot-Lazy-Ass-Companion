@@ -312,6 +312,12 @@ body {
   text-align: left;
 }
 
+/* 排队待发消息：半透明 + 斜体提示，出队后移除 .queued */
+.msg.user.queued .user-bubble {
+  opacity: 0.6;
+  font-style: italic;
+}
+
 /* ---- 助手消息：sender header + 行内内容 ---- */
 .msg.agent { align-self: flex-start; width: 100%; }
 /* 同一用户回合内的续写片段：折叠 Copilot 头像/名字，只留正文 */
@@ -753,6 +759,12 @@ body {
   border: 1px solid color-mix(in srgb, #73c991 45%, transparent);
 }
 .tool-body { background: var(--vscode-editor-background); }
+.tool-pend-hint {
+  padding: 8px 10px;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  border-top: 1px dashed var(--vscode-sideBar-border);
+}
 .tool-section { padding: 8px 10px 10px; }
 .tool-section.border { border-top: 1px solid var(--vscode-sideBar-border); }
 .tool-label {
@@ -963,6 +975,14 @@ body {
 .session-item:active {
   background: var(--vscode-list-activeSelectionBackground);
   border-left-color: var(--vscode-focusBorder);
+}
+.session-item.bound {
+  background: var(--vscode-list-inactiveSelectionBackground, rgba(90, 140, 220, 0.14));
+  border-left-color: var(--vscode-focusBorder);
+}
+.session-item.bound .session-name::after {
+  content: " ·";
+  color: var(--vscode-focusBorder);
 }
 .session-name {
   font-size: 13px;

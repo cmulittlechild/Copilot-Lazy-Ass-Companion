@@ -14,6 +14,8 @@ import {
   isInjectedEcho,
   setActiveSessionFile,
   getActiveSessionFile,
+  sessionIdFromFile,
+  checkInjectEverLanded,
 } from "./inject";
 import { samePath } from "./pathutil";
 import { TunnelManager } from "./tunnel";
@@ -41,11 +43,79 @@ let boundSessionActivityAt = 0;
 /** 当前绑定是否来自手机显式点选——只有点选来的绑定才有「活跃即续压」资格；
  *  桌面跟随绑定的会话若也享有活跃压制权，桌面端主动切会话会被延迟 ~90s */
 let boundViaExplicitSelect = false;
+/** 最近一次显式点选的时刻：跨向跟随须校验目标会话在此之后有真实用户
+ *  活动（R22：被弃会话的在途轮持续写盘一直占 newest，「文件最新」是
+ *  turn 写入假象而非用户回访）。 */
+let lastExplicitSelectAt = 0;
+/** 各会话最近一条 USER_MESSAGE 的时间戳（含别会话——sessiondb 全局轮询
+ *  会投来所有会话的用户文，按 _sess 分记）。 */
+const userActivityBySess = new Map<string, number>();
 /** 因零内容被跳过的跟随目标：该会话出现首个用户轮次时补发跟随 */
 let pendingFollowFile: string | undefined;
 // 挂空操作占位；tdir 存在时赋真实现（sessionWatcher 通道先建，引用需提前可解析）
 let reevaluatePendingFollow: () => void = () => {};
 let performSessionFollow: (csFile: string, base: string) => void = () => {};
+/** PHONE_STOP 可能比注入请求的 USER 落盘还早（取消打在未开启的轮上=空操作，
+ * 该轮照样跑完——实测 stop 比 USER 早 0.8s，答案仍全文到达）。
+ * 若停止时最近注入文本的 USER 尚未注册上游，挂起停止；其 USER_MESSAGE 在
+ * transcript 出现时（轮真正开启）补发一次取消。45s TTL。 */
+let lastInjectedPhoneText = "";
+let lastInjectedUserSeen = true;
+let deferredPhoneStop: { text: string; at: number } | undefined;
+/** 落盘核验的「活着」旁证：带 _ut 的事件按用户文本记时；任意 AGENT/TOOL/
+ *  THINKING 事件记全局时刻——请求行要轮次完成才写盘（长作文轮全程缺席），
+ *  纯查文件会把在途轮误报成未落盘（s1 实测 +45s 误火）。 */
+const lastAgentUtAt = new Map<string, number>();
+let lastAnyAgentEventAt = 0;
+
+/**
+ * 目标 transcript 尾部是否存在「message.text === sentText 且 request.timestamp >= sinceTs」
+ * 的请求条目（注入落盘核验：inject 宣称送达后定时复查——宣称路径已让手机端
+ * 以为成功，真没落盘时必须事后补一句真话）。读不到文件/结构对不上时返回
+ * true（保守不报警），同文历史请求靠 timestamp 下界区分不误判。
+ */
+function transcriptHasRequestSince(file: string, sentText: string, sinceTs: number): boolean {
+  try {
+    const want = sentText.trim();
+    const needle = JSON.stringify(want).slice(1, -1);
+    if (!needle) return true;
+    const st = fs.statSync(file);
+    const size = Math.min(st.size, 768 * 1024);
+    const fd = fs.openSync(file, "r");
+    let hay: string;
+    try {
+      const buf = Buffer.alloc(size);
+      fs.readSync(fd, buf, 0, size, Math.max(0, st.size - size));
+      hay = buf.toString("utf8");
+    } finally {
+      fs.closeSync(fd);
+    }
+    for (const line of hay.split("\n")) {
+      if (!line.includes(needle)) continue;
+      try {
+        const obj = JSON.parse(line);
+        const reqs: unknown[] = Array.isArray(obj?.v)
+          ? obj.v
+          : Array.isArray(obj?.requests)
+            ? obj.requests
+            : [];
+        for (const r of reqs) {
+          const t = (r as { message?: { text?: unknown; content?: Array<{ text?: unknown }> } })?.message;
+          const mt = typeof t?.text === "string" ? t.text : typeof t?.content?.[0]?.text === "string" ? t.content[0].text : "";
+          if (mt.trim() !== want) continue;
+          const ts = Number((r as { timestamp?: number })?.timestamp || 0);
+          if (!ts || ts >= sinceTs) return true;
+        }
+      } catch {
+        // tail 截断的残行 parse 失败——needle 命中即视为已落盘（不报警）
+        return true;
+      }
+    }
+    return false;
+  } catch {
+    return true;
+  }
+}
 
 /** 正文规范化（dedupe 用）：剥 markdown 强调+压空白+截断，与 transcriptWatcher.agentTextKey 同形 */
 function replayTextKey(text: string): string {
@@ -70,14 +140,190 @@ function buildReplayWithDbBackfill(
   sid: string | undefined,
 ): Array<Record<string, unknown>> {
   const out = hist.filter(Boolean) as Array<Record<string, unknown>>; // eslint-disable-line @typescript-eslint/no-explicit-any
+  // requestIndex 归属修复：上游 journal 偶把前轮响应并进后一请求槽（同文
+  // 重问尤甚——db 侧还把前轮记成无响应，序位纠偏无 aKey 可锚）。响应块的
+  // requestIndex 与所在 USER 槽的 requestIndex 不同、且存在 requestIndex
+  // 相同且尚无答案的 USER 槽时，把整块（流壳+正文）挪过去（R118-2）。
+  const blockHasAnswer = (e: Record<string, unknown> | null | undefined) => {
+    const t = e?.type;
+    if (t === "AGENT_MESSAGE") {
+      // 「该轮无回复」孤儿占位不是答案——把它算作已答会让 ridx 修复
+      // 找不到未答 USER 槽（target=-1），真答案滞留在错锚下（R121 BUG-2）。
+      return !String((e as { streamId?: unknown })?.streamId || "").startsWith("orphan/");
+    }
+    if (t === "AGENT_STREAM_SET" || t === "AGENT_STREAM_CHUNK") {
+      return String((e as { text?: unknown })?.text || "").trim().length > 0;
+    }
+    return false;
+  };
+  for (let i = 0; i < out.length; i++) {
+    const e = out[i];
+    const t = e?.type;
+    if (!blockHasAnswer(e)) continue;
+    const ridx = typeof e?.requestIndex === "number" ? e.requestIndex : null;
+    if (ridx == null || ridx < 0) continue;
+    let owner = -1;
+    for (let j = i - 1; j >= 0; j--) {
+      if (out[j]?.type === "USER_MESSAGE") { owner = j; break; }
+    }
+    if (owner < 0) continue;
+    const ownerIdx = typeof out[owner]?.requestIndex === "number" ? (out[owner].requestIndex as number) : null;
+    if (ownerIdx === ridx) continue;
+    // 目标：requestIndex 相同且尚无答案的 USER 槽。
+    let target = -1;
+    for (let j = 0; j < out.length; j++) {
+      const u = out[j];
+      if (u?.type !== "USER_MESSAGE" || u.requestIndex !== ridx) continue;
+      let answered = false;
+      for (let k = j + 1; k < out.length && out[k]?.type !== "USER_MESSAGE"; k++) {
+        if (blockHasAnswer(out[k])) { answered = true; break; }
+      }
+      if (!answered) { target = j; break; }
+    }
+    if (target < 0 || target === owner) continue;
+    let lo = i;
+    while (
+      lo - 1 > owner &&
+      out[lo - 1]?.type !== "USER_MESSAGE" &&
+      out[lo - 1]?.type !== "AGENT_STREAM_END"
+    ) {
+      lo--;
+    }
+    let hi = i;
+    while (
+      hi + 1 < out.length &&
+      out[hi + 1]?.type !== "USER_MESSAGE" &&
+      out[hi + 1]?.type !== "AGENT_STREAM_START"
+    ) {
+      hi++;
+    }
+    const block = out.splice(lo, hi - lo + 1);
+    const ut = String(out[target]?.text ?? "");
+    for (const be of block) (be as { _ut?: unknown })._ut = ut;
+    out.splice(target + 1, 0, ...block);
+    i = -1; // 下标已变，重头扫
+  }
   if (!dbTurns || !dbTurns.length || !sid) return out;
+  // db 轮次在 [0..ri] 内同文 user_message 的序位（1 起）：同文连发时纯文本
+  // 就近匹配会把答案贴错泡（D12 BUG-1：上游 journal 把后轮答案并进前一
+  // 同文请求的槽位）——序位锚让它归到第 n 个同文 USER。
+  const sameTextOrd = (key: string, ri: number): number => {
+    let n = 0;
+    for (let i = 0; i <= ri; i++) {
+      if (replayTextKey(String(dbTurns[i]?.user_message || "")) === key) n++;
+    }
+    return n;
+  };
+  const nthUserPos = (key: string, n: number): number => {
+    for (let i = 0; i < out.length; i++) {
+      if (
+        out[i]?.type === "USER_MESSAGE" &&
+        replayTextKey(String((out[i] as { text?: unknown }).text || "")) === key &&
+        --n === 0
+      ) {
+        return i;
+      }
+    }
+    return -1;
+  };
+  // db 配对权威纠偏：上游 journal 可能把响应写进错的请求槽（同文连发时
+  // transcript 把后轮答案并进前一同文请求——D12 BUG-1）。对每条 db 轮：
+  // 定位 out 中其答案所在响应块当前挂在哪个 USER 下；与序位锚 USER 不符
+  // 就把整块（TYPING→STREAM 帧→MESSAGE→END）挪到正确 USER 之后。
+  for (let ri = 0; ri < dbTurns.length; ri++) {
+    const r = dbTurns[ri];
+    const uKey = replayTextKey(String(r.user_message || ""));
+    const aKey = replayTextKey(String(r.assistant_response || ""));
+    if (!uKey || !aKey) continue;
+    const wantOrd = sameTextOrd(uKey, ri);
+    if (nthUserPos(uKey, wantOrd) < 0) continue;
+    let matchOrd = 0;
+    let lastBlockLo = -1;
+    for (let i = 0; i < out.length; i++) {
+      const e = out[i];
+      const t = e?.type;
+      if (
+        (t !== "AGENT_MESSAGE" && t !== "AGENT_STREAM_SET") ||
+        replayTextKey(String((e as { text?: unknown }).text || "")) !== aKey
+      ) {
+        continue;
+      }
+      // 同文重问常配同文答案——第 ri 条 db 轮必须配第 n 个同文答案块，
+      // 否则每条轮都命中同一块把它沿各序位锚逐级级联挪走，最终堆在末
+      // 锚下、前槽全部假孤儿（R121 BUG-2）。按「块」计序而非按元素：
+      // 一块内 SET+MESSAGE 两个同文元素各计一次会让后轮把已归位的块
+      // 再挪走（R122：答案块整体后移一锚）。
+      let blo = i;
+      while (
+        blo - 1 >= 0 &&
+        out[blo - 1]?.type !== "USER_MESSAGE" &&
+        out[blo - 1]?.type !== "AGENT_STREAM_END"
+      ) {
+        blo--;
+      }
+      if (blo === lastBlockLo) continue;
+      lastBlockLo = blo;
+      matchOrd++;
+      if (matchOrd !== wantOrd) continue;
+      let owner = -1;
+      for (let j = i - 1; j >= 0; j--) {
+        if (out[j]?.type === "USER_MESSAGE") {
+          owner = j;
+          break;
+        }
+      }
+      const anchor = nthUserPos(uKey, wantOrd);
+      if (owner === anchor) break;
+      // 含 i 的完整响应块：回溯到上一 USER/STREAM_END 之后，前进到下一
+      // USER/STREAM_START 之前——流壳与正文同搬，不留残帧在错槽。
+      let lo = i;
+      while (
+        lo - 1 > owner &&
+        out[lo - 1]?.type !== "USER_MESSAGE" &&
+        out[lo - 1]?.type !== "AGENT_STREAM_END"
+      ) {
+        lo--;
+      }
+      let hi = i;
+      while (
+        hi + 1 < out.length &&
+        out[hi + 1]?.type !== "USER_MESSAGE" &&
+        out[hi + 1]?.type !== "AGENT_STREAM_START"
+      ) {
+        hi++;
+      }
+      const block = out.splice(lo, hi - lo + 1);
+      const ap = nthUserPos(uKey, wantOrd);
+      // 归属戳一并改写：客户端 _ut 配对/分组以 user_message 为准。
+      for (const be of block) {
+        (be as { _ut?: unknown })._ut = String(r.user_message || "");
+      }
+      out.splice(ap >= 0 ? ap + 1 : out.length, 0, ...block);
+      if (ap >= 0) {
+        // 真答案归位后，该槽先前合成的「无回复」孤儿占位即错——移除。
+        for (let k = ap + 1 + block.length; k < out.length; k++) {
+          const oe = out[k];
+          if (oe?.type === "USER_MESSAGE") break;
+          if (
+            oe?.type === "AGENT_MESSAGE" &&
+            String((oe as { streamId?: unknown }).streamId || "").startsWith("orphan/")
+          ) {
+            out.splice(k, 1);
+            k--;
+          }
+        }
+      }
+      break;
+    }
+  }
   const seen = new Set(
     out
       .filter((e) => e?.type === "AGENT_MESSAGE")
       .map((e) => replayTextKey(String((e as { text?: string }).text || ""))),
   );
   const tail: Array<Record<string, unknown>> = [];
-  for (const r of dbTurns) {
+  for (let ri = 0; ri < dbTurns.length; ri++) {
+    const r = dbTurns[ri];
     const ans = String(r.assistant_response || "").trim();
     if (!ans) continue;
     if (seen.has(replayTextKey(ans))) continue;
@@ -89,49 +335,75 @@ function buildReplayWithDbBackfill(
       timestamp: Date.now(),
       _ut: r.user_message || undefined,
     };
-    // 找该回答所属的用户消息位置：最后一个与该 user_message 同文的 USER_MESSAGE
+    // 找该回答所属的用户消息位置：同文消息按 db 轮次序位锚（第 n 个同文
+    // USER）——「最后一个同文」对同文连发会把前轮的答贴到后轮下。
     const uKey = replayTextKey(String(r.user_message || ""));
     let inserted = false;
     if (uKey) {
-      for (let i = out.length - 1; i >= 0; i--) {
-        const e = out[i];
-        if (
-          e?.type === "USER_MESSAGE" &&
-          replayTextKey(String((e as { text?: string }).text || "")) === uKey
-        ) {
-          // 该轮到下一条 USER 之间已有助手回复（文件投影或先补全）→ 跳过。
-          // sessiondb 与文件投影的文本形态常异构（含/不含文件名引用等），
-          // 纯文本 key 去重会漏 → 同一条答案双投成相邻两块。
-          let answered = false;
-          for (let j = i + 1; j < out.length; j++) {
-            const t = out[j]?.type;
-            if (t === "USER_MESSAGE") break;
-            if (
-              t === "AGENT_MESSAGE" ||
-              t === "AGENT_STREAM_SET" ||
-              t === "AGENT_STREAM_CHUNK" ||
-              t === "AGENT_STREAM_END" ||
-              t === "AGENT_STREAM_START"
-            ) {
-              answered = true;
-              break;
-            }
+      const i = nthUserPos(uKey, sameTextOrd(uKey, ri));
+      if (i >= 0) {
+        // 该轮到下一条 USER 之间已有助手回复（文件投影或先补全）→ 跳过。
+        // sessiondb 与文件投影的文本形态常异构（含/不含文件名引用等），
+        // 纯文本 key 去重会漏 → 同一条答案双投成相邻两块。
+        // 只认有正文的答：失败轮只剩 START+END 空流壳，生命周期标记不算已答。
+        let answered = false;
+        for (let j = i + 1; j < out.length; j++) {
+          const t = out[j]?.type;
+          if (t === "USER_MESSAGE") break;
+          if (t === "AGENT_MESSAGE") {
+            answered = true;
+            break;
           }
-          if (!answered) out.splice(i + 1, 0, ev);
-          inserted = true;
-          break;
+          if (
+            (t === "AGENT_STREAM_SET" || t === "AGENT_STREAM_CHUNK") &&
+            typeof (out[j] as { text?: unknown })?.text === "string" &&
+            String((out[j] as { text?: unknown }).text).trim().length > 0
+          ) {
+            answered = true;
+            break;
+          }
         }
+        if (!answered) out.splice(i + 1, 0, ev);
+        inserted = true;
       }
     }
     if (!inserted) {
+      const pair: Array<Record<string, unknown>> = [];
       if (uKey) {
-        tail.push({
+        pair.push({
           type: "USER_MESSAGE",
           text: String(r.user_message || ""),
           timestamp: Date.now(),
         });
       }
-      tail.push(ev);
+      pair.push(ev);
+      // 序数兜底定位：user_message 文本键没匹配上（被取代/异常轮的
+      // sessiondb 文本常与投影异构）就按轮次序插位——sessiondb 的先后即
+      // 真实次序。数 r 之后还有几条带用户文的轮 → 插到 out 倒数第 k 条
+      // USER_MESSAGE 之前；k 超出投影窗口 = 这轮在窗口之前 → 放最前。
+      // 直接甩尾会把旧轮渲到最新轮之后（R45 B1 feed 序腐坏）。
+      const laterUsers = dbTurns
+        .slice(ri + 1)
+        .filter((x) => String(x?.user_message || "").trim()).length;
+      if (laterUsers === 0) {
+        tail.push(...pair);
+      } else {
+        let pos = -1;
+        let seenUsers = 0;
+        for (let i = out.length - 1; i >= 0; i--) {
+          if (out[i]?.type === "USER_MESSAGE" && ++seenUsers === laterUsers) {
+            pos = i;
+            break;
+          }
+        }
+        // 插入位置贴邻位时间戳：Date.now() 会顶高客户端 replayFloorTs，
+        // 把之后真实迟到的 live 事件误判成回放前旧件丢掉。
+        const anchorTs =
+          Number((out[pos >= 0 ? pos : 0] as { timestamp?: unknown })?.timestamp) || Date.now();
+        for (const p of pair) p.timestamp = anchorTs - 1;
+        if (pos >= 0) out.splice(pos, 0, ...pair);
+        else out.splice(0, 0, ...pair);
+      }
     }
     seen.add(replayTextKey(ans));
   }
@@ -161,6 +433,9 @@ function rebindTranscriptForSession(file: string) {
     qrPanel.addLog(
       `会话 ${base} 无 transcripts（${rec?.qualifiedName ?? "未知工作区"}）→ 降级 chatSessions 源`,
     );
+    // 无 transcript 也要让 sessiondb 快通道跟上所选会话：轮询本身是全局的，
+    // 但归属 sid/悬挂行补种需要同步，否则该会话的在途轮直播整段静默。
+    transcriptWatcher?.noteSession(base);
   } catch {
     /* transcript rebind best-effort */
   }
@@ -280,7 +555,14 @@ export async function activate(context: vscode.ExtensionContext) {
       // （transcript tail、sessiondb 轮询、chatSessions rewrite）会在回放之后
       // 作为 live 事件再投一遍 → feed 尾部出现用户泡/答案堆叠副本。
       transcriptWatcher?.seedFromHistory(merged as never);
-      return merged;
+      // 把 file/title 一起回传：重连回放若不带 file，客户端
+      // currentSessionMeta.file 一直为空——_sess 过滤、待发补画、
+      // 未送达校验全部失效（实测杀进程重连后发送记录 sess=''，
+      // 泡既不补画也不报未送达，静默消失）。
+      const rTitle = watcher
+        ?.listSessions(40)
+        .find((s) => s.file === file || (s.file && samePath(s.file, file)))?.title;
+      return { events: merged, file, title: rTitle };
     };
 
     push = new PushManager(context.globalState);
@@ -307,11 +589,16 @@ export async function activate(context: vscode.ExtensionContext) {
           if (transcriptWatcher && typeof msg.text === "string") {
             transcriptWatcher.addPendingPhoneUserText(msg.text);
           }
+          // 新发即解除挂起停止：用户重新提问表示想要这个轮（同文重问亦然）
+          lastInjectedPhoneText = String(msg.text).trim();
+          lastInjectedUserSeen = false;
+          deferredPhoneStop = undefined;
 
           // noteInjectedText is called inside injectMessage; bridge also remembers
           // PHONE_MESSAGE text so sendToPhone can drop JSONL USER_MESSAGE echo.
           // USER_MESSAGE 已由 bridge.acceptPhoneUserMessage 广播；这里只推 typing 态。
           bridge?.broadcast({ type: "COPILOT_TYPING" });
+          const injectBeganAt = Date.now();
           const result = await injectMessage(msg.text, mode);
           try {
             const leak = (result as any).leakFile
@@ -325,11 +612,73 @@ export async function activate(context: vscode.ExtensionContext) {
           }
           // soft-unverified：已 submit 且无串台证据，落盘可能延迟 — 不吓用户去粘贴双发
           if (String(result.injectPath || "").includes("soft-unverified")) {
+            // 误报抑制：inject 内部双核验走的是落盘扫描（chatSessions 可能慢于
+            // 实时流几十秒）——核验超时返回时答案可能早已经 transcripts 实时
+            // 通道上线（实测 soft-unverified 在答案投送 ~13s 后才到）。此时该
+            // _ut 已有 agent 活动/全局已有 agent 活动 = 送达成立，只发终态 DONE
+            // 清发送核验，不再提示「若未出现再重试」也不挂 55s 判死复核。
+            const softKey = String(msg.text || "")
+              .replace(/\s+/g, " ")
+              .trim()
+              .slice(0, 120);
+            const landedAlready =
+              (lastAgentUtAt.get(softKey) || 0) >= injectBeganAt - 2_000 ||
+              lastAnyAgentEventAt >= injectBeganAt - 2_000;
+            if (landedAlready) {
+              qrPanel.addLog(
+                `soft-unverified 误报抑制: ${softKey.slice(0, 50)} 已见 agent 活动`,
+              );
+              bridge?.broadcast({
+                type: "COPILOT_DONE",
+                reason: "inject_soft_unverified",
+                _ut: softKey,
+              });
+            } else {
             bridge?.broadcast({
               type: "SYSTEM_MESSAGE",
               text: "已提交到目标会话（落盘确认稍慢，若桌面未出现再重试）",
             });
             bridge?.broadcast({ type: "COPILOT_DONE", reason: "inject_soft_unverified" });
+            // 延迟复核判死：soft-unverified = 提交后 20s+30s 双核验零落盘。
+            // 提交可能打进了无 Copilot 的窗口（消息停在草稿态）——55s 后
+            // 全库再扫一遍仍零命中 ⇒ 明确判未送达：客户端回填原文+释放，
+            // 否则泡挂 ~194s 死流看门狗才放，原文静默丢失。
+            const lostText = String(msg.text || "");
+            const lostTarget = getActiveSessionFile();
+            const lostSid = lostTarget ? sessionIdFromFile(lostTarget) : undefined;
+            setTimeout(() => {
+              void (async () => {
+                try {
+                  const landed = await checkInjectEverLanded(
+                    lostTarget,
+                    lostText,
+                    () => {
+                      // sessiondb 快径：turns 行先于 chatSessions 落盘——正确会话
+                      // 的轮次已开（文件写在路上）算已送达，不误判死。
+                      if (!lostSid) return false;
+                      const rows = transcriptWatcher?.sessionDbRecentTurns(40, lostSid) ?? [];
+                      const needle = lostText.trim();
+                      return rows.some((r) =>
+                        String(r.user_message || "").includes(needle),
+                      );
+                    },
+                  );
+                  if (landed) return;
+                  bridge?.broadcast({
+                    type: "SYSTEM_MESSAGE",
+                    text: "上一条消息未送达目标会话（可能提交到了不可用窗口），文本已回填，请重试",
+                  });
+                  bridge?.broadcast({
+                    type: "COPILOT_DONE",
+                    reason: "inject_lost",
+                    _ut: lostText,
+                  });
+                } catch {
+                  /* ignore */
+                }
+              })();
+            }, 55_000);
+            }
           } else if (result.injectPath === "bind+chat.open+leak-warning") {
             bridge?.broadcast({
               type: "SYSTEM_MESSAGE",
@@ -338,9 +687,41 @@ export async function activate(context: vscode.ExtensionContext) {
           }
           // 商业化：clipboard → 明确告诉手机；verified 成功保持安静
           if (result.via === "clipboard") {
+            // 假阴性抑制：inject 走剪贴板兜底返回时，若该文本之后已有 agent
+            // 活动/目标会话请求行已落盘，说明提交其实成功、只是核验慢判死——
+            // 照失败广播会把已送达的消息回填+释放发送键，在途轮中排队的下一条
+            // 提前出队插队（实测工具轮在跑时判 clipboard，排队消息立即外发）。
+            const clipKey = String(msg.text || "")
+              .replace(/\s+/g, " ")
+              .trim()
+              .slice(0, 120);
+            const clipTarget =
+              typeof msg.file === "string" ? msg.file.trim() : "";
+            const clipLanded =
+              (lastAgentUtAt.get(clipKey) || 0) >= injectBeganAt - 2_000 ||
+              lastAnyAgentEventAt >= injectBeganAt - 2_000 ||
+              (clipTarget
+                ? transcriptHasRequestSince(
+                    clipTarget,
+                    clipKey,
+                    injectBeganAt - 5_000,
+                  )
+                : false);
+            if (clipLanded) {
+              // 真落地就不发任何事件：与 verified 成功径同语义（静默）。
+              // 发 inject_soft_unverified DONE 也会销待答条目+释放 rr+收
+              // 在途工具卡——真轮的发送键/排队该由它自己的轮终 DONE 管。
+              qrPanel.addLog(
+                `clipboard 误报抑制: ${clipKey.slice(0, 50)} 已见落地证据`,
+              );
+            } else {
             const reason = String(result.injectPath || "clipboard");
             bridge?.broadcast({
               type: "SYSTEM_MESSAGE",
+              // injectFailed：终态注入失败（该会话绝不会再产出本轮内容）——
+              // 客户端据此销掉待答条目并回填原文。DONE 走裁决器会被判
+              // inject-ack 丢弃，终态信号只能搭 SYSTEM_MESSAGE。
+              injectFailed: String(msg.text || ""),
               text:
                 reason.includes("cross-session-leak")
                   ? "注入未确认目标会话（检测到可能串台），消息已复制到剪贴板，请在正确 Chat 粘贴"
@@ -352,6 +733,7 @@ export async function activate(context: vscode.ExtensionContext) {
             });
             // 结束手机端 typing，避免一直转圈
             bridge?.broadcast({ type: "COPILOT_DONE", reason: "inject_clipboard" });
+            }
           } else if (
             (result as any).verified === false &&
             !/soft-unverified|leak-warning/.test(String(result.injectPath || ""))
@@ -359,6 +741,9 @@ export async function activate(context: vscode.ExtensionContext) {
             // soft-unverified/leak-warning 已在上方链给过提示；避免同一次注入既「已提交」又「警告」。
             bridge?.broadcast({
               type: "SYSTEM_MESSAGE",
+              // 与 clipboard 同：verified=false = 未确认写入目标会话，本会话
+              // 绝不会再产出本轮——客户端销待答条目并回填。
+              injectFailed: String(msg.text || ""),
               text: "警告：注入未通过目标会话校验，请核对桌面 Chat 是否为手机所选会话",
             });
             // 0.5.27：结束手机 typing，避免发送失败后一直显示“正在输入”
@@ -368,6 +753,46 @@ export async function activate(context: vscode.ExtensionContext) {
               type: "SYSTEM_MESSAGE",
               text: `警告：目标会话已写入，但另一会话也出现相同文本（${path.basename(String((result as any).leakFile))}）`,
             });
+          }
+          // 落盘核验：宣称送达后 45s 内目标 transcript 仍未多出该请求 → 注入
+          // 实际未落盘（window reload 期 chat 管道打空——桥回声已让手机端以为
+          // 成功，实测消息静默蒸发且无提示）。补一句真话并让手机回填原文。
+          // 45s 留足重载后的懒写盘余量（实测请求行 +20s 才进文件）。
+          // clipboard / verified_false 路径已当场告警，不再重复查。
+          {
+            const sentTextNow = String(msg.text || "").trim();
+            const targetFile = typeof msg.file === "string" ? msg.file.trim() : "";
+            const claimedDelivery =
+              result.via !== "clipboard" && (result as any).verified !== false;
+            if (sentTextNow && targetFile && claimedDelivery) {
+              const sendAt = Date.now() - 15000; // 慢注入窗内的请求 ts 早于此刻一定算旧轮
+              setTimeout(() => {
+                try {
+                  // 三重门：请求行缺席 AND 该文本无任何 _ut 活动 AND 全局无 agent
+                  // 活动——后两者覆盖「行只在轮末写盘」的在途轮（长答全程行缺席）。
+                  const utSeen = (lastAgentUtAt.get(sentTextNow) || 0) >= sendAt;
+                  const anyAgent = lastAnyAgentEventAt >= sendAt;
+                  if (
+                    !utSeen &&
+                    !anyAgent &&
+                    !transcriptHasRequestSince(targetFile, sentTextNow, sendAt)
+                  ) {
+                    qrPanel?.addLog(`inject not persisted: ${sentTextNow.slice(0, 60)}`);
+                    bridge?.broadcast({
+                      type: "SYSTEM_MESSAGE",
+                      text: "发送未落盘到目标会话（可能赶上 VS Code 重载），原文已回填，请重新发送",
+                      notPersisted: sentTextNow,
+                    });
+                    bridge?.broadcast({
+                      type: "COPILOT_DONE",
+                      reason: "inject_not_persisted",
+                    });
+                  }
+                } catch {
+                  /* best-effort */
+                }
+              }, 45000);
+            }
           }
         } else if (msg.type === "PHONE_STOP") {
           const result = await cancelChatRequest();
@@ -379,6 +804,12 @@ export async function activate(context: vscode.ExtensionContext) {
           } else {
             // 本地立即收尾 typing；transcript 随后的 turn_end 还会再发 COPILOT_DONE
             bridge?.broadcast({ type: "COPILOT_DONE", reason: "phone_stop" });
+            // 停止早于注入 USER 落盘：请求还在注入管道里、取消打空——挂起，
+            // 该文本的 USER_MESSAGE 出现时补发取消（见 handleTranscriptWatcherEvent）。
+            if (!lastInjectedUserSeen && lastInjectedPhoneText) {
+              deferredPhoneStop = { text: lastInjectedPhoneText, at: Date.now() };
+              qrPanel.addLog(`deferred stop armed: ${lastInjectedPhoneText.slice(0, 50)}`);
+            }
           }
         } else if (msg.type === "PHONE_CONFIRM") {
           await handleConfirmation(String(msg.button || ""));
@@ -405,7 +836,10 @@ export async function activate(context: vscode.ExtensionContext) {
     // 终端管理 + 多实例发现（参考 copilot-remote 的 TerminalManager / InstanceDiscovery）
     terminalMgr = new TerminalManager((line) => qrPanel.addLog(line));
     discovery = new InstanceDiscovery({
-      basePort: bridge.port,
+      // 扫描必须锚规范基端口而非本实例实绑端口：端口被占时桥会自增
+      // 绑定（3010 忙→3011→3012…），若从实绑端口起扫，后起的实例永远
+      // 看不到排在自己前面的实例（3012 扫 3012..3032 → 列表恒空）。
+      basePort: bridge.preferredListenPort,
       authToken: bridge.getAuthToken() || undefined,
       log: (line) => qrPanel.addLog(line),
     });
@@ -466,7 +900,11 @@ export async function activate(context: vscode.ExtensionContext) {
           if (ok && file) {
             lastExplicitSelect = { file, until: Date.now() + EXPLICIT_SELECT_GUARD_MS };
             pendingFollowFile = undefined;
-            boundSessionActivityAt = 0;
+            lastExplicitSelectAt = Date.now();
+            // 点选本身即算绑定会话活跃：inject 驱动桌面切换要 ~20-24s，期间
+            // 目标会话还无写盘事件，boundSessionActivityAt=0 会让 boundHot 恒假
+            // → 守卫窗外一条迟到的旧会话跟随就把手机拽回（R18 拉锯×3 根因）。
+            boundSessionActivityAt = Date.now();
             boundViaExplicitSelect = true;
           }
           // 记录选中会话：后续 PHONE_MESSAGE 注入必须先切到该会话，
@@ -515,6 +953,10 @@ export async function activate(context: vscode.ExtensionContext) {
                 },
               ],
               file,
+              selTitle,
+              // 用户显式点选：客户端已清空 feed，回放必须送达——跳过
+              // replaySession 的 5s 同文件节流（连点切回同会话不得吞掉回放）。
+              true,
             );
           }
           break;
@@ -648,6 +1090,15 @@ export async function activate(context: vscode.ExtensionContext) {
       workspaceIndex,
       currentWorkspaceHash,
       onEvent: (ev) => {
+        // 各会话用户活动打点：事件 _sess 优先，无戳用绑定文件（本 watcher
+        // 只 tail 绑定文件，事件必然属于该会话）。
+        if (ev.type === "USER_MESSAGE") {
+          const us = (
+            String((ev as any)._sess || "") ||
+            (watcher?.currentFile ? path.basename(watcher.currentFile) : "")
+          ).replace(/\.jsonl$/i, "");
+          if (us) userActivityBySess.set(us, Date.now());
+        }
         if (
           ev.type === "USER_MESSAGE" &&
           typeof (ev as any).text === "string" &&
@@ -657,12 +1108,14 @@ export async function activate(context: vscode.ExtensionContext) {
         }
         // 绑定会话活动打点：sessionWatcher 只 tail 绑定文件，其可见事件即
         // 「所选会话仍在被使用」的信号（跟随拉锯评估用）。
+        // COPILOT_DONE 不算：它是终止簿记——多通道收尾件/迟到件会在这条 tail 上
+        // 持续到达（实测 ridx 簿记噪声让 boundHot 永真、被压跟随续压死循环），
+        // 在途轮的活跃由 USER/AGENT/STREAM 事件已经覆盖。
         if (
           ev.type === "USER_MESSAGE" ||
           ev.type === "AGENT_MESSAGE" ||
           ev.type === "AGENT_STREAM_SET" ||
-          ev.type === "AGENT_STREAM_CHUNK" ||
-          ev.type === "COPILOT_DONE"
+          ev.type === "AGENT_STREAM_CHUNK"
         ) {
           boundSessionActivityAt = Date.now();
         }
@@ -690,7 +1143,17 @@ export async function activate(context: vscode.ExtensionContext) {
         // （assistant 侧仍被 gate 拦，避免双渲染；手机注入回声由 isInjectedEcho 拦。）
         // USER_MESSAGE 双源重复由 bridge.sendToPhone 的时间窗去重处理
         // （gate 会矫枉过正：transcripts 静默时唯一来源被吞 → 零气泡）。
-        if (transcriptActive && ev.type !== "USER_MESSAGE") return;
+        // AGENT_CONFIRM/_RESOLVED 同属放行：待批准信号只存在于 chatSessions
+        // （transcript 源不含 hasPendingEdits/工具确认态），被 gate 吞掉后手机端
+        // 永远看不到待批准卡（实测 hasPendingEdits 翻转投影在此被整条丢弃）。
+        // 双通道重复由 bridge 确认卡去重兜底。
+        if (
+          transcriptActive &&
+          ev.type !== "USER_MESSAGE" &&
+          ev.type !== "AGENT_CONFIRM" &&
+          ev.type !== "AGENT_CONFIRM_RESOLVED"
+        )
+          return;
         if (bridge?.sendToPhone) bridge.sendToPhone(ev);
         else bridge?.broadcast(ev);
       },
@@ -710,6 +1173,22 @@ export async function activate(context: vscode.ExtensionContext) {
       // 执行一次会话跟随：SESSION_SELECTED（PWA 清 feed+标题）+ db 回填回放。
       // 供 SESSION_FOLLOW 事件与 pendingFollowFile 补发共用。
       performSessionFollow = (csFile: string, base: string) => {
+        // 跨向跟随的用户活动门（R22 残余拉锯）：点选之后目标会话没有新
+        // USER_MESSAGE = 用户在桌面并未回访它——其 newest 地位只是被弃会话
+        // 在途轮的写盘假象，丢弃而非拽回。同一方向/无点选绑定不设此门。
+        const boundF = lastExplicitSelect?.file || getActiveSessionFile();
+        const boundB = boundF ? path.basename(boundF).replace(/\.jsonl$/i, "") : "";
+        const targetB = base.replace(/\.jsonl$/i, "");
+        if (
+          boundViaExplicitSelect &&
+          boundB &&
+          targetB &&
+          boundB !== targetB &&
+          (userActivityBySess.get(targetB) ?? 0) <= lastExplicitSelectAt
+        ) {
+          qrPanel.addLog(`SESSION_FOLLOW 丢弃: 点选后目标无用户活动 ${targetB}`);
+          return;
+        }
         const hist = watcher?.projectHistory(csFile, 20) ?? [];
         const sidForDb = base ? base.replace(/\.jsonl$/, "") : "";
         const dbTurns = transcriptWatcher?.sessionDbRecentTurns(20, sidForDb) ?? [];
@@ -723,7 +1202,11 @@ export async function activate(context: vscode.ExtensionContext) {
           return;
         }
         pendingFollowFile = undefined;
-        boundViaExplicitSelect = false;
+        // 同一方向的跟随（所选会话本身）不得清点选绑定标记——否则 +3s 的
+        // 补发跟随会提前解除 90s boundHot 保护，被弃会话的在途轮随后把
+        // 手机拽走（R22 拉锯根因一）。真换向的跟随照常解除。
+        const boundF2 = lastExplicitSelect?.file || getActiveSessionFile();
+        if (!boundF2 || !samePath(csFile, boundF2)) boundViaExplicitSelect = false;
         setActiveSessionFile(csFile);
         watcher?.selectSession(csFile);
         transcriptWatcher?.seedFromHistory(hist);
@@ -755,6 +1238,7 @@ export async function activate(context: vscode.ExtensionContext) {
             },
           ],
           csFile,
+          title,
         );
       };
       // 被跳过的空会话出现首个用户轮次后补跟随：两条事件通道任一到达内容事件即重评估。
@@ -787,14 +1271,46 @@ export async function activate(context: vscode.ExtensionContext) {
         // 快速通道永久失效。文件不存在时由 openSessionDb 惰性探测返回 null。
         sessionStoreDb,
         pollMs: Math.max(10, cfg.get<number>("pollMs", 50)),
+        onLog: (line) => qrPanel.addLog(line),
         // 具名函数表达式：压制窗口补发路径需要重入本 handler（见 SESSION_FOLLOW 压制分支）
+        // 返回 sendToPhone 的投递结果：false = 事件在桥端被丢（回声/去重/仲裁），
+        // watcher 据此不记「已投」——否则后续通道的同答案会被误判重投影而净丢。
         onEvent: function handleTranscriptWatcherEvent(ev) {
+          // 落盘核验旁证打点（见 lastAgentUtAt 注释）
+          if (/^(AGENT|TOOL|THINKING)/.test(String(ev.type || ""))) {
+            lastAnyAgentEventAt = Date.now();
+          }
+          {
+            const evUt = typeof (ev as any)._ut === "string" ? String((ev as any)._ut).trim() : "";
+            if (evUt) lastAgentUtAt.set(evUt, Date.now());
+          }
+          if (ev.type === "USER_MESSAGE" && typeof (ev as any).text === "string") {
+            // 各会话用户活动打点（sessiondb 全局轮询的别会话 USER 也带 _sess）：
+            // 跨向跟随裁决「用户在桌面是否真去了那会话」的依据。
+            const usBase = String((ev as any)._sess || "").replace(/\.jsonl$/i, "");
+            if (usBase) userActivityBySess.set(usBase, Date.now());
+            const utNow = String((ev as any).text).trim();
+            if (utNow && utNow === lastInjectedPhoneText) lastInjectedUserSeen = true;
+            // 挂起停止兑现：停止先于本 USER 落盘 → 此刻轮才真正开启，补发取消。
+            // 只匹配「停止时还没见到 USER」的那次注入文本；晚到的同文事件不误杀
+            // （45s TTL + 一次性消费）。
+            if (deferredPhoneStop && deferredPhoneStop.text === utNow) {
+              const armed = deferredPhoneStop;
+              deferredPhoneStop = undefined;
+              if (Date.now() - armed.at < 45000) {
+                qrPanel.addLog(`deferred stop fired on turn start: ${utNow.slice(0, 50)}`);
+                setTimeout(() => {
+                  cancelChatRequest().catch(() => undefined);
+                }, 800);
+              }
+            }
+          }
           if (
             ev.type === "USER_MESSAGE" &&
             typeof (ev as any).text === "string" &&
             isInjectedEcho((ev as any).text)
           ) {
-            return;
+            return false;
           }
           // 被跳过的空会话出现真实内容后补跟随：内容事件到达时重评估
           // （本通道 + sessionWatcher 通道都挂；跳过的写盘不会再发 FOLLOW）。
@@ -879,14 +1395,54 @@ export async function activate(context: vscode.ExtensionContext) {
                       qrPanel.addLog(`SESSION_FOLLOW 续压: 所选会话近期有活动`);
                       return;
                     }
-                    qrPanel.addLog(`SESSION_FOLLOW 补发: 窗口结束重放被压制的跟随`);
-                    handleTranscriptWatcherEvent(p);
+                    // 重放前校验目标仍是双源最新：被压制的跟随描述的是发出时刻的
+                    // 「桌面活跃会话」，窗口结束时桌面可能已搬到别处（含 inject 完成
+                    // 切到所选会话）——过时跟随直接丢，否则手机会被拽去死会话（R18）。
+                    const pTarget = String(
+                      (p as any).csFile || (p as any).file || "",
+                    );
+                    // newestSessionFile() 在 transcripts 目录命中同名时返回的是
+                    // transcripts 路径——与 pTarget（chatSessions 路径）按全路径
+                    // 比较永假，被压跟随必然当「过时」丢弃（R99 死链）。同名 basename
+                    // 即同一会话，按 basename 比。
+                    const stillNewest = transcriptWatcher?.newestSessionFile?.();
+                    if (
+                      pTarget &&
+                      stillNewest &&
+                      path.basename(pTarget) !== path.basename(stillNewest)
+                    ) {
+                      qrPanel.addLog(
+                        `SESSION_FOLLOW 丢弃: 目标已非最新 ${path.basename(pTarget)}`,
+                      );
+                    } else {
+                      qrPanel.addLog(`SESSION_FOLLOW 补发: 窗口结束重放被压制的跟随`);
+                      handleTranscriptWatcherEvent(p);
+                    }
                   }, wait);
                 }
                 return;
               }
-            // 指向绑定会话本身的跟随：放行并解除显式选择窗口
+            // 跨向跟随的用户活动门（直发路径）：被弃会话的在途轮持续写盘
+            // 会一直占 newest——若点选后目标会话无任何用户活动，这次跟随是
+            // turn 写入的假象，丢掉不拽回（压制重放走同一门：performSessionFollow）。
+            if (
+              boundViaExplicitSelect &&
+              selBase &&
+              followBase &&
+              selBase !== followBase &&
+              (userActivityBySess.get(followBase) ?? 0) <= lastExplicitSelectAt
+            ) {
+              qrPanel.addLog(`SESSION_FOLLOW 丢弃: 点选后目标无用户活动 ${followBase}`);
+              return;
+            }
+            // 指向绑定会话本身的跟随：放行并解除显式选择窗口——但不再回放。
+            // 同一会话的重放是纯消耗：feed 被清空重渲（实测空窗 ~75s），还会
+            // 清掉输入框里的草稿。live 事件流已经在补增量，无需重放。
             if (inWindow) lastExplicitSelect = undefined;
+            if (selBase && followBase && selBase === followBase) {
+              qrPanel.addLog(`SESSION_FOLLOW 跳过: 跟随目标即绑定会话 ${followBase}`);
+              return;
+            }
             if (csFile && fs.existsSync(csFile)) {
               performSessionFollow(csFile, base);
             } else if (bridge?.sendToPhone) {
@@ -904,9 +1460,9 @@ export async function activate(context: vscode.ExtensionContext) {
           // 用 chatSessions 的 USER_MESSAGE 兜底（bridge sendToPhone 的 isPhoneEcho
           // 会拦手机回声，不会双出现）。
           if (ev.type === "USER_MESSAGE") {
-            if (bridge?.sendToPhone) bridge.sendToPhone(ev);
-            else bridge?.broadcast(ev);
-            return;
+            if (bridge?.sendToPhone) return bridge.sendToPhone(ev);
+            bridge?.broadcast(ev);
+            return true;
           }
           if (
             ev.type === "SYSTEM_MESSAGE" &&
@@ -915,8 +1471,9 @@ export async function activate(context: vscode.ExtensionContext) {
             writeChannelArtifact();
             return;
           }
-          if (bridge?.sendToPhone) bridge.sendToPhone(ev);
-          else bridge?.broadcast(ev);
+          if (bridge?.sendToPhone) return bridge.sendToPhone(ev);
+          bridge?.broadcast(ev);
+          return true;
         },
       });
       transcriptWatcher.start();

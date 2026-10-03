@@ -366,8 +366,119 @@ export async function detectCrossSessionLeak(
   return undefined;
 }
 
+/** 读文件尾部判断是否含 needle（复刻 detectCrossSessionLeak 的读法，不含时序门槛） */
+function fileTailContains(file: string, needle: string): boolean {
+  try {
+    if (!fs.existsSync(file)) return false;
+    const st = fs.statSync(file);
+    const readSize = Math.min(st.size, 512 * 1024);
+    const fd = fs.openSync(file, "r");
+    try {
+      const buf = Buffer.alloc(readSize);
+      fs.readSync(fd, buf, 0, readSize, Math.max(0, st.size - readSize));
+      return buf.toString("utf8").includes(needle);
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    return false;
+  }
+}
+
+/** 送达判定版：会话 jsonl 的 inputState.inputText 里躺着的文本只是
+    composer 草稿（submit 被 pending-requests 弹窗吞掉时文本就停在这里，
+    从未成为请求）——命中草稿不算落盘送达。先清空所有 inputText 值再搜；
+    文本另在 pendingRequests/requests 里仍是真送达。 */
+function fileTailContainsDelivered(file: string, needle: string): boolean {
+  try {
+    if (!fs.existsSync(file)) return false;
+    const st = fs.statSync(file);
+    const readSize = Math.min(st.size, 512 * 1024);
+    const fd = fs.openSync(file, "r");
+    try {
+      const buf = Buffer.alloc(readSize);
+      fs.readSync(fd, buf, 0, readSize, Math.max(0, st.size - readSize));
+      const tail = buf
+        .toString("utf8")
+        .replace(
+          /"inputText"\s*:\s*"((?:[^"\\]|\\.)*)"/g,
+          '"inputText":""',
+        );
+      return tail.includes(needle);
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * soft-unverified 延迟复核：提交的文本到底有没有落进**目标会话**。
+ * 命中目标会话文件尾部、其 transcript 镜像、或调用方提供的补充检查
+ * （extension 侧传 sessiondb 绑定 sid 的 turns 行扫描）都算已送达。
+ * 旧同文命中同样算（保守不判死）——判死只发生在目标会话零命中时。
+ * 打进别的会话（异会话归属）对本客户端同样不可见 = 未送达，不误放行。
+ */
+export async function checkInjectEverLanded(
+  targetFile: string | undefined,
+  text: string,
+  extraCheck?: () => boolean | Promise<boolean>,
+): Promise<boolean> {
+  const needle = text.trim();
+  if (!needle) return true;
+  if (targetFile) {
+    try {
+      const base = path.basename(targetFile);
+      const dir = path.dirname(targetFile);
+      if (dir.endsWith("chatSessions")) {
+        const mirror = path.join(
+          path.dirname(dir),
+          "GitHub.copilot-chat",
+          "transcripts",
+          base,
+        );
+        if (fileTailContains(mirror, needle)) return true;
+      }
+    } catch {
+      /* ignore */
+    }
+    if (fileTailContainsDelivered(targetFile, needle)) return true;
+  }
+  try {
+    if (extraCheck && (await extraCheck())) return true;
+  } catch {
+    /* ignore */
+  }
+  return false;
+}
+
+/** 清空 chat composer 草稿：chat.open 的 query 是往现有输入框里【插入】
+    而非替换——phone_stop/取消后 VS Code 会把被停轮的原文恢复成草稿，
+    此时直接注入会把新文本拼接进旧草稿再自动提交（R112 实测乱码合并）。
+    selectAll+delete 是 best-effort（命令不可用时静默跳过）。 */
+async function clearComposerDraft(): Promise<void> {
+  try {
+    await vscode.commands.executeCommand("workbench.action.chat.focusInput");
+  } catch {
+    /* ignore */
+  }
+  try {
+    await vscode.commands.executeCommand("editor.action.selectAll");
+  } catch {
+    /* ignore */
+  }
+  try {
+    await vscode.commands.executeCommand("deleteLeft");
+  } catch {
+    /* ignore */
+  }
+}
+
 async function submitFocusedQuery(text: string): Promise<boolean> {
   try {
+    await clearComposerDraft();
+    await delay(80);
     await vscode.commands.executeCommand("workbench.action.chat.open", {
       query: text,
       isPartialQuery: false,
@@ -640,7 +751,12 @@ export async function cancelChatRequest(): Promise<{ ok: boolean; via?: string; 
   let lastErr: unknown;
   for (const cmd of candidates) {
     try {
-      await vscode.commands.executeCommand(cmd);
+      // 工具执行中的取消命令可能挂起（Copilot 内部等工具收尾）——不设超时
+      // 会永远 await，停止路径两路广播（DONE[phone_stop]/失败提示）都发不出。
+      await Promise.race([
+        vscode.commands.executeCommand(cmd),
+        new Promise((_, rej) => setTimeout(() => rej(new Error("cancel command timed out")), 5000)),
+      ]);
       return { ok: true, via: cmd };
     } catch (e) {
       lastErr = e;

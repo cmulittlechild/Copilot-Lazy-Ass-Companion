@@ -128,6 +128,12 @@
   let lastSysText = '';
   let lastSysAt = 0;
   let replaying = false;
+  /** 已完成回放次数：0=冷启/首次连接回放——排队暂存按「回填输入框不自动发」
+      处理；>=1=切会话/重连回放——同会话暂存项重新挂回队列。 */
+  let replayCount = 0;
+  /** 暂存在 ss 里的跨会话排队项（sess != 当前绑定会话）：回放合并写回时
+      不得丢掉，否则切到别的会话再切回后排队文本凭空蒸发。 */
+  let parkedForeignQueue = [];
   let typingEl = null;
   let typingTimer = null;
   /** 会话切换 / 历史回放期间：禁用 smooth 滚动，直接跳到底部（避免整段滑动动画） */
@@ -144,6 +150,10 @@
   let requestRunning = false;
   /** 停止需双击确认：空输入点击发送键先武装 3s，再点才真正停（防误触/打字未落框杀掉在途回复） */
   let stopArmUntil = 0;
+  let stopArmHintEl = null;
+  /** PHONE_STOP 发出/回执时刻：服务端 DONE[phone_stop] 缺席超 12s 提示可能未生效 */
+  let stopSentAt = 0;
+  let stopAckAt = 0;
   /** 本会话见过的最大 requestIndex（仅 live）：用于识别旧请求迟到的 DONE，
       防止把当前在途轮的发送键/队列提前释放 */
   let latestLiveReqIdx = -1;
@@ -167,8 +177,12 @@
    * 视为僵尸流——requests/N 开流后 END 被服务器端抑制时按钮会永远卡在「停止」。
    */
   const STREAM_STALE_MS = 75 * 1000;
+  /** 待答条目仍计"活轮"的时限：须 > 上游实际 TTFT/超时（观测 ~90s+） */
+  const STREAM_STALE_AWAIT_MS = 150 * 1000;
   /** 最后一次流活动（STREAM_* / COPILOT_TYPING / AGENT_MESSAGE）时间戳 */
   let lastStreamActivityAt = 0;
+  let lastAgentMessageAt = 0; // 最近一次真渲染 AGENT_MESSAGE 的时刻
+  let lastUserSendAt = 0;     // 最近一次真发送（含回声/桌面来源 USER）的时刻
   /**
    * 发送后置核验：半死 socket 上 ws.send() 不抛异常但从未送达——
    * 送出后在 N 秒内等服务器 USER_MESSAGE 回声，超时判丢失并回填文本。
@@ -177,13 +191,57 @@
   let pendingSendCheck = null;
   /** 核验计时器误报时间戳：送达确认若晚于误报到达，补一条「已送达」修正提示 */
   let sendVerifyMissedAt = 0;
+  /** 误报后回填进输入框的文本：送达确认到达时若原样未动则自动清，勿留残渣 */
+  let sendVerifyRestoredText = null;
+  /** 送达确认后清回填残渣：仅当输入框内容仍与回填文本原样一致（用户没动过） */
+  function clearRestoredIfConfirmed(confirmedText) {
+    if (!sendVerifyRestoredText) return;
+    if (confirmedText != null &&
+        userTextDedupeKey(String(confirmedText)) !== userTextDedupeKey(sendVerifyRestoredText)) return;
+    if ((input.value || '') === sendVerifyRestoredText) input.value = '';
+    sendVerifyRestoredText = null;
+  }
+  /** 释放链路调试环缓冲：release/flush/DONE 判定决策留痕，sessionStorage 300 条上限。
+      排查「队列滞留/释放过晚」时用 __dbg() 导出复盘。 */
+  const DBG_KEY = 'sidecar.dbg';
+  function DBG(tag, data) {
+    try {
+      const raw = sessionStorage.getItem(DBG_KEY);
+      const arr = raw ? JSON.parse(raw) : [];
+      arr.push({ t: Date.now(), tag, ...(data || {}) });
+      if (arr.length > 300) arr.splice(0, arr.length - 300);
+      sessionStorage.setItem(DBG_KEY, JSON.stringify(arr));
+    } catch (_) {}
+  }
+  try { window.__dbg = () => sessionStorage.getItem(DBG_KEY) || '[]'; } catch (_) {}
   /** 待发核验持久化 key：页面被半死 socket 刷新杀死内存计时器时，刷新后从这里回填 */
   const PENDING_SEND_KEY = 'sidecar.pendingSend';
   function persistPendingSend(text, key) {
-    try { sessionStorage.setItem(PENDING_SEND_KEY, JSON.stringify({ text, key: key || '', at: Date.now() })); } catch {}
+    try { sessionStorage.setItem(PENDING_SEND_KEY, JSON.stringify({ text, key: key || '', at: Date.now(), sess: currentSessionMeta.file || '' })); } catch {}
+  }
+  /** pendingSend 属于发送时的会话：切到别会话后补画会造成跨会话残泡（R91）。 */
+  function pendingSendSessOk(p) {
+    if (!p || !p.sess) return true; // 旧记录无 sess 无法判定，按本会话处理
+    const pBase = baseNameAny(p.sess).replace(/\.jsonl$/i, '');
+    const boundBase = baseNameAny(currentSessionMeta.file).replace(/\.jsonl$/i, '');
+    return !pBase || !boundBase || pBase === boundBase;
   }
   /** 已发出但未收到回答的用户消息（清屏/重放后重画用）；回声到达或回答完成即移除 */
   const sentAwaitingReply = [];
+  /** 待答清单持久化：页面刷新把内存清单连同「发后落盘窗口」上下文一起蒸发——
+      transcript 请求行只在轮次完成时写盘，发送后 ~1s 刷新的回放里该轮 USER 缺席，
+      补画与未送达校验都无凭据 → 答案裸挂上一轮。快照进 sessionStorage，回放末段按
+      「5min 内 + 本会话 + 回放 USER 缺席」恢复（已在回放里的说明轮已落盘无需跟踪）。 */
+  const SENT_AWAITING_KEY = 'sidecar.sentAwaiting';
+  function persistSentAwaiting() {
+    try {
+      const arr = sentAwaitingReply
+        .filter((e) => e && typeof e.text === 'string' && e.text.trim())
+        .map((e) => ({ text: e.text, key: e.key || '', sess: e.sess || '', at: e.at || Date.now() }));
+      if (arr.length) sessionStorage.setItem(SENT_AWAITING_KEY, JSON.stringify(arr.slice(-8)));
+      else sessionStorage.removeItem(SENT_AWAITING_KEY);
+    } catch (_) {}
+  }
   /** 回放渲染过的用户文 textKey→ts：跟随/重连回放后迟到的同文 live USER 回声据此吞掉 */
   const recentReplayedUserText = new Map();
   function clearPendingSend() {
@@ -208,7 +266,7 @@
         sessionStorage.removeItem(PENDING_SEND_KEY);
         return;
       }
-      if (!(input.value || '').trim()) input.value = p.text;
+      if (!(input.value || '').trim()) { input.value = p.text; sendVerifyRestoredText = p.text; }
       addSys('发送可能未送达（连接中断），文本已回填，请重新发送');
     } catch {}
   }
@@ -218,6 +276,63 @@
   const OUTBOUND_QUEUE_TTL_MS = 90000;
   /** 请求进行中用户再次输入的消息队列：排队而非停轮（发送键=有文本就排队，空文本才停止） */
   const pendingSendQueue = [];
+  /** 换会话退队已回填输入框的提示：回放清屏后需补投一次。 */
+  let queueBackfillNotePending = false;
+  /** 排队消息持久化：页面刷新会把内存里的 pendingSendQueue 连同泡一起蒸发，
+      回放后用 sessionStorage 副本把文本回填输入框（与切会话回填同语义，不自动重发）。 */
+  const QUEUED_SENDS_KEY = 'sidecar.queuedSends';
+  function persistQueuedSends() {
+    try {
+      const arr = [];
+      for (const q of pendingSendQueue) {
+        if (q && typeof q.text === 'string' && q.text.trim()) {
+          arr.push({ text: q.text, at: q.at || Date.now(), sess: q.sess || currentSessionMeta.file || '' });
+        }
+      }
+      // 跨会话暂存项一并写回：内存队列覆盖整个 ss key，不带 foreign
+      // 会把别会话的暂存条目抹掉。
+      for (const q of parkedForeignQueue) {
+        if (q && typeof q.text === 'string' && q.text.trim()) arr.push(q);
+      }
+      if (arr.length) sessionStorage.setItem(QUEUED_SENDS_KEY, JSON.stringify(arr.slice(0, 8)));
+      else sessionStorage.removeItem(QUEUED_SENDS_KEY);
+    } catch (_) {}
+  }
+  /** 「已排队」提示元素：出队发走后移除，不再残留（R59 P3）。 */
+  let queuedHintEl = null;
+  /** 硬释放看门狗：DONE 触发的宽限释放链会被 setRequestRunning(true) 取消
+      （迟到流事件重置 rr → 悬挂 ~100s 到僵尸看门狗）。DONE 判 release 时
+      独立布一个 15s 检查：rr 仍在且流静默 ≥5s → 强制释放+出队。 */
+  let releaseHardTimer = null;
+  /** 看门狗体：rr 仍在且流静默 ≥5s → 强制释放；流还有活动则 15s 后再查
+      （一次性失效会让「挡后新待答入列」的轮次永久卡停止态）。 */
+  function hardReleaseCheck() {
+    releaseHardTimer = null;
+    if (!requestRunning) return;
+    const hrcSil = Date.now() - lastStreamActivityAt;
+    // 有未决待批准卡的轮 parked 等桌面批准：静默 ≠ 死亡，续查不释放
+    //（否则 inject-ack DONE 触发的本看门狗 15s 内就把 parked 轮杀掉）。
+    // 同理豁免未超龄待答轮：例行 inject-ack DONE 也会布本看门狗，上游
+    // TTFT 慢（实测 20s+ 才首流）时 5s 静默阈会收割活轮 → rr 提前释放、
+    // 下条发送绕过排队插队。真正的死轮由 75s 死流看门狗兜底即可。
+    const hrcAwaiting =
+      sentAwaitingReply.length > 0 &&
+      sentAwaitingReply.some((e) => Date.now() - (e.at || 0) < STREAM_STALE_AWAIT_MS);
+    if (hrcSil >= 5000 && !parkedConfirmAlive() && !hrcAwaiting) {
+      DBG('hrc', { act: 'release', sil: hrcSil });
+      markAllToolsDone();
+      finishAllAssistantVisuals();
+      requestRunning = false;
+      paintSendButton();
+      if (statusText && !replaying && !replayingInstant) {
+        statusText.textContent = connectedLabel();
+      }
+      flushPendingSendQueue();
+    } else {
+      DBG('hrc', { act: 'rearm', sil: hrcSil });
+      releaseHardTimer = setTimeout(hardReleaseCheck, 15000);
+    }
+  }
 
   /**
    * 鉴权 token：URL ?token= 优先，其次 localStorage（tunnel 开了 auth 时必须带）。
@@ -352,6 +467,7 @@
 
   function setRequestRunning(on, statusLabel, opts) {
     const force = !!(opts && opts.force);
+    DBG('rr', { on: !!on, force, defer: opts && opts.deferMs, src: String((new Error().stack || '').split('\n')[2] || '').trim().slice(0, 80) });
     if (on) {
       if (requestDoneTimer) {
         clearTimeout(requestDoneTimer);
@@ -405,9 +521,16 @@
       // .streaming 元素——中途 DONE/回执 DONE 后流仍在走，此时释放会让排队
       // 消息赶在 A1 前插队（U1U2A1A2 残余逃逸）。真轮终后必经历 5s 静默。
       if (Date.now() - lastStreamActivityAt < 5000) {
+        DBG('grace', { act: 'rearm', sil: Date.now() - lastStreamActivityAt });
         requestDoneTimer = setTimeout(graceRelease, 1500);
         return;
       }
+      DBG('grace', { act: 'release', sil: Date.now() - lastStreamActivityAt });
+      // rr 在此刻真实落锁 = 客户端已判定本论终结——残余 running 工具卡
+      // 一律收 done：END 的 !any 门跳过、DONE 全被 ack/stale 压制的轮
+      // （实测 Autopilot 工具轮）走到这里才释放，缺这步徽章要干等到
+      // transcript 尾帧 DONE 或下一轮顺带清扫（最差永久挂 running）。
+      markAllToolsDone();
       finishAllAssistantVisuals();
       requestRunning = false;
       paintSendButton();
@@ -430,6 +553,7 @@
       return;
     }
     // 仍有 streaming：短宽限等下一 turn
+    DBG('grace', { act: 'stream-wait' });
     requestDoneTimer = setTimeout(graceRelease, REQUEST_DONE_GRACE_MS);
   }
 
@@ -631,18 +755,42 @@
   }
 
   let scrollRafId = null;
-  /** 判断用户是否手动向上滚动了一定距离（> 96px） */
-  function isUserScrolledUp() {
-    if (!feed) return false;
-    const distanceToBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight;
-    return distanceToBottom > 96;
+  /** 用户主动上滚持锁：只在真实滚轮/触摸向上时置位，滚回底部解除。
+      此前用「距底 >96px」判定——大块流内容一次插入把 scrollHeight 拉高即
+      误判为上滚，之后整轮长答不再跟底（R66 P3）。 */
+  let userScrollHold = false;
+  function feedIsAtBottom() {
+    return feed.scrollHeight - feed.scrollTop - feed.clientHeight < 8;
+  }
+  function bindScrollHold() {
+    if (!feed) return;
+    const isAtBottom = feedIsAtBottom;
+    feed.addEventListener('wheel', (e) => {
+      if (e.deltaY < 0) userScrollHold = true;
+      else if (isAtBottom()) userScrollHold = false;
+    }, { passive: true });
+    let touchY = null;
+    feed.addEventListener('touchstart', (e) => {
+      touchY = e.touches && e.touches.length ? e.touches[0].clientY : null;
+    }, { passive: true });
+    feed.addEventListener('touchmove', (e) => {
+      if (touchY == null || !(e.touches && e.touches.length)) return;
+      const dy = e.touches[0].clientY - touchY;
+      touchY = e.touches[0].clientY;
+      // 手指下滑 = 内容上滚查看历史；上滑到底解除
+      if (dy > 4) userScrollHold = true;
+      else if (dy < -4 && isAtBottom()) userScrollHold = false;
+    }, { passive: true });
+    feed.addEventListener('scroll', () => {
+      if (isAtBottom()) userScrollHold = false;
+    }, { passive: true });
   }
 
   function scrollFeed(force) {
     // 回放期间完全禁止滚动——逐条渲染若每次 scroll，手机会从第一条一路滑到尾。
     if (replaying || replayingInstant) return;
     // 非强制且用户手动向上滑动翻阅历史时，不打断用户
-    if (!force && isUserScrolledUp()) return;
+    if (!force && userScrollHold) return;
     if (scrollRafId) cancelAnimationFrame(scrollRafId);
     scrollRafId = requestAnimationFrame(() => {
       scrollRafId = null;
@@ -797,6 +945,124 @@
     return false;
   }
 
+  /** _ut 命中的同文 user 泡可能不止一个（同题重问）：归属选「最早尚无真答案」
+      的同文轮——与服务端 FIFO 收尾同序（markAnswered 只关最老匹配轮）。
+      evTs（事件源 ts）做窗口约束：
+        - 活着的未答轮：事件早于它开启 (>2s) → 不归它，跳过；
+        - 已挂孤儿占位的「判死」轮：上游静默取代后答案会迟到——事件 ts 落在
+          它窗口内（自己的 ts ≤ evTs < 下一个 user 的 ts）仍可认领该答案。
+      已答轮一律跳过（同文答案重投影归到最早未答轮）。全落选时回退最新
+      同文泡（迟到重投影照旧走上层判死/去重路）。 */
+  function pickUtOwner(users, want, evTs) {
+    const ev = Number(evTs);
+    const hasEv = Number.isFinite(ev) && ev > 0;
+    let last = null, firstOpen = null;
+    for (let i = 0; i < users.length; i++) {
+      const u = users[i];
+      if (u.dataset.textKey !== want) continue;
+      last = u;
+      if (turnHasOtherAnswer(u, undefined)) continue;
+      let dead = false;
+      for (let n = u.nextElementSibling; n && !n.classList.contains('user'); n = n.nextElementSibling) {
+        if (n.classList && n.classList.contains('agent') && n.dataset.orphanPh) { dead = true; break; }
+      }
+      const uts = Number(u.dataset.ts);
+      if (dead) {
+        if (hasEv && Number.isFinite(uts) && ev >= uts - 2000) {
+          let nxt = NaN;
+          for (let j = i + 1; j < users.length; j++) {
+            const t2 = Number(users[j].dataset.ts);
+            if (Number.isFinite(t2) && t2 > 0) { nxt = t2; break; }
+          }
+          if (!Number.isFinite(nxt) || ev < nxt - 2000) return u;
+        }
+        continue;
+      }
+      if (hasEv && Number.isFinite(uts) && uts > ev + 2000) continue;
+      if (!firstOpen) firstOpen = u;
+    }
+    return firstOpen || last;
+  }
+
+  /** 归属 user 泡（与 appendFeedChronological 的 owner 判定一致）：
+      ut 文本键优先（最早未答同文 user），否则最后一个 ts ≤ t 的 user，
+      均无则取末尾 user。 */
+  function ownerUserFor(ut, ts) {
+    const users = feed.querySelectorAll('.msg.user');
+    if (ut) {
+      const want = userTextDedupeKey(String(ut));
+      const o = pickUtOwner(users, want, ts);
+      if (o) return o;
+    }
+    const t = Number(ts);
+    if (Number.isFinite(t) && t > 0) {
+      for (let i = users.length - 1; i >= 0; i--) {
+        const uts = Number(users[i].dataset.ts);
+        if (Number.isFinite(uts) && uts <= t) return users[i];
+      }
+    }
+    return users.length ? users[users.length - 1] : null;
+  }
+
+  /** 归属 user 泡下是否已有真答案——排除 selfSid 自身在产的卡（自产答案的
+      流不应被判尾帧）。thinking/孤儿占位/utCopy 补画不算。 */
+  function turnHasOtherAnswer(userEl, selfSid) {
+    if (!userEl) return false;
+    for (let n = userEl.nextElementSibling; n && !n.classList.contains('user'); n = n.nextElementSibling) {
+      if (!n.classList.contains('agent') || n.classList.contains('typing-row')) continue;
+      if (n.dataset.orphanPh || n.dataset.utCopy) continue;
+      const b = n.querySelector('.body');
+      if (b && String(b.dataset.raw || '').trim() && n.dataset.streamId !== selfSid) return true;
+      const sid = n.dataset && n.dataset.streamId;
+      const st = sid && sid !== selfSid ? streamingTurns.get(sid) : null;
+      if (st && String(st.markdown || '').trim()) return true;
+    }
+    return false;
+  }
+
+  /** 指定 user 泡之下是否已有同文答案（含未收尾的流式卡；thinking/孤儿占位不算） */
+  function answerUnderUser(userEl, text) {
+    if (!userEl) return false;
+    const want = String(text || '').trim();
+    if (!want) return false;
+    for (let n = userEl.nextElementSibling; n && !n.classList.contains('user'); n = n.nextElementSibling) {
+      if (!n.classList.contains('agent') || n.classList.contains('typing-row')) continue;
+      if (n.dataset.orphanPh || n.dataset.utCopy) continue;
+      const b = n.querySelector('.body');
+      if (b && String(b.dataset.raw || '').trim() === want) return true;
+      const sid = n.dataset && n.dataset.streamId;
+      const st = sid ? streamingTurns.get(sid) : null;
+      if (st && String(st.markdown || '').trim() === want) return true;
+    }
+    return false;
+  }
+
+  /** ansText 已渲染于某个 user 轮下时，同问（同 textKey）轮里是否还有待答者：
+      返回最早未答且未死的同文 user 泡，无则 null。同题重问时新一轮的同文答案
+      不是重投影——上游同题合并语义会原样重发同文答案，压制让新轮裸奔
+      （R122W-3：t1m097 被 answerUnderUser/agentTextRendered 吞 → U2 空槽 →
+      U3 的流错锚到 U2）。仅判同问轮，异问的同文答案（"ok"式）照旧去重。 */
+  function sameQuestionAwaiting(ansText, evTs) {
+    const want = String(ansText || '').trim();
+    if (!want) return null;
+    const keys = new Set();
+    feed.querySelectorAll('.msg.agent .body').forEach((b) => {
+      if (String(b.dataset.raw || '') !== want) return;
+      let u = b.closest('.msg.agent');
+      while (u && !u.classList.contains('user')) u = u.previousElementSibling;
+      if (u && u.dataset && u.dataset.textKey) keys.add(u.dataset.textKey);
+    });
+    if (!keys.size) return null;
+    const users = feed.querySelectorAll('.msg.user');
+    for (const k of keys) {
+      const o = pickUtOwner(users, k, evTs);
+      // pickUtOwner 全落选时回退末位同文泡——那不算「待答」，须再验它无真答案
+      if (o && !turnHasOtherAnswer(o, undefined)) return o;
+    }
+    return null;
+  }
+
+
   /** User message — 官方 chat-row：avatar + "You" + 气泡 */
   function addUser(text, key, opts) {
     const t = String(text || '');
@@ -811,8 +1077,9 @@
     // 0.5.19：同文去重只吞「短窗内刚画过的手机回声」，不再扫历史 12 条。
     // 否则会话里曾经有过「1」，用户再发「1」会被静默丢掉（截图：远端无用户气泡）。
     if (!isReplay && !force && isRecentPhoneUserText(t)) {
+      // 全量扫：迟到的重投影/回放副本可能把真泡顶出尾部窗口，按 DOM 位置限扫会漏
       const nodes = feed.querySelectorAll('.msg.user');
-      for (let i = nodes.length - 1; i >= Math.max(0, nodes.length - 4); i--) {
+      for (let i = nodes.length - 1; i >= 0; i--) {
         const body = nodes[i].querySelector('.user-bubble');
         if (body && body.textContent === t) {
           // 吞掉回声后即消耗该记录：用户同文重问（>回声到达）不该被二次吞掉变裸文本
@@ -833,7 +1100,7 @@
       const rat = recentReplayedUserText.get(textKey);
       if (rat != null && Date.now() - rat <= REPLAY_ECHO_DEDUP_MS) {
         const nodes = feed.querySelectorAll('.msg.user');
-        for (let i = nodes.length - 1; i >= Math.max(0, nodes.length - 8); i--) {
+        for (let i = nodes.length - 1; i >= 0; i--) {
           const body = nodes[i].querySelector('.user-bubble');
           if (body && body.textContent === t) {
             recentReplayedUserText.delete(textKey);
@@ -881,6 +1148,9 @@
     pill.className = 'sys-pill';
     pill.textContent = text || '';
     el.appendChild(pill);
+    // 打 ts 让按序插入把它当时间锚点：无 ts 的 sys 行会被后到的 USER 越过、
+    // AGENT 又按归属插回 USER 之后 → 「已切换到会话」夹在 U/A 对中间。
+    el.dataset.ts = String(Date.now());
     feed.appendChild(el);
     scrollFeed();
     return el;
@@ -891,21 +1161,30 @@
    * 造成「用户气泡出现在旧助手回复上面/下面错乱」；无 timestamp 则 append。
    * 0.5.22b：回放（HISTORY_REPLAY）期间跳过按序插入——projectHistory 已按轮次
    * 交错排好，按 timestamp 重排反而把 user/agent 拆成两堆。只有 live 事件才需要。
+   * R93：agent/tool 元素可携带 _ut（归属用户文）——同题重问时 ts 会归属错轮
+   * （事件源 ts 与客户端泡 ts 不同时钟），按 ut 文本键锁到最后一条同名用户泡。
    */
-  function appendFeedChronological(el, ts) {
+  function appendFeedChronological(el, ts, ut, ownerEl) {
     if (!el || !feed) return;
+    const t = typeof ts === 'number' && Number.isFinite(ts) ? ts : Number(ts);
+    // ts 戳与插入顺序无关——回放元素也打：全 feed 无 ts 节点时，后续 live 事件
+    // 的按序插入把它们全当「尾端」跳过，迟到件贴尾不归位（实测回放后
+    // sessiondb 迟到对永久挂底）。
+    if (Number.isFinite(t) && t > 0) el.dataset.ts = String(t);
     // 回放期间：projectHistory 已排好顺序，直接 append
-    if (replaying || replayingInstant) {
+    if (replaying || replayingInstant) {
       feed.appendChild(el);
       return;
     }
-    const t = typeof ts === 'number' && Number.isFinite(ts) ? ts : Number(ts);
-    if (Number.isFinite(t) && t > 0) el.dataset.ts = String(t);
     const isAgent = el.classList && (el.classList.contains('agent') || el.classList.contains('tool-card'));
     if (isAgent) {
       const users = feed.querySelectorAll('.msg.user');
-      let owner = null;
-      if (Number.isFinite(t) && t > 0) {
+      let owner = ownerEl || null;
+      if (!owner && ut) {
+        const want = userTextDedupeKey(String(ut));
+        owner = pickUtOwner(users, want, t);
+      }
+      if (!owner && Number.isFinite(t) && t > 0) {
         for (let i = users.length - 1; i >= 0; i--) {
           const ut = Number(users[i].dataset.ts);
           if (Number.isFinite(ut) && ut <= t) { owner = users[i]; break; }
@@ -924,10 +1203,17 @@
         }
         if (at.nextSibling) feed.insertBefore(el, at.nextSibling);
         else feed.appendChild(el);
+        // 判死轮回魂：真答案锚到挂了孤儿占位的轮下时，占位作废摘除
+        // （上游静默取代后答案迟到——占位画完答案才到）。
+        if (el.classList.contains('agent') && !el.classList.contains('typing-row')) {
+          for (let m = owner.nextElementSibling; m && !m.classList.contains('user'); m = m.nextElementSibling) {
+            if (m !== el && m.classList.contains('agent') && m.dataset.orphanPh) { try { m.remove(); } catch (_) {} }
+          }
+        }
         return;
       }
     }
-    if (!Number.isFinite(t) || t <= 0) {
+    if (!Number.isFinite(t) || t <= 0) {
       feed.appendChild(el);
       return;
     }
@@ -942,7 +1228,7 @@
         // 继续向前，找到第一个 <= t 的后面
         continue;
       }
-      // n.ts <= t → 插到 n 后面
+      // n.ts <= t → 插到 n 后面
       if (n.nextSibling) feed.insertBefore(el, n.nextSibling);
       else feed.appendChild(el);
       return;
@@ -1028,7 +1314,7 @@
     content.append(meta, bubble);
     row.append(avatar, content);
     el.appendChild(row);
-    appendFeedChronological(el, opts && (opts.ts != null ? opts.ts : opts.timestamp));
+    appendFeedChronological(el, opts && (opts.ts != null ? opts.ts : opts.timestamp), opts && opts.ut, opts && opts.anchorUser);
 
     entry = {
       id,
@@ -1044,7 +1330,16 @@
     };
     streamingTurns.set(id, entry);
     lastActiveStreamId = id;
-    if (!replaying) setRequestRunning(true);
+    // 已答轮尾帧不撑起 rr（与 frameRearms 同判据）：doneStreams 成员，或
+    // _ut 归属轮已有非本流真答案的迟到流。
+    const armOk =
+      !doneStreams.has(id) &&
+      !(opts && opts.ut &&
+        turnHasOtherAnswer(
+          ownerUserFor(opts.ut, opts.ts != null ? opts.ts : opts.timestamp),
+          id,
+        ));
+    if (!replaying && armOk) setRequestRunning(true);
     scrollFeed();
     return entry;
   }
@@ -1074,7 +1369,43 @@
     if (!sid) sid = 'default';
     const entry = streamingTurns.get(sid);
     if (entry && entry.element && entry.element.isConnected) return entry;
-    return startAssistantTurn(sid);
+    // 直播期无活卡时：事件 ts 早于最新用户泡 >2s = 旧轮经慢通道迟到的
+    // 思考/进度帧（归属轮已收尾，sid 常是已被复用的位置型僵尸 id）——为它
+    // 新建流卡只会 appendChild 贴到 feed 底部挂进最新轮下。丢弃；活轮的
+    // 早到思考帧 ts 是新鲜值不受影响。回放期豁免：历史思考帧必须照常渲染，
+    // 它们靠 ts 锚定回自己那轮。
+    const evTs = eventTsNum(msg);
+    if (!replaying && !replayingInstant && Number.isFinite(evTs)) {
+      const users = feed.querySelectorAll('.msg.user');
+      const lastU = users.length ? users[users.length - 1] : null;
+      const luTs = lastU ? Number(lastU.dataset.ts) : NaN;
+      if (lastU && Number.isFinite(luTs) && evTs + 2000 < luTs) return null;
+    }
+    return startAssistantTurn(sid, { ut: msg && msg._ut, ts: evTs });
+  }
+
+  /** 慢通道流式重投压制：同文答案已在该轮（按 ts 归属的 user 泡之下）渲染时，
+      不再创建流式卡——攒着文本等 END 时走 addAgentFinal 统一去重/补画。 */
+  const suppressedStreams = new Map();
+
+  /** 已答轮的残留流：DONE 放行轮次后归属流卡标记进本集合——其尾帧照常渲染/收尾，
+      但不再计流活动（lastStreamActivityAt）、不再撑起 rr。否则 transcript 尾流
+      把发送队列顶到 75s 收割窗才放出（实测 ~78s），目标 ~7s 出队。 */
+  const doneStreams = new Set();
+
+  /** 流帧是否应撑起 rr/计流活动。豁免两种尾帧：
+      a) doneStreams 成员（DONE 已判其轮终）；
+      b) 归属轮已有「非本流」真答案的迟到帧（transcript 尾流/跨通道重投影——
+         内容照渲染，但不许再续命发送队列）。
+      同题重问安全：_ut 归属取最新同文泡，未答新轮照常撑起。 */
+  function frameRearms(msg) {
+    const sid = (msg && msg.streamId) || 'default';
+    if (doneStreams.has(sid)) return false;
+    // 判重抑制流（transcript requests/N 通道晚于 sessiondb 答案到达被整流
+    // 吞掉）——帧不渲也不该算流活动：尾部 END/碎片实测把发送键多卡 ~75s。
+    if (suppressedStreams.has(sid)) return false;
+    if (msg && msg._ut && turnHasOtherAnswer(ownerUserFor(msg._ut, msg.timestamp), sid)) return false;
+    return true;
   }
 
   /** 流式增量刷新：用 textContent 显示纯文本（快速），rAF 合并同一帧多次 chunk */
@@ -1101,16 +1432,46 @@
   }
 
   /** AGENT_STREAM_SET：整段替换 */
-  function setEntryMarkdown(streamId, text, ts) {
-    const entry = startAssistantTurn(streamId, { ts: ts });
+  function setEntryMarkdown(streamId, text, ts, ut) {
+    const sid = streamId || 'default';
+    if (suppressedStreams.has(sid)) {
+      suppressedStreams.set(sid, String(text || ''));
+      return;
+    }
+    // 归属判定双径：_ut/ts 归属轮下有同文答案，或无 _ut 自证但全 feed 已有
+    // 同文——后者兜住「归属泡是未答排队泡」的盲区：旧轮帧按 ts 归到最新未答
+    // 泡下，owner 轮无答案 → 漏压制 → 旧答案建成新卡（实测僵尸流双渲+重挂
+    // rr 顶队列 ~80s）。带 _ut 的帧照旧只查归属轮，同题重问的新轮不误杀。
+    const waiting = sameQuestionAwaiting(text, ts);
+    if (!streamingTurns.get(sid) && !replaying && !replayingInstant &&
+        (answerUnderUser(ownerUserFor(ut, ts), text) ||
+         (!ut && agentTextRendered(String(text || '').trim()))) &&
+        !waiting) {
+      suppressedStreams.set(sid, String(text || ''));
+      return;
+    }
+    const entry = startAssistantTurn(sid, { ts: ts, ut: ut, anchorUser: waiting });
     entry.markdown = String(text || '');
     if (ts != null && entry.element) entry.element.dataset.ts = String(ts);
     renderEntryBody(entry);
   }
 
   /** AGENT_STREAM_CHUNK：增量追加（仅纯文本追加 + rAF 合批，不调 marked.parse） */
-  function appendAssistantChunk(streamId, chunk, ts) {
-    const entry = startAssistantTurn(streamId, { ts: ts });
+  function appendAssistantChunk(streamId, chunk, ts, ut) {
+    const sid = streamId || 'default';
+    if (suppressedStreams.has(sid)) {
+      suppressedStreams.set(sid, (suppressedStreams.get(sid) || '') + String(chunk || ''));
+      return;
+    }
+    let waiting = null;
+    if (!streamingTurns.get(sid) && !replaying && !replayingInstant &&
+        (answerUnderUser(ownerUserFor(ut, ts), chunk) ||
+         (!ut && agentTextRendered(String(chunk || '').trim()))) &&
+        !(waiting = sameQuestionAwaiting(chunk, ts))) {
+      suppressedStreams.set(sid, String(chunk || ''));
+      return;
+    }
+    const entry = startAssistantTurn(sid, { ts: ts, ut: ut, anchorUser: waiting });
     if (ts != null && entry.element && !entry.element.dataset.ts) entry.element.dataset.ts = String(ts);
     entry.markdown += String(chunk || '');
     scheduleStreamFlush(entry);
@@ -1129,17 +1490,31 @@
       '<span class="codicon codicon-copy" aria-hidden="true"></span>' +
       '<span class="footer-label">复制</span>';
     copyBtn.addEventListener('click', async () => {
+      const label = copyBtn.querySelector('.footer-label');
+      let ok = false;
       try {
         await navigator.clipboard.writeText(text);
-        const label = copyBtn.querySelector('.footer-label');
-        if (label) {
-          label.textContent = '已复制';
-          setTimeout(() => {
-            label.textContent = '复制';
-          }, 1200);
-        }
+        ok = true;
       } catch {
-        /* 剪贴板不可用 */
+        // clipboard.writeText 在页面未聚焦/无权限时抛错——execCommand 兜底
+        try {
+          const ta = document.createElement('textarea');
+          ta.value = text;
+          ta.style.position = 'fixed';
+          ta.style.opacity = '0';
+          document.body.appendChild(ta);
+          ta.select();
+          ok = document.execCommand('copy');
+          ta.remove();
+        } catch {
+          ok = false;
+        }
+      }
+      if (label) {
+        label.textContent = ok ? '已复制' : '复制失败';
+        setTimeout(() => {
+          label.textContent = '复制';
+        }, 1200);
       }
     });
     footer.appendChild(copyBtn);
@@ -1148,19 +1523,86 @@
 
   /** AGENT_STREAM_END / AGENT_MESSAGE：去掉 streaming 类（光标停止）；finalText 非空则覆盖 */
   function completeAssistantTurn(streamId, finalText, msg) {
-    const entry = streamingTurns.get(streamId || 'default');
+    const sidKey = streamId || 'default';
+    // 压制流的收尾：攒到的文本交给 addAgentFinal 统一判定（同文已渲则丢）
+    if (suppressedStreams.has(sidKey)) {
+      const acc = suppressedStreams.get(sidKey) || '';
+      suppressedStreams.delete(sidKey);
+      const ft = typeof finalText === 'string' && finalText ? finalText : acc;
+      if (ft) {
+        addAgentFinal(ft, 'agent:' + sidKey, {
+          ts: msg ? eventTsNum(msg) : NaN,
+          gapFill: !!(msg && msg.gapFill),
+          streamId: sidKey,
+          ut: msg && msg._ut,
+        });
+      }
+      return;
+    }
+    const entry = streamingTurns.get(sidKey);
+    // 同题重问第二答：上游复用首轮响应 → 慢通道把旧轮答案带「最新同文轮」的
+    // _ut 重投（ts 继承首轮）。本 streamId 的卡锚在更早的同文 user 泡下时，
+    // 这条投递属于新一轮——为最新轮补画一份（data-utCopy），旧卡留给自己的
+    // END 收尾，不归位。
+    if (entry && entry.element && entry.element.isConnected && msg && msg._ut &&
+        !(replaying || replayingInstant) && typeof finalText === 'string' && finalText) {
+      let anchor = entry.element;
+      while (anchor && !anchor.classList.contains('user')) anchor = anchor.previousElementSibling;
+      const uk = userTextDedupeKey(String(msg._ut));
+      const users = feed.querySelectorAll('.msg.user');
+      let lastMatch = null;
+      for (let i = users.length - 1; i >= 0; i--) {
+        if (users[i].dataset.textKey === uk) { lastMatch = users[i]; break; }
+      }
+      if (anchor && lastMatch && anchor !== lastMatch) {
+        let hasAnswer = false;
+        for (let n = lastMatch.nextElementSibling; n && !n.classList.contains('user'); n = n.nextElementSibling) {
+          if (!n.classList.contains('agent') || n.classList.contains('typing-row')) continue;
+          if (n.dataset.orphanPh) continue;
+          const b = n.querySelector('.body');
+          if (b && String(b.dataset.raw || '').trim()) { hasAnswer = true; break; }
+          const sid2 = n.dataset && n.dataset.streamId;
+          const st2 = sid2 ? streamingTurns.get(sid2) : null;
+          if (st2 && String(st2.markdown || '').trim()) { hasAnswer = true; break; }
+        }
+        if (!hasAnswer) {
+          const uts = Number(lastMatch.dataset.ts);
+          const copy = addAgentFinal(finalText, null, {
+            ts: Number.isFinite(uts) ? uts + 1 : eventTsNum(msg),
+            gapFill: !!msg.gapFill,
+            ut: msg._ut,
+          });
+          if (copy) copy.dataset.utCopy = '1';
+          return;
+        }
+      }
+    }
     if (!entry || !entry.element || !entry.element.isConnected) {
       if (typeof finalText === 'string' && finalText) {
         addAgentFinal(finalText, streamId ? 'agent:' + streamId : null, {
-          ts: msg && msg.timestamp,
+          ts: msg ? eventTsNum(msg) : NaN,
           gapFill: !!(msg && msg.gapFill),
           streamId: streamId,
+          ut: msg && msg._ut,
         });
       }
       return;
     }
     if (typeof finalText === 'string' && finalText.length) {
-      entry.markdown = finalText;
+      // 变体重投影：sessiondb/db 通道会发同答案的 markdown 剥壳版
+      // （`file.js`→file.js、**粗体**→粗体），直接覆盖会丢格式。
+      // 归一化（剥 markdown/空白）相同 = 同一份答案，保留更长的原始版。
+      const existing = String(entry.markdown || '');
+      if (existing && existing !== finalText) {
+        const norm = (s) => String(s).replace(/[\s`*_~#>\-]+/g, '');
+        if (norm(existing) === norm(finalText)) {
+          if (finalText.length > existing.length) entry.markdown = finalText;
+        } else {
+          entry.markdown = finalText;
+        }
+      } else if (!existing) {
+        entry.markdown = finalText;
+      }
     }
     // 空壳回合（只有 Copilot 头 + •••，无正文/无 thinking/status）：直接移除，避免多枚空 Copilot 标
     const hasBody = !!(entry.markdown && String(entry.markdown).trim());
@@ -1169,6 +1611,47 @@
       try { entry.element.remove(); } catch (_) {}
       streamingTurns.delete(streamId || 'default');
       return;
+    }
+    // 同文流式重投影：回放/别通道已把该轮正文画上屏，这张流式卡是迟到副本。
+    // 流式路径不经 addAgentFinal 的同文去重，收尾时补查——按卡片自身锚定的
+    // user 泡扫（不只末尾 user：锚在旧轮的卡收尾时最新轮已换）。
+    if (entry.markdown && !replaying && !replayingInstant) {
+      let anchorUser = entry.element;
+      while (anchorUser && !anchorUser.classList.contains('user')) anchorUser = anchorUser.previousElementSibling;
+      let dup = false;
+      if (anchorUser) {
+        for (let n = anchorUser.nextElementSibling; n && !n.classList.contains('user'); n = n.nextElementSibling) {
+          if (n === entry.element) continue;
+          if (n.dataset && (n.dataset.utCopy || n.dataset.orphanPh)) continue;
+          if (!n.classList.contains('agent') || n.classList.contains('typing-row')) continue;
+          const b = n.querySelector('.body');
+          if (b && b.dataset.raw === entry.markdown) { dup = true; break; }
+        }
+      }
+      if (dup) {
+        try { entry.element.remove(); } catch (_) {}
+        streamingTurns.delete(streamId || 'default');
+        let anyLive = false;
+        for (const e of streamingTurns.values()) {
+          if (e.element && e.element.isConnected && e.element.classList.contains('streaming')) {
+            anyLive = true;
+            break;
+          }
+        }
+        if (!anyLive) {
+          clearTyping();
+          feed.querySelectorAll('.msg.agent .typing-label').forEach((n) => {
+            n.style.display = 'none';
+            n.classList.add('is-done');
+          });
+          // 摘除迟到双卡后若真轮还在生成（其流卡未建），直释会放排队逃逸——
+          // 同门：本轮真答渲过才可释放，否则靠 DONE/硬看门狗。
+          if (lastAgentMessageAt > lastUserSendAt) {
+            setRequestRunning(false, undefined, { deferMs: 3000 });
+          }
+        }
+        return;
+      }
     }
     entry.element.classList.remove('streaming');
     entry.bubble.classList.remove('streaming');
@@ -1190,6 +1673,7 @@
     }
     maybeAddFooter(entry.element, entry.markdown);
     streamingTurns.delete(streamId || 'default');
+    rescindOrphanPlaceholders();
     scrollFeed();
     // 该流结束后若没有其它 streaming 回合，收尾状态（防 ••• 与停止键残留）
     if (!replaying) {
@@ -1206,7 +1690,14 @@
           n.style.display = 'none';
           n.classList.add('is-done');
         });
-        setRequestRunning(false);
+        // 与 END 处理同锚：流卡收尾只是「这条流」结束，不是轮终——轮中途
+        // 的骨架/进度块 END 会走到这里。无条件即释会让在途态在静默窗内
+        // 提前回弹（R36 wire：骨架 END 经此站点 +6.8s 放出排队消息）。
+        // 同门：本轮真答案渲染过（lastAgentMessageAt > lastUserSendAt）才算轮终；
+        // AGENT_MESSAGE 路径会先盖 lastAgentMessageAt 再调本函数，不受影响。
+        if (lastAgentMessageAt > lastUserSendAt) {
+          setRequestRunning(false, undefined, { deferMs: 3000 });
+        }
       }
     }
   }
@@ -1239,7 +1730,12 @@
           const node = allMsgs[i];
           if (!node.classList.contains('agent') || node.classList.contains('typing-row')) continue;
           const body = node.querySelector('.body');
-          if (body && body.dataset.raw === text) return null;
+          if (!body) continue;
+          if (body.dataset.raw === text) return null;
+          // CHUNK 流式卡收尾前不写 dataset.raw：取 streamingTurns 的 markdown 比
+          const sid = node.dataset && node.dataset.streamId;
+          const st = sid ? streamingTurns.get(sid) : null;
+          if (st && String(st.markdown || '').trim() === String(text).trim()) return null;
         }
       }
     }
@@ -1272,11 +1768,40 @@
     content.append(meta, bubble);
     row.append(avatar, content);
     el.appendChild(row);
-    appendFeedChronological(el, opts && (opts.ts != null ? opts.ts : opts.timestamp));
+    appendFeedChronological(el, opts && (opts.ts != null ? opts.ts : opts.timestamp), opts && opts.ut);
     // 独立助手消息完成 → 底部操作栏（复制按钮）
     maybeAddFooter(el, text);
+    rescindOrphanPlaceholders();
     scrollFeed();
     return el;
+  }
+
+  /** 孤儿占位自清：误判画出的「该轮无回复」下，真答案后到就把占位撤掉。
+      双向扫：迟到答案按源 ts 时序插入，可能落在占位【之前】（同一用户泡下、
+      占位上方）——只向后扫会漏，形成「答案+无回复占位」同框矛盾。 */
+  function rescindOrphanPlaceholders() {
+    const phs = feed.querySelectorAll('.msg.agent[data-orphan-ph]');
+    if (!phs.length) return;
+    const hasAnswer = (sib) =>
+      sib.classList &&
+      sib.classList.contains('agent') &&
+      !sib.classList.contains('typing-row') &&
+      !sib.dataset.orphanPh &&
+      (() => {
+        const bd = sib.querySelector('.body');
+        return bd && String(bd.dataset.raw || '').trim();
+      })();
+    const isUser = (sib) => sib.classList && sib.classList.contains('user');
+    phs.forEach((ph) => {
+      for (let n = ph.nextSibling; n; n = n.nextSibling) {
+        if (isUser(n)) break;
+        if (hasAnswer(n)) { ph.remove(); return; }
+      }
+      for (let n = ph.previousSibling; n; n = n.previousSibling) {
+        if (isUser(n)) break;
+        if (hasAnswer(n)) { ph.remove(); return; }
+      }
+    });
   }
 
   /** THINKING_STEP：statusHost 内折叠块，流式追加不重渲染 */
@@ -1391,15 +1916,28 @@
   }
 
   /** 强制所有未完成 tool-card → done，并折叠步骤组（COPILOT_DONE / STREAM_END） */
-  function markAllToolsDone() {
+  function markAllToolsDone(exceptSince) {
+    const cut = typeof exceptSince === 'number' && Number.isFinite(exceptSince) ? exceptSince : 0;
     try {
       for (const [, el] of tools) {
         if (!el || !el.isConnected) continue;
+        // 在途轮切走→切回：回放把尚在运行的工具卡也盖成 done（R107 BUG-1）。
+        // 开启时刻之后的卡豁免——源事件 ts >= 轮开启时间的属于在途轮，保持 running。
+        if (cut > 0) {
+          const ets = Number(el.dataset.ts);
+          if (!Number.isFinite(ets) || ets >= cut) continue;
+        }
         const badge = el.querySelector('.tool-badge');
         if (badge && badge.classList.contains('running')) {
           badge.className = 'tool-badge done';
           badge.innerHTML =
             '<span class="codicon codicon-check" aria-hidden="true"></span>done';
+          const ph = el.querySelector('.tool-pend-hint');
+          if (ph) ph.remove();
+          // 单调完成须落 toolDone 标记：transcript 尾帧会在 DONE 之后重投同一
+          // TOOL_CALL（isComplete=false），无标记则 upsertTool 把徽章打回
+          // running 且再无 DONE 翻回——卡永久停在 running（实测排队轮复现）。
+          el.dataset.toolDone = '1';
         }
         const details = el.querySelector('details.tool-details');
         if (details) details.open = false;
@@ -1472,7 +2010,29 @@
         ? '<span class="codicon codicon-loading" aria-hidden="true"></span>running'
         : '<span class="codicon codicon-check" aria-hidden="true"></span>done';
     badge.className = 'tool-badge ' + (confirmed ? 'confirmed' : running ? 'running' : 'done');
-    if (!running) el.dataset.toolDone = '1';
+    if (!running) {
+      el.dataset.toolDone = '1';
+      const ph = el.querySelector('.tool-pend-hint');
+      if (ph) ph.remove();
+    }
+    // 长时 running 提示：Copilot 0.67 的工具审批「待批准」态在获批前不产生
+    // 任何 transcript/sessiondb 事件——客户端只能看到 run_in_terminal 等卡
+    // 一直 running（实测 Get-Content 挂 ~100s 直到桌面点 Allow）。>20s 未完结
+    // 就标注原因，用户才知道该去 VS Code 端批准。
+    if (el.__pendTimer) { clearTimeout(el.__pendTimer); el.__pendTimer = null; }
+    if (running && !confirmed) {
+      el.__pendTimer = setTimeout(() => {
+        el.__pendTimer = null;
+        const b = el.querySelector('.tool-badge');
+        if (!b || !b.classList.contains('running') || !el.isConnected) return;
+        if (el.querySelector('.tool-pend-hint')) return;
+        const hint = document.createElement('div');
+        hint.className = 'tool-pend-hint';
+        hint.textContent = '仍在运行 · 可能正等待 VS Code 端审批';
+        const body = el.querySelector('.tool-body');
+        if (body) body.appendChild(hint);
+      }, 20000);
+    }
 
     let html = '';
     if (inputStr && inputStr !== '{}' && inputStr !== 'null') {
@@ -1500,8 +2060,35 @@
     // Inline feed card (Remote pS) + sticky bar for thumb reach
     const buttons = Array.isArray(msg.buttons) && msg.buttons.length ? msg.buttons : ['Continue', 'Cancel'];
     const confirmId = msg.confirmId || msg.requestId || msg.toolCallId || null;
+    // 同一张卡的第二份（双通道重投/回放重post）：已有同 id 或同标题+正文的
+    // 未决卡时不再建第二张——否则 feed 出现双份待批准卡（R96）。
+    // 候选 id 全集判重：仲裁器取 toolCallId||confirmId||requestId，这里取
+    // confirmId||requestId||toolCallId——双通道副本字段齐全度不同时两个
+    // 通道算出的 confirmId 不一致，单一 sameId 漏拦（R112 P3 瞬态双卡）。
+    const candIds = [msg.confirmId, msg.requestId, msg.toolCallId, msg.id]
+      .filter((x) => x != null && x !== '')
+      .map(String);
+    try {
+      const cards = feed.querySelectorAll('.msg.confirm-card');
+      for (const c of cards) {
+        // 同 id 一律拦（含已决卡：回放重投不得把已答确认复活成新卡）；
+        // 无 id 的只拦未决卡同标题+正文（已决卡 body 已被改写，按内容对不上）。
+        const cIds = String(c.dataset.confirmIds || '').split('|');
+        const sameId = candIds.length > 0 && candIds.some((i) => cIds.includes(i));
+        const sameBody =
+          !c.classList.contains('resolved') &&
+          (c.querySelector('.confirm-title')?.textContent || '') === (msg.title || 'Confirm') &&
+          (c.querySelector('.confirm-body')?.textContent || '') === (msg.message || '');
+        if (sameId || sameBody) {
+          if (!c.classList.contains('resolved')) confirmBar.classList.remove('hidden');
+          return;
+        }
+      }
+    } catch (_) {}
     let resolved = false;
     const el = document.createElement('div');
+    if (confirmId) el.dataset.confirmId = confirmId;
+    if (candIds.length) el.dataset.confirmIds = candIds.join('|');
     el.className = 'msg confirm-card';
     const title = document.createElement('div');
     title.className = 'confirm-title';
@@ -1651,7 +2238,21 @@
 
   // 死流看门狗：每 10s 检查一次流活性，静默超阈值自动收尸
   setInterval(() => {
-    if (requestRunning && lastStreamActivityAt && Date.now() - lastStreamActivityAt > STREAM_STALE_MS) {
+    // 尚有未超龄的待答条目 = 回声已确认、上游仍在处理——慢上游（TTFT 实测
+    // ~90s+）不能按 75s 静默判死，否则活轮被提前释放，下条发送绕过排队
+    // 直接插队（U1U2A1A2 回归形态）。窗口独立于 AWAIT_REPLY_FLUSH_BLOCK_MS
+    // （15s 只管"刚发未答挡队"语义，此处要覆盖上游超时上限）。
+    const stillAwaitingReply =
+      sentAwaitingReply.length > 0 &&
+      sentAwaitingReply.some((e) => Date.now() - (e.at || 0) < STREAM_STALE_AWAIT_MS);
+    if (
+      requestRunning &&
+      !stillAwaitingReply &&
+      !parkedConfirmAlive() &&
+      lastStreamActivityAt &&
+      Date.now() - lastStreamActivityAt > STREAM_STALE_MS
+    ) {
+      DBG('watchdog', { sil: Date.now() - lastStreamActivityAt });
       forceFinishDeadStream();
     }
   }, 10 * 1000);
@@ -1664,13 +2265,14 @@
       if (!raw) return;
       const p = JSON.parse(raw);
       if (!p || typeof p.text !== 'string' || !p.text.trim()) return;
+      if (!pendingSendSessOk(p)) return;
       let found = false;
       const nodes = feed.querySelectorAll('.msg.user');
-      for (let i = nodes.length - 1; i >= Math.max(0, nodes.length - 4); i--) {
+      for (let i = nodes.length - 1; i >= 0; i--) {
         const body = nodes[i].querySelector('.user-bubble');
         if (body && body.textContent === p.text) { found = true; break; }
       }
-      if (!found) addUser(p.text, p.key || `user:pending:${Date.now()}:${userTextDedupeKey(p.text)}`, { force: true });
+      if (!found) addUser(p.text, p.key || `user:pending:${Date.now()}:${userTextDedupeKey(p.text)}`, { force: true, ts: p.at || Date.now() });
     } catch (_) {}
     repaintAwaitingUserBubbles();
   }
@@ -1678,25 +2280,38 @@
   function repaintAwaitingUserBubbles() {
     const boundBase = baseNameAny(currentSessionMeta.file).replace(/\.jsonl$/i, '');
     for (const m of sentAwaitingReply) {
-      // 只补画当前会话的条目：sess 属别会话的不该出现在本 feed（防串泡）
+      // 只补画当前会话的条目：sess 属别会话或 sess 缺失（发送时绑定未定）
+      // 的不该出现在本 feed——缺失也拦，否则在途切会话时残泡复活（R94）。
       const mBase = baseNameAny(m.sess || '').replace(/\.jsonl$/i, '');
-      if (boundBase && mBase && mBase !== boundBase) continue;
+      if (!boundBase || mBase !== boundBase) continue;
       let found = false;
       const nodes = feed.querySelectorAll('.msg.user');
-      for (let i = nodes.length - 1; i >= Math.max(0, nodes.length - 4); i--) {
+      for (let i = nodes.length - 1; i >= 0; i--) {
         const body = nodes[i].querySelector('.user-bubble');
         if (body && body.textContent === m.text) { found = true; break; }
       }
-      if (!found) addUser(m.text, m.key, { force: true });
+      // ts 用当前时刻而非 m.at：补画泡是最新未完成轮，要排在「已切换会话」
+      // 系统提示之后；用旧发送时刻会把它插到提示上面（R66 P3 乱序）。
+      if (!found) addUser(m.text, m.key, { force: true, ts: Date.now() });
     }
   }
 
   function handle(msg) {
     if (!msg || !msg.type) return;
+    // 同文 USER 回声无论在哪个会话到达都证明桥端已收——误报回填的原样
+    // 文本在这就清（放在 _sess/foreign 过滤之前，否则别会话回声/重连
+    // 窗口会把残渣留在输入框）。
+    if (msg.type === 'USER_MESSAGE') clearRestoredIfConfirmed(msg.text);
     // 别会话的桌面消息：系统行提示而不是用户泡——否则 foreign 事件无 _sess 打标时
     // 穿过过滤冒充当前会话的发言，看起来像本会话的轮次（实测漏泡根因）。
     if (msg.type === 'USER_MESSAGE' && msg.foreign === true) {
       const sid = String(msg._sess || '');
+      // 本会话文件被 foreign 扫描误投（模型切换重写文件触发尾部重读）：
+      // live 通道已渲过同一条，静默丢——不能渲成【其他会话】系统行冒充别会话发言。
+      const bound0 = currentSessionMeta.file
+        ? baseNameAny(currentSessionMeta.file).replace(/\.jsonl$/i, '')
+        : '';
+      if (bound0 && sid === bound0) return;
       const want = sid + '.jsonl';
       let label = '其他会话';
       const cache = window.__sessionTitleCache || {};
@@ -1711,9 +2326,27 @@
     }
     // 跨会话事件过滤：服务端给 live 事件打 _sess（绑定会话 id）；与当前绑定不符的
     // 直接丢弃，防别会话 USER/AGENT 泡漏进当前 feed（回放类消息不带 _sess 不拦）。
+    // 放行例外：_ut/文本与「已发未答」条目同文 = 自家轮次被 Copilot 归进了别的
+    // 会话文件（注入落到新会话、或会话只存于 sessiondb 无 jsonl）——是本轮的
+    // 应答而非别会话泄漏；丢下会让待答泡空等、答案永不可见。
+    let ownTurnForeignSess = false;
     if (msg._sess && currentSessionMeta.file) {
       const bound = baseNameAny(currentSessionMeta.file).replace(/\.jsonl$/i, '');
-      if (bound && String(msg._sess) !== bound) return;
+      if (bound && String(msg._sess) !== bound) {
+        const evUt = String(
+          msg._ut || (msg.type === 'USER_MESSAGE' ? msg.text : '') || '',
+        );
+        ownTurnForeignSess =
+          !!evUt &&
+          sentAwaitingReply.some((e) => {
+            if (userTextDedupeKey(e.text) !== userTextDedupeKey(evUt)) return false;
+            // 例外仅适用于「本会话的轮被归进了别文件」：条目本身须属当前查看
+            // 会话。条目的 sess 属别会话时放行 = 别会话在途答案画进本视图（B2）。
+            const eBase = baseNameAny(e.sess || '').replace(/\.jsonl$/i, '');
+            return !e.sess || !eBase || eBase === bound;
+          });
+        if (!ownTurnForeignSess) return;
+      }
     }
     // 跟踪本会话 live 最大 requestIndex：识别旧请求迟到的 DONE
     if (!replaying && typeof msg.requestIndex === 'number' && msg.requestIndex > latestLiveReqIdx) {
@@ -1727,6 +2360,34 @@
       case 'SYSTEM_MESSAGE': {
         if (msg.visibility === 'internal' || msg.internal === true) break;
         const t = String(msg.text || '');
+        // 服务端落盘核验失败（inject 宣称送达但 transcript 无此轮）→ 销待答
+        // 条目 + 原文回填输入框。泡不删：同文旧轮的泡会误删，让 sys 提示解释。
+        try {
+          if (msg.notPersisted) {
+            const npKey = userTextDedupeKey(String(msg.notPersisted));
+            for (let i = sentAwaitingReply.length - 1; i >= 0; i--) {
+              if (userTextDedupeKey(sentAwaitingReply[i].text) === npKey) sentAwaitingReply.splice(i, 1);
+            }
+            if (!(input.value || '').trim()) {
+              input.value = String(msg.notPersisted);
+              sendVerifyRestoredText = String(msg.notPersisted);
+            }
+          }
+          // 终态注入失败（串台/bind-failed/verified_false → 已复制剪贴板）：
+          // 本会话绝不会再产出本轮，但终态 DONE 被裁决器判 inject-ack 丢弃
+          // 到不了这里——待答条目会挂到看门狗超时、空 Copilot 泡干等。
+          // 按 ut 销条目+回填原文（与 notPersisted 同语义：泡不删）。
+          if (msg.injectFailed) {
+            const ifKey = userTextDedupeKey(String(msg.injectFailed));
+            for (let i = sentAwaitingReply.length - 1; i >= 0; i--) {
+              if (userTextDedupeKey(sentAwaitingReply[i].text) === ifKey) sentAwaitingReply.splice(i, 1);
+            }
+            if (!(input.value || '').trim()) {
+              input.value = String(msg.injectFailed);
+              sendVerifyRestoredText = String(msg.injectFailed);
+            }
+          }
+        } catch (_) {}
         // auth failed 曾只关 socket → PWA 无限重连显示 connecting
         if (/auth failed/i.test(t) || /auth required/i.test(t)) {
           onAuthFailed(t);
@@ -1737,15 +2398,30 @@
         break;
       }
       case 'USER_MESSAGE': {
-        // 发送核验：自己的消息被服务器回声了 = 真送达，撤銷核验计时
-        if (pendingSendCheck && userTextDedupeKey(msg.text || '') === pendingSendCheck.textKey) {
+        if (!replaying && !replayingInstant) lastUserSendAt = Date.now();
+        // 发送核验：自己的消息被服务器回声了 = 真送达，撤銷核验计时。
+        // 但回声须来自当前绑定会话——绑定/桌面活跃分叉时（P2），别会话里同文
+        // 的迟到的 USER 回声会误清核验，把一次真吞包伪装成已送达。
+        const echoSessOk = (() => {
+          if (!msg._sess) return true;
+          if (ownTurnForeignSess) return true; // 自家轮被归进别会话文件——回声即送达
+          const bound = baseNameAny(currentSessionMeta.file || '').replace(/\.jsonl$/i, '');
+          const mBase = baseNameAny(msg._sess).replace(/\.jsonl$/i, '');
+          return !bound || !mBase || bound === mBase;
+        })();
+        if (
+          pendingSendCheck &&
+          echoSessOk &&
+          userTextDedupeKey(msg.text || '') === pendingSendCheck.textKey
+        ) {
           clearTimeout(pendingSendCheck.timer);
           pendingSendCheck = null;
         }
         // 收到 USER 回声 = 送达确认：若与持久化的待发文本同文，清掉防误回填
+        // （同样须当前会话回声——别会话的同文回声不得清）
         try {
           const raw = sessionStorage.getItem(PENDING_SEND_KEY);
-          if (raw) {
+          if (raw && echoSessOk) {
             const p = JSON.parse(raw);
             if (p && userTextDedupeKey(msg.text || '') === userTextDedupeKey(p.text || '')) {
               sessionStorage.removeItem(PENDING_SEND_KEY);
@@ -1762,7 +2438,10 @@
         const key = msg.requestId
           ? `user:${msg.requestId}`
           : userTextDedupeKey(msg.text || '');
-        addUser(msg.text || '', key, { ts: msg.timestamp });
+        // ts 取 eventTsNum：无 requestId 的回声（soft-unverified 注入路径）只带
+        // 事件级 ts 不带内层 timestamp——不兜底则泡无 dataset.ts，后续按时序插入
+        // 的元素会把无 ts 泡当「尾端」跳过、插到它前面 → 新轮排在在途轮之前。
+        addUser(msg.text || '', key, { ts: eventTsNum(msg) });
         // 回声只证明消息入列，不证明泡仍在 feed（clearFeed 随时可能抹掉）。
         // 待答清单刻意保留到答案落地（AGENT_MESSAGE._ut 匹配或真 DONE）才释放。
         break;
@@ -1779,31 +2458,32 @@
         flushOutboundQueue();
         break;
       case 'AGENT_STREAM_START':
-        lastStreamActivityAt = Date.now();
+        if (frameRearms(msg)) lastStreamActivityAt = Date.now();
         ensurePendingUserBubble();
         // 不立刻 startAssistantTurn：否则 tool-only / 空 turn 会留下「Copilot •••」空壳。
         // 真正正文在 CHUNK/SET/MESSAGE 时再创建行；这里只进入 running + 顶部 typing。
         if (msg.requestIndex != null) reqToStream.set(msg.requestIndex, msg.streamId || 'default');
         if (msg.streamId) lastActiveStreamId = msg.streamId;
-        if (!replaying) {
+        if (!replaying && frameRearms(msg)) {
           setRequestRunning(true);
           showTyping();
         }
         break;
       case 'AGENT_STREAM_SET':
-        lastStreamActivityAt = Date.now();
-        setEntryMarkdown(msg.streamId || 'default', msg.text || '', msg.timestamp);
+        if (frameRearms(msg)) lastStreamActivityAt = Date.now();
+        setEntryMarkdown(msg.streamId || 'default', msg.text || '', msg.timestamp, msg._ut);
         if (msg.requestIndex != null) reqToStream.set(msg.requestIndex, msg.streamId || 'default');
-        if (!replaying) setRequestRunning(true);
+        if (!replaying && frameRearms(msg)) setRequestRunning(true);
         break;
       case 'AGENT_STREAM_CHUNK':
-        lastStreamActivityAt = Date.now();
-        appendAssistantChunk(msg.streamId || 'default', msg.text || '', msg.timestamp);
+        if (frameRearms(msg)) lastStreamActivityAt = Date.now();
+        appendAssistantChunk(msg.streamId || 'default', msg.text || '', msg.timestamp, msg._ut);
         if (msg.requestIndex != null) reqToStream.set(msg.requestIndex, msg.streamId || 'default');
-        if (!replaying) setRequestRunning(true);
+        if (!replaying && frameRearms(msg)) setRequestRunning(true);
         break;
       case 'AGENT_STREAM_END':
-        lastStreamActivityAt = Date.now();
+        if (frameRearms(msg)) lastStreamActivityAt = Date.now();
+        doneStreams.delete(msg.streamId || 'default');
         completeAssistantTurn(msg.streamId || 'default');
         clearTyping();
         // 若已无 streaming 行，立即藏掉残余 ••• 并恢复发送键（不等 COPILOT_DONE）
@@ -1820,9 +2500,16 @@
               n.classList.add('is-done');
             });
             markAllToolsDone();
-            if (!replaying) setRequestRunning(false, undefined, { force: true });
-            setStatus(true, connectedLabel());
           }
+          // END 只是「某条流」的终止帧——骨架/进度块的 END 会在轮中途来，把它
+          // 当终止帧释放会让在途态在静默窗内提前落回「发送」：连发排队消息
+          // ~6s 后即逃逸插队（R33/R34/R35 实测 U2 在 A1 前 19s+ 广播）。
+          // 判据：本轮真答案（AGENT_MESSAGE）必须在最后发送之后才渲染过——
+          // 进度流也写 markdown，流级标记区分不了；只有真答帧能证明轮近终。
+          // 无 DONE 收尾的真轮由 releaseHardTimer（15s 硬看门狗）兜底释放。
+          const endHadText = lastAgentMessageAt > 0 && lastAgentMessageAt > lastUserSendAt;
+          if (!replaying && endHadText) setRequestRunning(false, undefined, { deferMs: 3000 });
+          if (!any) setStatus(true, connectedLabel());
         }
         break;
       case 'AGENT_MESSAGE': {
@@ -1846,17 +2533,124 @@
             setTimeout(flushPendingSendQueue, 50);
           }
         } catch (_) {}
-        // 迟到重投影且同文已渲染 → 丢；未渲染的迟到 final 照常追加
-        if (isStaleReplayEvent(eventTsNum(msg)) && agentTextRendered(String(msg.text || ''))) {
+        // 迟到重投影且同文已渲染 → 丢；未渲染的迟到 final 照常追加。
+        // 判据（同文已渲染为前提，任一即丢）：
+        //  a) ts ≤ 回放水位（经典迟到件）；
+        //  b) 空闲态且 _ut 不属于最新用户轮——激活/切会话的整文件重投影
+        //     都在空闲时到，最新轮的同款回答（"ok"×2）仍放行；
+        //  c) _ut 命中的用户轮后面已有助手块（该轮已答），反向找同名泡，
+        //     快速连发时未答轮（_ut 是最新一条）必须放行。
+        // 回放期间不判：历史里不同轮次的同文回答（如连续的 ⚠️ 失败标记）
+        // 必须各自渲染，否则 collapsed 成首个 → 光秃 USER 连排。
+        if (!(replaying || replayingInstant) && agentTextRendered(String(msg.text || ''))) {
+          const users = feed.querySelectorAll('.msg.user');
+          const lastKey = users.length ? users[users.length - 1].dataset.textKey : '';
+          const utIsLatest =
+            !!msg._ut && !!lastKey && userTextDedupeKey(String(msg._ut)) === lastKey;
+          // d) 事件自带源 ts 早于最新用户泡的发送时刻 >2s → 旧轮经慢通道
+          //    迟到的重投影：在途态（requestRunning）不影响判定。
+          //    例外：_ut 自证属于最新轮（同题重问时上游复用首轮响应，答案的
+          //    事件 ts 继承旧轮时刻）——按 _ut 归位而非按 ts 丢弃。
+          const lastUserTs = users.length ? Number(users[users.length - 1].dataset.ts) : NaN;
+          const evTs = eventTsNum(msg);
+          // _ut 命中最新用户泡 = 当前轮真答：豁免 ts 判定——Copilot 源 ts 与客户端
+          // 泡 ts 不同时钟，真答可能携带早于泡的 request-start ts（R94 误杀）。
+          const predatesLatestUser =
+            !utIsLatest &&
+            Number.isFinite(evTs) && Number.isFinite(lastUserTs) && evTs < lastUserTs - 2000;
+          let oldTurnReproj =
+            isStaleReplayEvent(evTs) || (predatesLatestUser && !utIsLatest) || (!requestRunning && !utIsLatest);
+          if (msg._ut) {
+            // _ut 可能命中多个同文用户泡（同题重问）：逐个判——任一匹配轮尚无真
+            // 答案，这条迟到件就是它的答案（R118-1：A2 与 A1 全同文，旧轮已答
+            // 不能误杀新轮未答）；全部匹配轮都已答 → 确属旧轮重投影，丢。
+            const utKey2 = userTextDedupeKey(String(msg._ut));
+            let sawAnswered = false;
+            let sawUnanswered = false;
+            for (let i = users.length - 1; i >= 0; i--) {
+              if (users[i].dataset.textKey !== utKey2) continue;
+              let sib = users[i].nextElementSibling;
+              let answered = false;
+              while (sib && !sib.classList.contains('user')) {
+                // 只算真答案：thinking/孤儿占位等无正文块不算「该轮已答」
+                if (sib.classList.contains('agent') && !sib.dataset.orphanPh) {
+                  const sb = sib.querySelector('.body');
+                  if (sb && String(sb.dataset.raw || '').trim()) { answered = true; break; }
+                  const ssid = sib.dataset && sib.dataset.streamId;
+                  const sst = ssid ? streamingTurns.get(ssid) : null;
+                  if (sst && String(sst.markdown || '').trim()) { answered = true; break; }
+                }
+                sib = sib.nextElementSibling;
+              }
+              if (answered) sawAnswered = true; else sawUnanswered = true;
+            }
+            if (sawUnanswered) oldTurnReproj = false;
+            else if (sawAnswered) oldTurnReproj = true;
+          }
+          if (oldTurnReproj) {
+            clearTyping();
+            break;
+          }
+        }
+        // 变体重投影（内容剥壳版）：归一化不等所以走不到上面的 exact 同文判断，
+        // 但 _ut 归属的用户轮已有答案、且这条文本归一化后是该答案的子集/前缀——
+        // 同答案的残缺重投影，不是新内容 → 丢弃，防孤儿泡（R13 实测 +35s 变体）。
+        let variantReproj = false;
+        if (!(replaying || replayingInstant) && msg._ut) {
+          const strip = (s) => String(s || '').replace(/[\s`*_~#>\-]+/g, '');
+          const incomingNorm = strip(msg.text);
+          if (incomingNorm) {
+            const wantKey = userTextDedupeKey(String(msg._ut));
+            const users2 = feed.querySelectorAll('.msg.user');
+            for (let i = users2.length - 1; i >= 0; i--) {
+              if (users2[i].dataset.textKey !== wantKey) continue;
+              let sib = users2[i].nextElementSibling;
+              while (sib && !sib.classList.contains('user')) {
+                if (sib.classList.contains('agent') && !sib.classList.contains('typing-row')) {
+                  const bd = sib.querySelector('.body');
+                  const haveNorm = strip(bd && (bd.dataset.raw || bd.textContent));
+                  // 来文是已渲染答案的「子序列」= 丢中段内容的剥壳变体
+                  // （`Created \`f.txt\` - done` 剥壳成 `Created - done` 后归一化
+                  // 非连续子串，includes 判不中）。约束：来文足够长且覆盖率 ≥60%，
+                  // 防真新短答（"ok"式）撞子序列误杀。
+                  if (
+                    haveNorm &&
+                    incomingNorm.length >= 6 &&
+                    incomingNorm.length >= haveNorm.length * 0.4 &&
+                    (() => {
+                      let j = 0;
+                      for (
+                        let k = 0;
+                        k < haveNorm.length && j < incomingNorm.length;
+                        k++
+                      ) {
+                        if (haveNorm[k] === incomingNorm[j]) j++;
+                      }
+                      return j === incomingNorm.length;
+                    })()
+                  ) {
+                    variantReproj = true;
+                  }
+                }
+                if (variantReproj) break;
+                sib = sib.nextElementSibling;
+              }
+              break;
+            }
+          }
+        }
+        if (variantReproj) {
           clearTyping();
           break;
         }
+        lastAgentMessageAt = Date.now();
         if (msg.streamId) {
           completeAssistantTurn(msg.streamId, msg.text || '', msg);
         } else {
           addAgentFinal(msg.text || '', null, {
-            ts: msg.timestamp,
+            ts: eventTsNum(msg),
             gapFill: !!msg.gapFill,
+            ut: msg._ut,
           });
         }
         clearTyping();
@@ -1873,20 +2667,47 @@
         break;
       }
       case 'THINKING_STEP': {
-        // 思考步骤也算在途活动：给 DONE 的延迟释放续命，防 thinking 间隙释放发送键
-        lastStreamActivityAt = Date.now();
-        if (!replaying && requestRunning) setRequestRunning(true);
+        // 思考步骤也算在途活动：给 DONE 的延迟释放续命，防 thinking 间隙释放发送键。
+        // 已答轮（doneStreams/归属轮已有答案）的尾帧不再续命——否则轮尾 thinking 顶满队列。
+        if (frameRearms(msg)) {
+          lastStreamActivityAt = Date.now();
+          if (!replaying && requestRunning) setRequestRunning(true);
+        }
         const tEntry = resolveEntryFor(msg);
         if (tEntry) appendThinking(tEntry, msg.text || '');
         break;
       }
       case 'AGENT_CONFIRM':
+        // 待批准卡到达也是活性帧：parked 轮此后静默等待桌面批准，静默本身
+        // 不是死亡——有未决卡的轮由 parkedConfirmAlive 豁免僵尸收割。
+        lastStreamActivityAt = Date.now();
         showConfirm(msg);
         break;
-      case 'AGENT_CONFIRM_RESOLVED':
+      case 'AGENT_CONFIRM_RESOLVED': {
         confirmBar.classList.add('hidden');
-        addSys(`确认已解决: ${msg.button || ''}`);
+        // feed 里的待批准卡也要销——否则被取代/轮终收尸的卡片仍按未决样式
+        // 挂在 feed 里（实测孤儿轮 RESOLVED 后卡仍显示「待批准」）。
+        let resolvedAny = false;
+        try {
+          const rIds = [msg.toolCallId, msg.confirmId, msg.requestId, msg.id]
+            .filter((x) => x != null && x !== '')
+            .map(String);
+          for (const c of feed.querySelectorAll('.msg.confirm-card:not(.resolved)')) {
+            const cIds = String(c.dataset.confirmIds || c.dataset.confirmId || '').split('|');
+            if (rIds.length && cIds[0] && !rIds.some((i) => cIds.includes(i))) continue;
+            c.classList.add('resolved');
+            resolvedAny = true;
+            const row = c.querySelector('.confirm-btns');
+            if (row) row.remove();
+            const body = c.querySelector('.confirm-body');
+            if (body) body.textContent = `已解决: ${msg.button || ''}`;
+          }
+        } catch (_) {}
+        // 重复 RESOLVED（如 supersede 合成件后投影器补发的轮终收尸）不再
+        // 叠提示行——只有这次真销到卡才打。
+        if (resolvedAny || !feed.querySelector('.msg.confirm-card.resolved')) addSys(`确认已解决: ${msg.button || ''}`);
         break;
+      }
       case 'COPILOT_TYPING':
         lastStreamActivityAt = Date.now();
         if (!replaying) {
@@ -1895,6 +2716,16 @@
         }
         break;
       case 'COPILOT_DONE':
+        // inject_lost = 服务端 55s 延迟复核后全库零命中——提交可能打进了无
+        // Copilot 的窗口（消息停在草稿态）：回填原文让用户重试；待答条目由
+        // 下面 _ut 清条目逻辑销掉，rr 随之正常释放。
+        if (msg.reason === 'inject_lost' && typeof msg._ut === 'string') {
+          const lost = String(msg._ut);
+          if (!(input.value || '').trim() || input.value === sendVerifyRestoredText) {
+            input.value = lost;
+            sendVerifyRestoredText = lost;
+          }
+        }
         // inject_soft_unverified = 服务端已把消息提交进目标会话（Windows 落盘确认慢
         // 会触发该路径）——送达核验立即通过，别让 9s 计时器误报「可能未送达」。
         if (msg.reason === 'inject_soft_unverified') {
@@ -1904,6 +2735,7 @@
             try { sessionStorage.removeItem(PENDING_SEND_KEY); } catch (_) {}
           } else if (sendVerifyMissedAt && Date.now() - sendVerifyMissedAt < 120000) {
             sendVerifyMissedAt = 0;
+            clearRestoredIfConfirmed(null);
             addSys('已确认送达（此前误报未送达，勿重复发送）');
           }
         }
@@ -1922,9 +2754,14 @@
         // requestIndex 之外加时间戳兜底：sessiondb/兜底通道的 DONE 常不带
         // requestIndex，但其 ts 是轮完成时刻——早于最近 live USER 发送时刻
         // 就是旧轮迟到件，不得释放当前在途轮的发送键/队列。
-        const doneIdx = typeof msg.requestIndex === 'number' ? msg.requestIndex : null;
+        // requestIndex 负数是无归属哨兵（裸答案 DONE 实测带 -1）：按无索引处理，
+        // 否则 -1 < latestLiveReqIdx 误 stale → 释放丢、队列干等 75s 看门狗。
+        const doneIdx = typeof msg.requestIndex === 'number' && msg.requestIndex >= 0 ? msg.requestIndex : null;
         const doneTs = eventTsNum(msg);
+        // 服务端裁决器（turnArbiter）已按轮次状态判过 stale/ack——直接采信，
+        // 本地判定留作兜底（旧版扩展无标记时仍生效）。
         const staleDone =
+          msg.stale === true ||
           (doneIdx != null && latestLiveReqIdx > doneIdx) ||
           (doneIdx == null && Number.isFinite(doneTs) && doneTs + 2000 < latestUserLiveTs);
         // 注入回执 DONE（发送后 ~2s 必发的那批，无 _ut/requestIndex 归属）不是
@@ -1937,31 +2774,59 @@
           ...sentAwaitingReply.map((e) => e.at || 0),
         );
         const doneImmediate = msg.reason === 'phone_stop' || msg.reason === 'isCanceled';
+        // inject_soft_unverified 是「已提交但落盘核验慢」的发送回执（verify ~20s
+        // 后才返回，早越过下面的 8s 宽限），不是轮终——真送达时该轮仍在上游跑，
+        // 释放 rr 会让排队消息提前插队；真未送达由 55s 复核的 inject_lost 收尾。
         const injectAckDone =
-          !doneImmediate && youngestAwaitAt > 0 && now0 - youngestAwaitAt < 8000;
+          msg.ack === true ||
+          msg.reason === 'inject_soft_unverified' ||
+          (!doneImmediate && youngestAwaitAt > 0 && now0 - youngestAwaitAt < 8000);
         const releaseDone = !staleDone && !injectAckDone;
-        if (injectAckDone) {
+        if (msg.reason === 'phone_stop' || msg.reason === 'isCanceled') stopAckAt = Date.now();
+        DBG('done', { stale: !!staleDone, ack: !!injectAckDone, rel: releaseDone, imm: !!doneImmediate, reason: msg.reason || '', ut: !!msg._ut, cut: !!msg.closedUt, idx: doneIdx, dts: doneTs });
+
+        if (injectAckDone && msg.reason !== 'inject_soft_unverified') {
           // 被挡的 DONE 不会重发——若它其实是真轮终（无 _ut 的收尾通道），
           // 8s 窗口到期后补一次释放评估，否则 rr 要靠 75s 看门狗才放得掉。
+          // inject_soft_unverified 例外：它是注入核验回执、永远不可能是轮终，
+          // 复评的 lastAgentMessageAt>lastUserSendAt 判据会把工具轮 preamble
+          // （「I'll run…」）误判成真答而放行 rr → 排队消息提前插队。
           setTimeout(() => {
             if (!requestRunning) return;
             const n2 = Date.now();
             const y2 = Math.max(0, ...sentAwaitingReply.map((e) => e.at || 0));
-            if (y2 === 0 || n2 - y2 >= 8000) {
+            // 仅当本轮真答已渲染（真轮终特征）才释放——否则在途轮的旧队列条目
+            // 会让 y2 判据误判而把在途态提前放掉（第二阶逃逸路径）。
+            if ((y2 === 0 || n2 - y2 >= 8000) && lastAgentMessageAt > lastUserSendAt) {
               markAllToolsDone();
               finishAllAssistantVisuals();
               setRequestRunning(false, undefined, { deferMs: 1500 });
             }
           }, 8100);
+          // 被挡 DONE 也上硬看门狗：8.1s 复评可能因新待答条目入列而不放，
+          // 之后 rr 再无任何释放触发 → 发送键永久卡「停止」。
+          // 看门狗按 lastStreamActivityAt 判：5s 无活动即强制释放，有活动再续。
+          if (releaseHardTimer) clearTimeout(releaseHardTimer);
+          releaseHardTimer = setTimeout(hardReleaseCheck, 15000);
         }
         if (releaseDone) {
           markAllToolsDone();
           finishAllAssistantVisuals();
         }
+        // 服务端裁决：停止类 DONE 已解出确切归属轮次（closedUt），按它精确清
+        if (!replaying && !replayingInstant && msg.closedUt) {
+          const cut = userTextDedupeKey(String(msg.closedUt));
+          for (let i = sentAwaitingReply.length - 1; i >= 0; i--) {
+            if (userTextDedupeKey(sentAwaitingReply[i].text) === cut) {
+              sentAwaitingReply.splice(i, 1);
+              break;
+            }
+          }
+        }
         // 停止/取消的 DONE（phone_stop/isCanceled）常不带 _ut——它终止的就是
         // 当前在途轮，其用户泡是最新一条待答条目；不清会永远「已发未答」，
         // 之后每次会话切换/重连回放都被 repaintAwaitingUserBubbles 补画回来。
-        if (!replaying && !replayingInstant && doneImmediate && !msg._ut) {
+        if (!replaying && !replayingInstant && doneImmediate && !msg._ut && !msg.closedUt) {
           const curBase = baseNameAny(currentSessionMeta.file).replace(/\.jsonl$/i, '');
           for (let i = sentAwaitingReply.length - 1; i >= 0; i--) {
             const e = sentAwaitingReply[i];
@@ -1977,7 +2842,206 @@
         // 真正结束——立即释放会让发送键提前变回「发送」，长轮几乎停不掉。
         // 3s 宽限释放：期间任何新流活动自动取消；用户主动停/取消仍立即释放。
         if (!replaying && releaseDone) {
+          // DONE 判本轮已答：归属轮的活流卡标 doneStreams——尾帧照渲染收尾，
+          // 但不再计流活动撑起 rr（transcript 尾流顶队列 ~78s 的根治）。
+          // _ut 缺失时只标锚在最新 user 泡下的卡（当前轮），不碰旧轮残流。
+          {
+            const dUtKey2 = msg._ut ? userTextDedupeKey(String(msg._ut)) : '';
+            const allU = feed.querySelectorAll('.msg.user');
+            const lastU = allU.length ? allU[allU.length - 1] : null;
+            for (const [sid, e] of streamingTurns) {
+              let owner = e && e.element;
+              while (owner && !owner.classList.contains('user')) owner = owner.previousElementSibling;
+              const match = dUtKey2
+                ? (owner && owner.dataset.textKey === dUtKey2)
+                : (owner && owner === lastU);
+              // 广义收尾：归属轮已有真答案的流卡一并判 done——requests/N 流
+              // sid 跨轮复用且常无 END（僵尸卡），错锚到其他泡下的尾帧此前
+              // 漏标仍能源源重武装 rr（实测排队被顶 ~57s）。turnHasOtherAnswer
+              // 排除自产答案在写的卡，在途轮不误标。
+              const sweep = owner && turnHasOtherAnswer(owner, sid);
+              if (match || sweep) { e.turnDone = true; doneStreams.add(sid); }
+            }
+          }
           setRequestRunning(false, undefined, doneImmediate ? { force: true } : { deferMs: 3000 });
+          // 硬释放兜底：上面 defer 链若被迟到事件重置 rr 而取消，15s 后兜底检查
+          if (releaseHardTimer) clearTimeout(releaseHardTimer);
+          releaseHardTimer = setTimeout(hardReleaseCheck, 15000);
+        }
+        // live 失败/空轮占位：DONE 归属轮没产出任何 agent 内容时，在该用户泡下
+        // 补终态占位（回放侧由服务端 annotateOrphanUserTurns 兜底；live 原来完全
+        // 缺失 → 上游 reqerr 轮只剩光秃用户泡，「发送堆一起」的 live 形态）。
+        if (releaseDone && !replaying && !replayingInstant) {
+          const utTxt = String(msg._ut || msg.closedUt || '');
+          const users = feed.querySelectorAll('.msg.user');
+          let ownerEl = null;
+          let want = '';
+          let bareDone = false;
+          if (utTxt) {
+            want = userTextDedupeKey(utTxt);
+            for (let i = users.length - 1; i >= 0; i--) {
+              const b = users[i].querySelector('.user-bubble');
+              if (b && userTextDedupeKey(b.textContent || '') === want) { ownerEl = users[i]; break; }
+            }
+          } else {
+            // 裸 DONE（无 _ut/closedUt）：归属回退到 feed 末尾最近一个还没答案的
+            // 用户泡——sessiondb 孤儿轮就是这种形态（上游写出空流壳+裸 DONE）。
+            // 若末尾用户泡已有答案，跳过（这是迟到杂散 DONE，不误画占位）。
+            bareDone = true;
+            for (let i = users.length - 1; i >= 0; i--) {
+              const u = users[i];
+              let answered = false;
+              for (let n = u.nextSibling; n; n = n.nextSibling) {
+                if (n.classList && n.classList.contains('user')) break;
+                if (n.classList && n.classList.contains('agent') && !n.classList.contains('typing-row')) {
+                  const bd = n.querySelector('.body');
+                  if (bd && String(bd.dataset.raw || bd.textContent || '').trim()) { answered = true; break; }
+                }
+              }
+              if (!answered) { ownerEl = u; break; }
+              break;
+            }
+            if (ownerEl) {
+              const ob = ownerEl.querySelector('.user-bubble');
+              want = ob ? userTextDedupeKey(ob.textContent || '') : '';
+            }
+          }
+          // 该轮区内还有没有 running 工具卡：待批期间 DONE[result] 先到，
+          // 但 run_in_terminal 仍挂着等桌面批准——此时画孤儿占位是误报。
+          const hasRunningToolAfter = (el) => {
+            for (let n = el && el.nextSibling; n; n = n.nextSibling) {
+              if (n.classList && n.classList.contains('user')) break;
+              if (n.classList && n.classList.contains('tool-card')) {
+                const b = n.querySelector('.tool-badge');
+                if (b && b.classList.contains('running')) return true;
+              }
+            }
+            return false;
+          };
+          const drawOrphanPlaceholder = () => {
+            if (!ownerEl || !ownerEl.isConnected) return;
+            let hasContent = false;
+            for (let n = ownerEl.nextSibling; n; n = n.nextSibling) {
+              if (n.classList && n.classList.contains('user')) break;
+              if (n.classList && n.classList.contains('agent') && !n.classList.contains('typing-row')) {
+                const bd = n.querySelector('.body');
+                if (bd && String(bd.dataset.raw || bd.textContent || '').trim()) { hasContent = true; break; }
+              }
+            }
+            // 答案倒挂修复：排队/回声滞后让 user 泡比答案晚渲时，答案会堆到
+            // 前面的同问轮间隙里——同文×3 实测 U1/U3 各得了「答案堆在上方间隙
+            // + 孤儿占位」。向上跨同问 user 逐个间隙找：间隙里第 1 个答案是
+            // 该问前轮自己的，第 2 个起才是富余——只偷富余里事件 ts ≥ 本论
+            // 发送时刻的（更早轮不可能产生晚于本论开启的事件），挪回回合区
+            // 末尾顶替占位。遇异问 user 或仍挂 queued 的未发送泡即停。
+            if (!hasContent) {
+              const ownTs = Number(ownerEl.dataset.ts);
+              const wantKey = ownerEl.dataset.textKey;
+              let stray = null;
+              let gapAnswers = [];
+              for (let n = ownerEl.previousSibling; n; n = n.previousSibling) {
+                if (n.classList && n.classList.contains('user')) {
+                  if (n.dataset.textKey !== wantKey || n.classList.contains('queued')) break;
+                  if (gapAnswers.length >= 2) {
+                    for (let k = 0; k <= gapAnswers.length - 2; k++) {
+                      const nt = Number(gapAnswers[k].dataset.ts);
+                      if (Number.isFinite(ownTs) && Number.isFinite(nt) && nt < ownTs - 2000) continue;
+                      stray = gapAnswers[k];
+                      break;
+                    }
+                    break;
+                  }
+                  gapAnswers = [];
+                  continue;
+                }
+                if (!(n.classList && n.classList.contains('agent')) || n.classList.contains('typing-row')) continue;
+                if (n.dataset.orphanPh || n.dataset.utCopy) continue;
+                const bd = n.querySelector('.body');
+                if (!(bd && String(bd.dataset.raw || bd.textContent || '').trim())) continue;
+                gapAnswers.push(n);
+              }
+              if (!stray && gapAnswers.length >= 2) {
+                for (let k = 0; k <= gapAnswers.length - 2; k++) {
+                  const nt = Number(gapAnswers[k].dataset.ts);
+                  if (Number.isFinite(ownTs) && Number.isFinite(nt) && nt < ownTs - 2000) continue;
+                  stray = gapAnswers[k];
+                  break;
+                }
+              }
+              if (stray) {
+                let at = ownerEl;
+                for (let n = ownerEl.nextSibling; n; n = n.nextSibling) {
+                  if (n.classList && n.classList.contains('user')) break;
+                  if (n === stray) continue;
+                  at = n;
+                }
+                if (at.nextSibling) feed.insertBefore(stray, at.nextSibling);
+                else feed.appendChild(stray);
+                hasContent = true;
+              }
+            }
+            if (!hasContent) {
+              const ob2 = ownerEl.querySelector('.user-bubble');
+              const ph = addAgentFinal(
+                '*（该轮无回复——已停止或请求失败）*',
+                `orphan-live-${want || 'last'}-${Date.now()}`,
+                {
+                  ts: Number.isFinite(doneTs) ? doneTs : Date.now(),
+                  ut: utTxt || (ob2 && ob2.textContent) || undefined,
+                },
+              );
+              if (ph) {
+                ph.dataset.orphanPh = '1';
+                // 裸 DONE（phone_stop 等无 _ut）时 addAgentFinal 的 ts 归属会把
+                // 占位落到最新 user 泡下——以已判定的 ownerEl 为准，插回其回合
+                // 区末尾（下一个 user 泡之前），别跑到别人轮子里。
+                let at = ownerEl;
+                for (let n = ownerEl.nextSibling; n; n = n.nextSibling) {
+                  if (n.classList && n.classList.contains('user')) break;
+                  if (n === ph) continue;
+                  at = n;
+                }
+                if (at.nextSibling) feed.insertBefore(ph, at.nextSibling);
+                else feed.appendChild(ph);
+              }
+            }
+          };
+          if (ownerEl) {
+            if (bareDone) {
+              // 裸 DONE 可能早于在途答案（TOOL→DONE→+13s 正文形态实测）：
+              // 延迟复核——到时该泡若已有答案就不画，真孤儿轮才补占位。
+              // want 锁的是这条用户泡本身，期间新发的消息不影响归属。
+              // 裸 DONE 无法自证终止的是这个轮（无 _ut/closedUt）——上游慢推理轮
+              // 实测 ~5min 才出答，期间任何杂散 DONE（elapsedMs 清理、通道终标）
+              // 若在「尚无答案」下就画占位 = 误报（dr2 实测 ~30s 误画）。复核前看
+              // 该轮待答条目龄：未过陈旧阈说明还可能活着，续查不画；条目被真 DONE
+              // 归属裁掉/熬到陈旧，才按孤儿画占位。
+              const recheckOrphan = () => {
+                if (!ownerEl.isConnected) return;
+                if (hasRunningToolAfter(ownerEl)) {
+                  setTimeout(recheckOrphan, 15000);
+                  return;
+                }
+                const entry = sentAwaitingReply.find(
+                  (e) => want && userTextDedupeKey(e.text) === want,
+                );
+                if (
+                  !doneImmediate &&
+                  entry &&
+                  Date.now() - (entry.at || 0) < STREAM_STALE_AWAIT_MS
+                ) {
+                  setTimeout(recheckOrphan, 15000);
+                  return;
+                }
+                drawOrphanPlaceholder();
+              };
+              setTimeout(recheckOrphan, 15000);
+            } else if (!hasRunningToolAfter(ownerEl)) {
+              drawOrphanPlaceholder();
+            } else {
+              setTimeout(recheckOrphan, 15000);
+            }
+          }
         }
         if (doneImmediate && releaseDone) setStatus(true, connectedLabel());
         if (!replaying) Haptics.success();
@@ -1997,7 +3061,7 @@
             const unsent = outboundQueue.splice(0).filter((m) => m && m.type === 'PHONE_MESSAGE');
             if (unsent.length) {
               const lastText = String(unsent[unsent.length - 1].text || '');
-              if (lastText && !(input.value || '').trim()) input.value = lastText;
+              if (lastText && !(input.value || '').trim()) { input.value = lastText; sendVerifyRestoredText = lastText; }
               addSys('切换会话：未送达的消息已回填输入框');
             }
           }
@@ -2007,16 +3071,11 @@
           replayingInstant = true;
           // 模型选择按会话分：切完刷新 chip，不然 PWA 显示上个会话的模型
           send({ type: 'PHONE_MODEL_LIST' });
-          // 待答清单按会话分：sess 与即将切到的会话不符就丢——旧会话在途条目
-          // 会补画进新 feed（残泡/答案裸奔归因错乱）。无 sess（旧写入）保留。
-          {
-            const selBase = baseNameAny(msg.file).replace(/\.jsonl$/i, '');
-            for (let i = sentAwaitingReply.length - 1; i >= 0; i--) {
-              const s = sentAwaitingReply[i].sess;
-              const sBase = baseNameAny(s).replace(/\.jsonl$/i, '');
-              if (sBase && selBase && sBase !== selBase) sentAwaitingReply.splice(i, 1);
-            }
-          }
+          // 待答清单【保留】跨会话条目：repaintAwaitingUserBubbles 已按 boundBase
+          // 过滤，别会话条目不会画进当前 feed。清掉会在「在途轮切走→切回」时丢掉
+          // 唯一备份——pending 请求的 USER 可能还没落进 jsonl（kind:2 惰性写），
+          // 回放缺它时只能靠清单补画（R66 B1 在途轮泡+卡整条消失）。
+          // 条目仍受 DONE/_ut 匹配清理与年龄上限约束，不会无限积压。
           if (sessionSwitchFallbackTimer) {
             clearTimeout(sessionSwitchFallbackTimer);
             sessionSwitchFallbackTimer = null;
@@ -2040,10 +3099,31 @@
             requestRunning = false;
             paintSendButton();
           } catch (_) {}
-          // 换会话后排队消息的目标已变化，丢弃并提示（防注入到新会话）
+          // 换会话后排队消息的目标已变化：泡丢掉（防注入到新会话），但文本
+          // 捞回输入框而不是蒸发——用户重发还是复制走由用户决定。
           if (pendingSendQueue.length) {
+            const texts = [];
+            for (const qi of pendingSendQueue) {
+              if (qi && qi.el && qi.el.isConnected) qi.el.remove();
+              if (qi && qi.text) {
+                texts.push(qi.text);
+                // 按 sess 暂存：切回该会话的回放会把它们重新挂回队列，
+                // 自动出队语义在往返切换后不丢。
+                parkedForeignQueue.push({ text: qi.text, at: qi.at || Date.now(), sess: qi.sess || '' });
+              }
+            }
             pendingSendQueue.length = 0;
-            addSys('已切换会话，排队消息已丢弃');
+            persistQueuedSends();
+            // 草稿非空时换行追加而不是丢——此前只在空框回填，有草稿时排队文本蒸发
+            if (texts.length) {
+              const cur = (input.value || '').trim();
+              input.value = cur ? cur + '\n' + texts.join('\n') : texts.join('\n');
+            }
+            addSys('已切换会话，排队消息已回填输入框');
+            // 紧随其后的 HISTORY_REPLAY 会 clearFeed 抹掉这条提示——回放结束
+            // 补投一次，否则用户看不到退队去向（R109 P3）。
+            queueBackfillNotePending = true;
+            if (queuedHintEl) { queuedHintEl.remove(); queuedHintEl = null; }
           }
           setStatus(true, '切换会话…');
           const f = msg.file || currentSessionMeta.file || '';
@@ -2117,14 +3197,27 @@
         // 回放携带 file 时同步会话元数据（滚动记忆 / 后续 PHONE_MESSAGE.file）
         if (typeof msg.file === 'string' && msg.file) {
           try {
-            // 已有标题（SESSION_SELECTED.title）优先——文件名回退会盖掉真实会话名
-            setSessionTitle(currentSessionMeta.title || titleFromSessionFile(msg.file), msg.file);
+            // 标题权威序：回放自带的 msg.title > 本地缓存/列表 titleFromSessionFile。
+            // 旧逻辑把 currentSessionMeta.title（可能还是上个会话的名字）放在最前，
+            // 切回一个会话后标题滞留在上一会话名。
+            // 同一文件的 meta 可信（重连回放同会话）；文件不同说明 meta
+            // 还是旧会话的——它的 title 不得作回退，否则切回后标题滞留。
+            const sameMeta =
+              baseNameAny(currentSessionMeta.file || '') === baseNameAny(msg.file);
+            const t =
+              (typeof msg.title === 'string' && msg.title.trim() && msg.title) ||
+              (sameMeta ? currentSessionMeta.title : '') ||
+              titleFromSessionFile(msg.file);
+            setSessionTitle(t, msg.file);
           } catch (_) {}
         }
+        // list 必须在 try 外声明——finally 也引用它；块内 const 会让
+        // finally 里的引用抛 ReferenceError 被静默吞掉（曾导致
+        // replayFloorTs 恒为 0、stale-replay 门整体失效）。
+        const list = Array.isArray(msg.messages) ? msg.messages : [];
         try {
           try { feed.style.scrollBehavior = 'auto'; } catch (_) {}
           clearFeed();
-          const list = Array.isArray(msg.messages) ? msg.messages : [];
           for (const m of list) {
             // 单条失败不阻断整段回放（marked/DOM 偶发错误）
             try {
@@ -2132,7 +3225,10 @@
             } catch (_) {}
           }
         } finally {
-          markAllToolsDone();
+          // inFlight：该会话仍有未答开启轮（切走时在途 → 切回）——在途轮
+          // 的工具卡保持 running，rr 维持 true 让发送继续走队列（R107 BUG-1）。
+          const inFlight = msg.inFlight === true;
+          markAllToolsDone(inFlight ? Number(msg.inFlightTs) || 0 : 0);
           replaying = false;
           replayingInstant = false;
           try {
@@ -2141,25 +3237,213 @@
               if (Number.isFinite(t) && t > replayFloorTs) replayFloorTs = t;
             }
           } catch (_) {}
+          // 换会话退队的回填提示被 clearFeed 抹掉了——补投在回放尾部。
+          if (queueBackfillNotePending) {
+            queueBackfillNotePending = false;
+            addSys('已切换会话，排队消息已回填输入框');
+          }
           // 历史里不应残留「正在输入」态
           finishAllAssistantVisuals();
           if (requestDoneTimer) {
             clearTimeout(requestDoneTimer);
             requestDoneTimer = null;
           }
-          requestRunning = false;
+          // 在途轮回放不得松开发送键：否则下一发送插队、把原轮的
+          // 完成事件/答案归属偷走 → 原答案丢失（R107 BUG-1）。
+          requestRunning = inFlight ? true : false;
+          // 服务端刚声明该会话有未答开启轮 = 活性证据：待批准 parked 轮
+          // 天然静默（CONFIRM 不出流帧），不刷新会在下个僵尸检查点被当
+          // 死轮收尸 → 发送键放开、排队消息立即插队（实测切回后 +55ms 出队）。
+          if (inFlight) lastStreamActivityAt = Date.now();
+          try { paintSendButton(); } catch (_) {}
           // 回放会清空 feed：把未确认送达的本地待发消息补画回去（发后遭遇 REPLAY 丢泡）
           try {
             const raw = sessionStorage.getItem(PENDING_SEND_KEY);
             if (raw) {
               const p = JSON.parse(raw);
-              if (p && typeof p.text === 'string' && p.text.trim()) {
+              if (p && typeof p.text === 'string' && p.text.trim() && pendingSendSessOk(p)) {
                 addUser(p.text, p.key || `user:pending:${Date.now()}:${userTextDedupeKey(p.text)}`, { force: true, ts: p.at || Date.now() });
               }
             }
           } catch (_) {}
+          // 刷新把内存待答清单蒸发了：从持久化快照恢复——回放 USER 已含的行说明
+          // 轮次已落盘（无需跟踪/补画），只有「桥已确认、transcript 懒写盘窗口内刷新」
+          // 的条目存活，让待答匹配与未送达校验在重载后仍能工作。
+          try {
+            const rawA = sessionStorage.getItem(SENT_AWAITING_KEY);
+            if (rawA) {
+              const arrA = JSON.parse(rawA);
+              const boundBaseA = baseNameAny(currentSessionMeta.file).replace(/\.jsonl$/i, '');
+              const replayedA = new Set();
+              for (const m of list) {
+                if (m && m.type === 'USER_MESSAGE' && typeof m.text === 'string') {
+                  replayedA.add(userTextDedupeKey(m.text));
+                }
+              }
+              const nowA = Date.now();
+              const keptA = [];
+              for (const a of Array.isArray(arrA) ? arrA : []) {
+                if (!a || typeof a.text !== 'string' || !a.text.trim()) continue;
+                if (nowA - (a.at || 0) > 5 * 60 * 1000) continue;
+                const aBase = baseNameAny(a.sess || '').replace(/\.jsonl$/i, '');
+                if (!boundBaseA || aBase !== boundBaseA) continue;
+                if (replayedA.has(userTextDedupeKey(a.text))) continue;
+                keptA.push(a);
+                if (!sentAwaitingReply.some((e) => userTextDedupeKey(e.text) === userTextDedupeKey(a.text))) {
+                  sentAwaitingReply.push({ text: a.text, key: a.key || `user:restored:${nowA}:${userTextDedupeKey(a.text)}`, sess: a.sess, at: a.at || nowA });
+                }
+              }
+              if (keptA.length) sessionStorage.setItem(SENT_AWAITING_KEY, JSON.stringify(keptA));
+              else sessionStorage.removeItem(SENT_AWAITING_KEY);
+            }
+          } catch (_) {}
           // 「已发未答」的泡也补回（发完即切/跟随重选的交错态不丢泡）
           repaintAwaitingUserBubbles();
+          // 回放权威校验：已确认回声的待答文本若在回放 USER 里完全缺席，
+          // 说明桥端确认后、上游落盘前链路中断（VS Code 被杀等）——
+          // 该轮永远不会有答案，按未送达处理（回填+移出待答），否则泡
+          // 会干等且占住 rr/收割器的在途判断。
+          // R31：跳过理由（<3s 落盘窗 / 在途证据 / <45s 核验窗）都会过期——
+          // 跳过时布延期复查，否则进程被杀的消息静默丢失永不再查。
+          // 提升到两个 try 块共同作用域——此前在箭头函数内声明、外层 try
+          // 引用 → ReferenceError 被 catch 吞掉，排队消息刷新回填永远跑不到
+          // （R104 B2：刷新后排队消息静默丢失）。
+          const boundBaseR = baseNameAny(currentSessionMeta.file).replace(/\.jsonl$/i, '');
+          const runUndeliveredAudit = () => {
+            try { let minRetryMs = 0;
+              const deferAudit = (ms) => { if (ms > 0 && (!minRetryMs || ms < minRetryMs)) minRetryMs = ms; };
+            const replayedUserKeys = new Set();
+            for (const m of list) {
+              if (m && m.type === 'USER_MESSAGE' && typeof m.text === 'string') {
+                replayedUserKeys.add(userTextDedupeKey(m.text));
+              }
+            }
+            // 懒写盘在途证据：回放里 send 之后仍有 agent 活动（AGENT/TOOL/THINKING 帧 ts）
+            // 说明管道活着——USER 行要轮次完成才写盘，在途轮缺席不等于丢失，
+            // 误报未送达会把仍在生成的条目回填+移出待答（答案随后裸挂上一轮）。
+            let lastReplayAgentAt = 0;
+            for (const m of list) {
+              if (m && /^(AGENT|TOOL|THINKING)/.test(String(m.type || ''))) {
+                const t = eventTsNum(m);
+                if (Number.isFinite(t) && t > lastReplayAgentAt) lastReplayAgentAt = t;
+              }
+            }
+            // 「落盘已过此点」判据：transcript 按轮次完成顺序追加，回放里任何 ts 晚于
+            // 该 send 的 USER 行都证明本轮若已落盘必然在场——缺席才是真丢失；
+            // 否则条目仍可能在途（USER 行要轮完才写），除非已越过服务端 45s 核验窗。
+            let lastReplayUserTs = 0;
+            for (const m of list) {
+              if (m && m.type === 'USER_MESSAGE' && typeof m.text === 'string') {
+                const t = eventTsNum(m);
+                if (Number.isFinite(t) && t > lastReplayUserTs) lastReplayUserTs = t;
+              }
+            }
+              for (let i = sentAwaitingReply.length - 1; i >= 0; i--) {
+                const e = sentAwaitingReply[i];
+                const eBase = baseNameAny(e.sess || '').replace(/\.jsonl$/i, '');
+                if (!boundBaseR || eBase !== boundBaseR) continue;
+                // 上行落盘有 ~1-2s 延迟：发送太新的条目跳过，回放可能先于落盘
+                if (Date.now() - (e.at || 0) < 3000) { deferAudit(3000 - (Date.now() - (e.at || 0)) + 400); continue; }
+                // 在途证据须「新」：真在途轮持续产帧，lastReplayAgentAt 必然距今很近；
+                // 进程在生成途中被杀的轮，其 agent 证据全部停在过去——陈旧证据不当
+                // 在途判据，否则死轮泡永远干等不报未送达（实测 br1 在途被杀静默悬挂）。
+                if (lastReplayAgentAt && lastReplayAgentAt >= (e.at || 0) &&
+                    Date.now() - lastReplayAgentAt < 90000) {
+                  deferAudit(90000 - (Date.now() - lastReplayAgentAt) + 400);
+                  continue;
+                }
+                if (!(lastReplayUserTs && lastReplayUserTs >= (e.at || 0)) &&
+                    Date.now() - (e.at || 0) < 45000) {
+                  deferAudit(45000 - (Date.now() - (e.at || 0)) + 400);
+                  continue;
+                }
+                if (replayedUserKeys.has(userTextDedupeKey(e.text))) continue;
+                sentAwaitingReply.splice(i, 1);
+                if (!(input.value || '').trim()) { input.value = e.text; sendVerifyRestoredText = e.text; }
+                sendVerifyMissedAt = Date.now();
+                addSys('发送可能未送达（连接中断），文本已回填，请重新发送');
+              }
+              if (minRetryMs) setTimeout(runUndeliveredAudit, minRetryMs);
+          } catch (_) {}
+          };
+          runUndeliveredAudit();
+          // 排队消息在刷新时随内存蒸发：从持久化副本恢复——入队后更新的
+          // 回放 USER 说明刷新瞬间已出队送达（销账）；否则把最近一条回填
+          // 输入框（不自动重发）。按 ts 判送达：同文重问时老 USER 不算数。
+          try {
+            // 回放开始先清内存侧暂存视图：ss 缺席/为空时也不得残留上次的 foreign
+            parkedForeignQueue = [];
+            const rawQ = sessionStorage.getItem(QUEUED_SENDS_KEY);
+            if (rawQ) {
+              const arrQ = JSON.parse(rawQ);
+              if (Array.isArray(arrQ) && arrQ.length) {
+                const replayedUserTs = new Map();
+                for (const m of list) {
+                  if (m && m.type === 'USER_MESSAGE' && typeof m.text === 'string') {
+                    const k = userTextDedupeKey(m.text);
+                    const t = eventTsNum(m);
+                    replayedUserTs.set(k, Math.max(replayedUserTs.get(k) || 0, Number.isFinite(t) ? t : 0));
+                  }
+                }
+                const nowQ = Date.now();
+                const keepQ = [];
+                const foreignQ = [];
+                for (const q of arrQ) {
+                  if (!q || typeof q.text !== 'string' || !q.text.trim()) continue;
+                  if (nowQ - (q.at || 0) > 5 * 60 * 1000) continue;
+                  const qBase = baseNameAny(q.sess || '').replace(/\.jsonl$/i, '');
+                  if (boundBaseR && qBase && qBase !== boundBaseR) { foreignQ.push(q); continue; }
+                  const rt = replayedUserTs.get(userTextDedupeKey(q.text)) || 0;
+                  if (rt && rt >= (q.at || 0) - 15000) continue;
+                  keepQ.push(q);
+                }
+                // 别会话的暂存项继续保留（此前一并丢弃，切回时排队蒸发）。
+                parkedForeignQueue = foreignQ;
+                if (keepQ.length) {
+                  // 已手动重发 / 已在内存队列（持久化副本同文同时段）的不再入队——双发/双渲。
+                  const requeueQ = keepQ.filter((q) => {
+                    const k0 = userTextDedupeKey(q.text);
+                    if (sentAwaitingReply.some((e) => userTextDedupeKey(e.text || '') === k0)) return false;
+                    if (pendingSendQueue.some((e) => userTextDedupeKey(e.text || '') === k0 && Math.abs((e.at || 0) - (q.at || 0)) < 120000)) return false;
+                    return true;
+                  });
+                  if (replayCount > 0 && requeueQ.length) {
+                    // 非冷启回放（切会话切回/重连）：同会话暂存项重新挂回
+                    // 队列——往返切换不该把「发后会送」悄悄降级成草稿。
+                    // 输入框里若正是排队回填的文本则清掉防双发，用户改过的草稿保留。
+                    for (const q of requeueQ) {
+                      const qKey = `user:queued:${q.at || Date.now()}:${userTextDedupeKey(q.text)}`;
+                      const qEl = addUser(q.text, qKey, { force: true, ts: q.at || Date.now() });
+                      if (qEl) qEl.classList.add('queued');
+                      pendingSendQueue.push({ text: q.text, mode: 'agent', el: qEl, key: qKey, at: q.at || Date.now(), sess: q.sess || '' });
+                    }
+                    const drained = requeueQ.map((q) => (q.text || '').trim()).filter(Boolean).join('\n');
+                    if (drained && (input.value || '').trim() === drained) {
+                      input.value = '';
+                      if ((sendVerifyRestoredText || '').trim() === drained) sendVerifyRestoredText = '';
+                    }
+                    if (!queuedHintEl || !queuedHintEl.isConnected) queuedHintEl = addSys('已排队：当前回复结束后自动发送');
+                    persistQueuedSends();
+                    try { flushPendingSendQueue(); } catch (_) {}
+                  } else {
+                    // 冷启回填只填未被手动重发的项；已重发的同步从暂存销账
+                    if (requeueQ.length && !(input.value || '').trim()) {
+                      const lastQ = requeueQ[requeueQ.length - 1];
+                      input.value = lastQ.text;
+                      sendVerifyRestoredText = lastQ.text;
+                      addSys('排队消息因页面刷新中断，文本已回填，请重新发送');
+                    }
+                    sessionStorage.setItem(QUEUED_SENDS_KEY, JSON.stringify(requeueQ.concat(foreignQ)));
+                  }
+                } else if (foreignQ.length) {
+                  sessionStorage.setItem(QUEUED_SENDS_KEY, JSON.stringify(foreignQ));
+                } else {
+                  sessionStorage.removeItem(QUEUED_SENDS_KEY);
+                }
+              }
+            }
+          } catch (_) {}
+          replayCount++;
           jumpFeedToBottom();
           // 回放完成后恢复顶部状态文案（SESSION_SELECTED 可能写成「切换会话…」）
           setStatus(true, connectedLabel());
@@ -2218,6 +3502,9 @@
   function openDrawer() {
     drawerOverlay.classList.remove('hidden');
     sessionDrawer.classList.add('open');
+    // 每次开抽屉重置搜索：残留过滤让用户看不到其余会话（实测开过搜索
+    // 后只剩命中项），重头列全量更符合抽屉语义。
+    if (sessionSearch) sessionSearch.value = '';
     // 打开瞬间拍下当前排序，之后刷新不再位移行
     sessionRowFreeze = new Map();
     lastSessions.forEach((s, i) => {
@@ -2395,6 +3682,13 @@
         const item = document.createElement('button');
         item.type = 'button';
         item.className = 'session-item';
+        // 标记当前绑定会话——抽屉重开时用户需要一眼看到「我正连着哪个」。
+        if (s.file && currentSessionMeta.file &&
+            baseNameAny(s.file).replace(/\.jsonl$/i, '') ===
+            baseNameAny(currentSessionMeta.file).replace(/\.jsonl$/i, '')) {
+          item.classList.add('bound');
+          item.setAttribute('aria-current', 'true');
+        }
         // 优先显示标题（官方 customTitle / 首条消息截断），无标题才用 UUID
         const label = (s.title && String(s.title).trim()) || s.name || '(未命名)';
         const name = document.createElement('span');
@@ -2621,6 +3915,14 @@
   /** 追加一行终端输出（textContent 保证安全转义） */
   function appendTerminalOutput(text, cls) {
     if (text == null || text === '') return;
+    // 剥 shell-integration OSC（ESC]…BEL 或 ESC]…ESC\，如 PowerShell 633;C）、
+    // ANSI CSI 序列（ESC[…letter，颜色/光标——pre 渲不出颜色只留乱码）
+    // 与其余 C0 控制符。
+    text = String(text)
+      .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
+      .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '')
+      .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, '');
+    if (!text) return;
     const span = document.createElement('span');
     if (cls) span.className = cls;
     span.textContent = text;
@@ -2957,6 +4259,16 @@
   function scheduleReconnect() {
     clearTimeout(reconnectTimer);
     reconnectAttempt += 1;
+    // 选中的实例已消失（窗口关闭/进程死掉）时，instanceUrlOverride 会让
+    // 重连死磕一个不存在的服务。多次失败后丢弃失效选择、回退页面宿主
+    // 桥——页面既然加载得出来，宿主桥大概率还活着；原实例恢复后可在
+    // 抽屉里重新点选。
+    if (reconnectAttempt >= 5 && instanceUrlOverride) {
+      instanceUrlOverride = null;
+      try {
+        localStorage.removeItem('sidecar.instanceUrl');
+      } catch {}
+    }
     const delay = Math.min(8000, 800 + reconnectAttempt * 400);
     reconnectTimer = setTimeout(connect, delay);
   }
@@ -3049,19 +4361,43 @@
     };
   }
 
+  /** feed 里有未决待批准卡 = 该轮 parked 等桌面批准：静默不是死轮，豁免
+      僵尸收尸（否则 parked 轮 ~85s 静默后被杀 rr，排队消息提前出队插队）。
+      上限 10min：桌面端静默销卡且无 RESOLVED 到达的真死局仍能靠收割兜底。 */
+  function parkedConfirmAlive() {
+    try {
+      if (Date.now() - lastStreamActivityAt > 10 * 60 * 1000) return false;
+      return !!(feed && feed.querySelector('.msg.confirm-card:not(.resolved)'));
+    } catch (_) { return false; }
+  }
+
+  function queuePendingSend(queuedText) {
+    // 入队即渲泡（半透明排队态）：出队时复用同一元素转正常，不再「提示在泡不在」。
+    const qKey = `user:queued:${Date.now()}:${userTextDedupeKey(queuedText)}`;
+    const qEl = addUser(queuedText, qKey, { force: true, ts: Date.now() });
+    if (qEl) qEl.classList.add('queued');
+    pendingSendQueue.push({ text: queuedText, mode: modeEl.value || 'agent', el: qEl, key: qKey, at: Date.now(), sess: currentSessionMeta.file || '' });
+    persistQueuedSends();
+    input.value = '';
+    input.style.height = 'auto';
+    // 二次入队复用同一提示元素——覆盖引用会把上一条提示泄漏在 DOM 里（B4）。
+    if (queuedHintEl && queuedHintEl.isConnected) queuedHintEl.remove();
+    queuedHintEl = addSys('已排队：当前回复结束后自动发送');
+    // 排队也要回焦输入框——焦点留在按钮/正文上，下一次打字会被吃
+    // （输入为空时发送键还会武装成「停止」误杀在途轮，R104 B1）。
+    try { input.focus(); } catch (_) {}
+  }
+
   function doSend() {
     // 请求进行中：发送键已变成停止；但流已静默超阈值的僵尸态直接当作空闲
-    if (requestRunning && lastStreamActivityAt && Date.now() - lastStreamActivityAt > STREAM_STALE_MS) {
+    if (requestRunning && lastStreamActivityAt && !parkedConfirmAlive() && Date.now() - lastStreamActivityAt > STREAM_STALE_MS) {
       forceFinishDeadStream();
     }
     if (requestRunning) {
       // 有文本 = 排队发送（杀在途轮太狠）；空文本 = 停止（需双击确认）
       const queuedText = (input.value || '').trim();
       if (queuedText) {
-        pendingSendQueue.push({ text: queuedText, mode: modeEl.value || 'agent' });
-        input.value = '';
-        input.style.height = 'auto';
-        addSys('已排队：当前回复结束后自动发送');
+        queuePendingSend(queuedText);
         return;
       }
       if (Date.now() < stopArmUntil) {
@@ -3071,7 +4407,8 @@
         return;
       }
       stopArmUntil = Date.now() + 3000;
-      addSys('再次点击「停止」中断当前回复');
+      // 提示行复用：3s 武装窗过期再武装不再叠新行（R107 BUG-2 停止提示 ×4）。
+      if (!stopArmHintEl || !stopArmHintEl.isConnected) stopArmHintEl = addSys('再次点击「停止」中断当前回复');
       try { sendBtn.title = '再次点击确认停止'; } catch (_) {}
       setTimeout(() => {
         if (stopArmUntil && Date.now() >= stopArmUntil) {
@@ -3083,6 +4420,13 @@
     }
     const text = (input.value || '').trim();
     if (!text) return;
+    if (pendingSendQueue.length) {
+      // 队列非空时不得直发插队：回填重挂的队列其 DONE 可能已被消费，
+      // 直发会让排队项永久停放并把乱序持久化进库（R138 FIFO 倒挂）。
+      queuePendingSend(text);
+      flushPendingSendQueue();
+      return;
+    }
     sendTextNow(text, modeEl.value || 'agent');
   }
 
@@ -3091,32 +4435,65 @@
     if (!pendingSendQueue.length) return;
     // 僵尸 rr：DONE 丢失/被去重吞掉时 rr 卡死，flush 全靠 10s 看门狗兜底，
     // 实测排队消息滞留 40-55s。这里就地收尸（内部会再调本函数重试）。
-    if (requestRunning && lastStreamActivityAt && Date.now() - lastStreamActivityAt > STREAM_STALE_MS) {
+    // 待批准 parked 轮豁免：挂确认卡的轮静默等人批准，不是死轮。
+    if (requestRunning && lastStreamActivityAt && !parkedConfirmAlive() && Date.now() - lastStreamActivityAt > STREAM_STALE_MS) {
+      DBG('flush', { gate: 'dead' });
       forceFinishDeadStream();
       return;
     }
-    if (requestRunning) return;
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    if (requestRunning) { DBG('flush', { gate: 'rr', n: pendingSendQueue.length }); return; }
+    if (!ws || ws.readyState !== WebSocket.OPEN) { DBG('flush', { gate: 'ws' }); return; }
     // 刚发未答的条目挡队列：0.67 无流路径上 DONE+宽限不等于真轮终，
     // 此时放行会让下一条插队成 U1U2A1A2。超龄条目（死轮/孤儿）不挡队列。
     const now = Date.now();
-    if (sentAwaitingReply.some((e) => now - (e.at || 0) < AWAIT_REPLY_FLUSH_BLOCK_MS)) return;
+    if (sentAwaitingReply.some((e) => now - (e.at || 0) < AWAIT_REPLY_FLUSH_BLOCK_MS)) { DBG('flush', { gate: 'await', n: pendingSendQueue.length }); return; }
+    DBG('flush', { gate: 'ok', n: pendingSendQueue.length });
     const n = pendingSendQueue.shift();
-    if (n) sendTextNow(n.text, n.mode);
+    persistQueuedSends();
+    if (n) {
+      if (n.el && n.el.isConnected) {
+        // 复用入队时已渲的泡：去掉排队态，别再画第二个
+        n.el.classList.remove('queued');
+        sendTextNow(n.text, n.mode, n.el, n.key, true);
+      } else {
+        // 泡已被回放/跟随重建换掉时走无 el 分支——同样不得清输入框：
+        // 入队时已清过，排队期用户可能打了新草稿（实测泡失联路径草稿被抹）。
+        sendTextNow(n.text, n.mode, undefined, undefined, true);
+      }
+    }
+    if (!pendingSendQueue.length && queuedHintEl) {
+      queuedHintEl.remove();
+      queuedHintEl = null;
+    }
   }
 
-  function sendTextNow(text, mode) {
+  function sendTextNow(text, mode, existingEl, existingKey, keepDraft) {
     Haptics.tap();
     // 0.5.19+：手机发送 force 上屏，避免短文案「1」被历史同文去重吞掉
-    const localKey = `user:local:${Date.now()}:${userTextDedupeKey(text)}`;
-    const painted = addUser(text, localKey, { force: true, ts: Date.now() });
-    if (!painted) {
+    // existingEl：排队期已渲的泡——复用，不再重复画（localKey 沿用入队时的 key）。
+    const localKey = existingKey || `user:local:${Date.now()}:${userTextDedupeKey(text)}`;
+    if (!(existingEl && existingEl.isConnected)) {
+      const painted = addUser(text, localKey, { force: true, ts: Date.now() });
+      if (!painted) {
+        try {
+          recentPhoneUserAt.delete(userTextDedupeKey(text));
+          seenKeys.delete(localKey);
+          seenKeys.delete(userTextDedupeKey(text));
+        } catch (_) {}
+        addUser(text, localKey, { force: true });
+      }
+    } else {
+      // 入队泡已带 textKey；补齐 dataset.key 使回声去重链路一致
+      try { if (localKey && !existingEl.dataset.key) existingEl.dataset.key = localKey; } catch (_) {}
+      // 出队才是真正发送时刻：重新盖章回声去重窗——入队时盖的章在
+      // 排队 >15s 后已过期，回声穿透去重会再画一个用户泡。
+      try { notePhoneUserText(text); } catch (_) {}
+      // 泡随真实发送时刻归位：入队 ts 早于前轮答案 → 留在原位置会把
+      // feed 呈现成 U1U2A1A2 堆叠（线上顺序实为 U1A1U2A2）。
       try {
-        recentPhoneUserAt.delete(userTextDedupeKey(text));
-        seenKeys.delete(localKey);
-        seenKeys.delete(userTextDedupeKey(text));
+        existingEl.dataset.ts = String(Date.now());
+        appendFeedChronological(existingEl, Date.now());
       } catch (_) {}
-      addUser(text, localKey, { force: true });
     }
     const beforeQueue = outboundQueue.length;
     const sent = sendMessage(
@@ -3135,8 +4512,16 @@
     }
     setRequestRunning(true, 'Copilot 正在输入…');
     showTyping();
-    input.value = '';
-    input.style.height = 'auto';
+    // 出队发送不清输入框：入队时已清空，此后用户可能又打了新草稿——
+    // 出队抹掉它是静默丢稿（R29-X1）。直连发送照常清空。
+    if (!keepDraft) {
+      input.value = '';
+      input.style.height = 'auto';
+    }
+    sendVerifyRestoredText = null; // 新发送即抛弃旧回填标记
+    // 发送键取走焦点后紧接的键入会无声吞掉整条消息（F1 连发吞字族）——
+    // 发送成功立即把焦点还回输入框，连打不丢字。
+    try { input.focus(); } catch (_) {}
     // 半死 socket 防御：N 秒内服务器没回声这条消息就判丢，回填文本让用户重发。
     // 同时写 sessionStorage——半死 socket 报错可能刷新页面杀死计时器，刷新后启动时回填。
     if (pendingSendCheck) clearTimeout(pendingSendCheck.timer);
@@ -3144,6 +4529,7 @@
     if (sentAwaitingReply.length >= 8) sentAwaitingReply.shift();
     // sess 标发送时的会话文件：SESSION_SELECTED 切换后丢别会话残留，防跨会话误重画
     sentAwaitingReply.push({ text, key: localKey, sess: currentSessionMeta.file, at: Date.now() });
+    persistSentAwaiting();
     const sentTextKey = userTextDedupeKey(text);
     pendingSendCheck = {
       textKey: sentTextKey,
@@ -3154,7 +4540,7 @@
         const lostKey = pendingSendCheck.textKey;
         pendingSendCheck = null;
         clearPendingSend();
-        if (!(input.value || '').trim()) input.value = lost;
+        if (!(input.value || '').trim()) { input.value = lost; sendVerifyRestoredText = lost; }
         if (requestRunning) {
           requestRunning = false;
           paintSendButton();
@@ -3172,6 +4558,7 @@
 
   /** 僵尸流收尸：清 streaming 视觉态 + 释放发送键（不发 phone_stop——流本就死了） */
   function forceFinishDeadStream() {
+    DBG('deadstream', {});
     for (const entry of streamingTurns.values()) {
       if (entry.element) entry.element.classList.remove('streaming');
       if (entry.bubble) entry.bubble.classList.remove('streaming');
@@ -3196,6 +4583,14 @@
       addSys('未连接，无法停止');
       return;
     }
+    // 停止回执看护：PHONE_STOP 无送达核验——服务端 DONE[phone_stop] 不上线
+    // （命令挂起/上游忽略）时，12s 后如实提示「可能未生效」，不再静默。
+    stopSentAt = Date.now();
+    setTimeout(() => {
+      if (stopSentAt && (!stopAckAt || stopAckAt < stopSentAt) && lastStreamActivityAt >= stopSentAt) {
+        addSys('停止请求已发出，但上游仍在执行（工具调用中的取消可能延迟生效）');
+      }
+    }, 12000);
     finishAllAssistantVisuals();
     if (requestDoneTimer) {
       clearTimeout(requestDoneTimer);
@@ -3212,7 +4607,12 @@
     setTimeout(flushPendingSendQueue, 800);
   }
 
-  sendBtn.addEventListener('click', doSend);
+  sendBtn.addEventListener('click', () => {
+    // 焦点陷阱：按钮点击后持焦，之后按 Space（翻页/惯性）会二次触发 click——
+    // 发送后变「停止」态，Space 误停；点完即失焦。
+    try { sendBtn.blur(); } catch {}
+    doSend();
+  });
 
   // 会话抽屉事件
   btnSessions.addEventListener('click', () => {
@@ -3302,6 +4702,7 @@
     input.style.height = 'auto';
     input.style.height = Math.min(140, input.scrollHeight) + 'px';
   });
+  bindScrollHold();
 
   const btnScrollBottom = document.getElementById('btnScrollBottom');
   if (btnScrollBottom) {
@@ -3318,7 +4719,7 @@
   if (feed) {
     feed.addEventListener('scroll', () => {
       if (btnScrollBottom) {
-        if (isUserScrolledUp()) {
+        if (!feedIsAtBottom()) {
           btnScrollBottom.classList.add('visible');
         } else {
           btnScrollBottom.classList.remove('visible');
@@ -3366,6 +4767,18 @@
     ) {
       setStatus(false, '连接超时，重连中…');
       forceReconnect();
+      return;
+    }
+    // 排空兜底：消息曾落进 outboundQueue（发送瞬间 socket 半死/未 OPEN），
+    // 之后 socket 恢复但没走 onopen 的 flush 路径时，队列会无声滞留——
+    // 消息不丢全靠重连。这里在连接健康时主动冲掉（TTL 过期判由 flush 内部做）。
+    if (
+      !intentionalClose &&
+      ws &&
+      ws.readyState === WebSocket.OPEN &&
+      outboundQueue.length
+    ) {
+      flushOutboundQueue();
     }
   }, 10000);
 

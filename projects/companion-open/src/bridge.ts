@@ -6,6 +6,7 @@ import * as crypto from 'crypto';
 import { WebSocketServer, WebSocket } from 'ws';
 import { PhoneEvent } from './jsonl';
 import type { PushManager } from './push';
+import { TurnArbiter } from './turnArbiter';
 
 export interface BridgeOptions {
   host: string;
@@ -120,18 +121,22 @@ function isInternalSystemMessage(ev: any): boolean {
  */
 function annotateOrphanUserTurns(events: any[]): any[] {
   const out = Array.isArray(events) ? events.slice() : [];
-  const isAnswer = (t: string) =>
-    t === 'AGENT_MESSAGE' ||
-    t === 'AGENT_STREAM_SET' ||
-    t === 'AGENT_STREAM_CHUNK' ||
-    t === 'AGENT_STREAM_END' ||
-    t === 'AGENT_STREAM_START';
+  // 只认有正文的答：失败轮会留下 START+END 空流壳（无内容事件），
+  // 生命周期标记不算已答，否则光秃 USER 连排且无占位。
+  const isAnswer = (e: any) => {
+    const t = String(e?.type || '');
+    if (t === 'AGENT_MESSAGE') return true;
+    if (t === 'AGENT_STREAM_SET' || t === 'AGENT_STREAM_CHUNK') {
+      return typeof e?.text === 'string' && e.text.trim().length > 0;
+    }
+    return false;
+  };
   for (let i = 0; i < out.length; i++) {
     if (out[i]?.type !== 'USER_MESSAGE') continue;
     let j = i + 1;
     let answered = false;
     while (j < out.length && out[j]?.type !== 'USER_MESSAGE') {
-      if (isAnswer(String(out[j]?.type || ''))) { answered = true; break; }
+      if (isAnswer(out[j])) { answered = true; break; }
       j++;
     }
     if (!answered && j < out.length) {
@@ -186,7 +191,23 @@ export class BridgeServer {
   private requestHandlers: RequestHandler[] = [];
   private history: any[] = [];
   private offlineQueue: any[] = [];
-  private pendingConfirm: any | null = null;
+  /** 按会话分桶的待审批卡：AGENT_CONFIRM 是瞬态事件不进回放历史，
+      切会话/重连后必须按会话重投，否则手机端永远无法批准（R45 B2）。
+      桌面侧批准无事件源——DONE（轮次收尾/被取代）和 TTL 负责收尸。 */
+  private pendingConfirms = new Map<string, { ev: any; at: number }>();
+  private static readonly CONFIRM_TTL_MS = 30 * 60 * 1000;
+  private confirmSessKey(v: any): string {
+    const f = typeof v === 'string' ? v : String(v?._sess || v?.file || v?.sessionFile || '');
+    if (!f) return '*';
+    const b = f.split(/[\\/]/).pop() || '';
+    return b.replace(/\.jsonl$/i, '');
+  }
+  private liveConfirmFor(sessKey: string): any | null {
+    const pc = this.pendingConfirms.get(sessKey) ?? this.pendingConfirms.get('*');
+    if (!pc) return null;
+    if (Date.now() - pc.at > BridgeServer.CONFIRM_TTL_MS) return null;
+    return pc.ev;
+  }
   private push: PushManager | null = null;
   private heartbeatTimer: NodeJS.Timeout | null = null;
   private pendingChunk: string | null = null;
@@ -199,6 +220,10 @@ export class BridgeServer {
   private recentPhoneTexts: { text: string; at: number; used: number }[] = [];
   /** 非手机来源 USER_MESSAGE 的最近广播（双源去重）：text → 上次广播时刻 */
   private recentUserEmits = new Map<string, number>();
+  /** 统一事件裁决器：三源事件在此归一去重定序后再广播（跨通道重投、
+      过期 DONE、注入回执 DONE 都在服务端判死，客户端不再各自猜）。 */
+  private arbiter = new TurnArbiter();
+  private lastReplayAt = new Map<string, number>();
   /** 已投最终答案的指纹：(reqIndex|null)|sess|规范化文本 → 时间戳。
       同一答案可能经 sessiondb 整句 + 流路径收尾各投一遍（相距 ~1s），
       第二个按同轮同文压制；requestIndex 不同（同题重问）不压。 */
@@ -236,7 +261,9 @@ export class BridgeServer {
    * 连接回放提供者：活积 history 可能缺 USER_MESSAGE（fallback 通道按设计吞用户文
    * 只记 rid→ut 键），此时由扩展回读当前会话文件重建回放（含 sessiondb 补全）。
    */
-  historyProvider?: () => any[] | undefined;
+  /** 连接回放源：可返回事件数组，或 {events, file, title} 让回放带上
+   *  会话身份（客户端据此回填 currentSessionMeta.file/title） */
+  historyProvider?: () => any[] | { events: any[]; file?: string; title?: string } | undefined;
   private onClientCount?: (n: number) => void;
   publicUrl: string | null = null;
 
@@ -287,16 +314,22 @@ export class BridgeServer {
   setAuthToken(token: string | undefined) {
     const next = token?.trim() || undefined;
     this.authToken = next || (!isLoopbackHost(this.host) ? crypto.randomBytes(16).toString('hex') : undefined);
-    for (const ws of this.clients) {
-      // A token change invalidates previous socket authentication. Clients must
-      // perform PHONE_CONNECT again with the current token.
-      this.clientAuth.set(ws, !this.authToken);
+    // token 从无到有/轮换：已认证的连接保持认证（它们是在旧策略下入场的合法
+    // 会话，全部打回未认证 = 开隧道瞬间把所有在线手机踢成 401 墙）；
+    // 未认证的保持未认证，新连接才需出示新 token。token 清除时全体放行。
+    if (!this.authToken) {
+      for (const ws of this.clients) this.clientAuth.set(ws, true);
     }
     this.emitClientCount();
   }
 
   setPushManager(pm: PushManager | null | undefined) {
     this.push = pm ?? null;
+  }
+
+  /** 会话绑定变更（点选/跟随/重连回放）时重置裁决器轮次状态。 */
+  resetArbiter(sessBase?: string) {
+    this.arbiter.resetForSession(sessBase);
   }
 
   get vapidPublicKey(): string | null {
@@ -507,6 +540,9 @@ export class BridgeServer {
             vapidPublicKey: this.vapidPublicKey,
           });
           // Single HISTORY_REPLAY per socket — PWA replaces feed, does not append.
+          let replayMaxTs = 0;
+          const replayKeys = new Set<string>();
+          let replayFile: string | undefined;
           if (!historyReplayed) {
             historyReplayed = true;
             let replay = this.history.slice(-HISTORY_MAX);
@@ -514,13 +550,164 @@ export class BridgeServer {
             // 手机发送的几条零星 USER 也会让它"部分缺失"），且 socket 重连会把
             // 切换前旧会话的 history 重放回来拽回 feed。文件版 USER 数不少于 live 版
             // 时优先用文件版；只有当刚发出的用户消息尚未落盘时才保留 live 版。
-            const provided = this.historyProvider?.();
+            const providedRaw = this.historyProvider?.();
+            let provided: any[] | undefined;
+            let replayTitle: string | undefined;
+            if (Array.isArray(providedRaw)) {
+              provided = providedRaw;
+            } else if (providedRaw && Array.isArray(providedRaw.events)) {
+              provided = providedRaw.events;
+              replayFile = providedRaw.file;
+              replayTitle = providedRaw.title;
+            }
             if (Array.isArray(provided) && provided.length) {
               const liveUsers = replay.filter((e) => e?.type === 'USER_MESSAGE').length;
               const provUsers = provided.filter((e) => e?.type === 'USER_MESSAGE').length;
               if (provUsers >= liveUsers) replay = provided;
+              else {
+                // live 版胜出（刚发的用户消息还没落盘）。history 是跨会话
+                // 累积——把带 _sess 且不属于绑定会话的事件从回放里剔除
+                // （重连后外会话最新轮混入当前 feed 的修复：R99 B-R99-2），
+                // 剔除后身份成立，file/title 保留（此前混入直接丢 file/title
+                // 还导致标题退回品牌名）。无 _sess 的裸事件保留（无法判属，
+                // 丢弃风险大于混入）。
+                if (replayFile) {
+                  const boundBase = replayFile
+                    .split(/[\\/]/)
+                    .pop()!
+                    .replace(/\.jsonl$/i, '');
+                  replay = replay.filter((e) => {
+                    const s = String(e?._sess || '');
+                    return !s || s === boundBase;
+                  });
+                } else {
+                  // 无法确定绑定会话：只要发现带 _sess 的异源事件就不认领身份
+                  const foreign = replay.some((e) => !!String(e?._sess || ''));
+                  if (foreign) {
+                    replayFile = undefined;
+                    replayTitle = undefined;
+                  }
+                }
+              }
             }
-            this.send(ws, { type: 'HISTORY_REPLAY', messages: annotateOrphanUserTurns(replay) });
+            // 在途轮 USER 补投：lazy-write 让轮完成前的请求行不在文件回放里，
+            // 冷连客户端会看到「裸答案挂上一轮」。与 replaySession 同源——
+            // 从裁决器开启轮补齐缺失的 pending USER（R104 B3）。
+            {
+              const sessB = replayFile
+                ? path.basename(replayFile).replace(/\.jsonl$/i, '')
+                : '';
+              // 连接路回放也是一次会话绑定：不登记则 boundSess 恒 ''，
+              // 此间发出的手机轮 sess=''，下次换绑时被新会话追认，
+              // pending/近完成轮补投会跨会话泄漏进别会话回放。
+              if (sessB) this.arbiter.noteSessionSelected(sessB);
+              const pend = this.arbiter.pendingUserEvents(sessB);
+              if (pend.length) {
+                const have = new Set(
+                  replay
+                    .filter((e: any) => e?.type === 'USER_MESSAGE')
+                    .map((e: any) =>
+                      String(e._ut || e.text || '')
+                        .replace(/\s+/g, ' ')
+                        .trim()
+                        .slice(0, 120),
+                    ),
+                );
+                for (const pe of pend) {
+                  const k = String(pe._ut || pe.text || '');
+                  if (k && !have.has(k)) replay.push(pe);
+                }
+              }
+              // 近完成轮补投：transcript 懒写盘，刚完成的轮几十秒内不在文件
+              // 回放里——整轮丢或答案裸奔（R105 缺口）。缺 USER 补 USER、
+              // 缺 AGENT 补 AGENT。
+              const donePairs = this.arbiter.recentCompletedEvents(sessB);
+              if (donePairs.length) {
+                const haveU = new Set(
+                  replay
+                    .filter((e: any) => e?.type === 'USER_MESSAGE')
+                    .map((e: any) => String(e._ut || '').trim() || ''),
+                );
+                const haveA = new Set(
+                  replay
+                    .filter((e: any) => e?.type === 'AGENT_MESSAGE')
+                    .map((e: any) =>
+                      String(e._ut || e.text || '')
+                        .replace(/\s+/g, ' ')
+                        .trim()
+                        .slice(0, 80),
+                    ),
+                );
+                // 答案文本前缀键：同一答案经 transcript+sessiondb 双通道投影时
+                // 两份的 _ut 可能不同（归属改判）——只按 _ut 查会漏成回放双渲
+                // （R112 P2），正文前缀同则视为同一条答案。
+                const haveAText = new Set(
+                  replay
+                    .filter((e: any) => e?.type === 'AGENT_MESSAGE')
+                    .map((e: any) =>
+                      String(e.text || '')
+                        .replace(/\s+/g, ' ')
+                        .trim()
+                        .slice(0, 80),
+                    ),
+                );
+                const haveUByText = new Set(
+                  replay
+                    .filter((e: any) => e?.type === 'USER_MESSAGE')
+                    .map((e: any) =>
+                      String(e._ut || e.text || '')
+                        .replace(/\s+/g, ' ')
+                        .trim()
+                        .slice(0, 120),
+                    ),
+                );
+                for (const ce of donePairs) {
+                  if (ce.type === 'USER_MESSAGE') {
+                    const k = String(ce._ut || '');
+                    if (k && !haveU.has(k)) {
+                      // 补投 USER 时回放可能已有同文裸事件——按文本键再查一层
+                      const tk = String(ce.text || '')
+                        .replace(/\s+/g, ' ')
+                        .trim()
+                        .slice(0, 120);
+                      if (!haveUByText.has(tk)) replay.push(ce);
+                    }
+                  } else {
+                    const ak = String(ce._ut || ce.text || '')
+                      .replace(/\s+/g, ' ')
+                      .trim()
+                      .slice(0, 80);
+                    const atk = String(ce.text || '')
+                      .replace(/\s+/g, ' ')
+                      .trim()
+                      .slice(0, 80);
+                    if (ak && !haveA.has(ak) && !(atk && haveAText.has(atk)))
+                      replay.push(ce);
+                  }
+                }
+              }
+            }
+            this.send(ws, {
+              type: 'HISTORY_REPLAY',
+              messages: annotateOrphanUserTurns(replay),
+              file: replayFile,
+              title: replayTitle,
+            });
+            for (const e of replay) {
+              const t = Number((e as any)?.timestamp ?? (e as any)?.ts ?? 0);
+              if (Number.isFinite(t) && t > replayMaxTs) replayMaxTs = t;
+              const ty = (e as any)?.type;
+              if (
+                ty === 'USER_MESSAGE' ||
+                ty === 'AGENT_MESSAGE' ||
+                ty === 'TOOL_CALL' ||
+                ty === 'THINKING_STEP'
+              ) {
+                replayKeys.add(
+                  ty + '|' + String((e as any)?.text ?? '').replace(/\s+/g, ' ').trim(),
+                );
+              }
+            }
           }
           if (this.activeStreamId && this.activeStreamAccum) {
             this.send(ws, {
@@ -536,8 +723,27 @@ export class BridgeServer {
           // covers durable chat. Only flush a short tail for raw clients / e2e.
           const offlineTail = this.offlineQueue.slice(-20);
           this.offlineQueue = [];
-          for (const ev of offlineTail) this.send(ws, ev);
-          if (this.pendingConfirm) this.send(ws, this.pendingConfirm);
+          for (const ev of offlineTail) {
+            // 回放已覆盖的旧事件不再补投：跨通道重投的 sid/文本形态常与回放
+            // 项不一致，客户端 requestId/streamId/同文去重会漏，形成尾部堆叠。
+            // 两道闸：ts ≤ 回放峰值（正常迟到件）；或 同文已在回放里
+            // （入队时被盖了到达时刻、逃逸 ts 闸的激活期重投影）。
+            // fromPhone 的 USER 不在文件回放里（未落盘）→ 始终放行。
+            if (ev?.fromPhone) {
+              this.send(ws, ev);
+              continue;
+            }
+            const et = Number(ev?.timestamp ?? ev?.ts ?? 0);
+            if (Number.isFinite(et) && replayMaxTs > 0 && et <= replayMaxTs) continue;
+            const k =
+              String(ev?.type || '') +
+              '|' +
+              String(ev?.text ?? '').replace(/\s+/g, ' ').trim();
+            if (replayKeys.has(k)) continue;
+            this.send(ws, ev);
+          }
+          const pcEv = this.liveConfirmFor(replayFile ? this.confirmSessKey(replayFile) : '*');
+          if (pcEv) this.send(ws, pcEv);
           // Do NOT re-send TUNNEL_URL here — already sent on socket open if set.
           return;
         }
@@ -550,7 +756,7 @@ export class BridgeServer {
         }
 
         if (msg.type === 'PHONE_CONFIRM') {
-          this.pendingConfirm = null;
+          this.pendingConfirms.clear();
           this.broadcast({ type: 'AGENT_CONFIRM_RESOLVED', button: msg.button });
         }
         await this.dispatchPhoneHandlers(msg);
@@ -598,12 +804,32 @@ export class BridgeServer {
    * 推 HISTORY_REPLAY（PWA 端清空 feed 并重放）；后续新事件继续累积。
    * 也重置 activeStream/offlineQueue，避免跨会话串流。
    */
-  replaySession(messages: any[], file?: string) {
+  replaySession(messages: any[], file?: string, title?: string, force = false) {
+    // 重放风暴闸：同一文件 5s 内的重复 replaySession 只放行首发
+    // （R90：watchers 多路触发 0.2s 内连续 5 次全量回放）。
+    // force：用户显式点选会话必须放行——节流只防 watcher 风暴，不能吞掉
+    // 用户点选（客户端已清空 feed，回放被吞则停在空 feed）。
+    if (file) {
+      const now = Date.now();
+      const last = this.lastReplayAt.get(file) ?? 0;
+      if (!force && now - last < 5_000) return;
+      this.lastReplayAt.set(file, now);
+      if (this.lastReplayAt.size > 64) this.lastReplayAt.clear();
+      // PWA 点选只走 unicast reply 不经 broadcast，SESSION_SELECTED 永远
+      // 不进裁决器 → boundSess 恒 ''，sess='' 的手机轮补投全丢。回放=绑定，
+      // 在此同步裁决器的绑定会话。
+      this.arbiter.noteSessionSelected(
+        path.basename(file).replace(/\.jsonl$/i, ''),
+      );
+    }
     this.history = [];
     this.offlineQueue = [];
     this.activeStreamId = null;
     this.activeStreamAccum = '';
-    this.pendingConfirm = null;
+    // pendingConfirms 保留：别会话的审批卡继续停着，切回时按会话重投。
+    // 裁决器轮次状态按会话分——切会话后 openTurns/latestUserLiveTs 属于旧会话，
+    // 不重置会让新会话的 DONE 被判成旧轮迟到件（stale）或吞掉注入回执门。
+    this.arbiter.resetForSession(file ? path.basename(file).replace(/\.jsonl$/i, '') : undefined);
     // 0.5.9：按「对话轮次」裁剪，而不是盲目 slice(-N)。
     // projectHistory 已按 request 交错输出；若再按事件数截断，TOOL 洪水会
     // 挤掉尾部 USER/AGENT（手机只剩中间某次 0.5.4 验证表）。
@@ -640,13 +866,106 @@ export class BridgeServer {
       slice = firstUser > 0 ? tail.slice(firstUser) : tail;
     }
     this.history = annotateOrphanUserTurns(slice);
+    const sessB = file ? path.basename(file).replace(/\.jsonl$/i, '') : '';
+    // pending 轮 USER 补投：kind:2 惰性写盘，在途轮的请求可能还没进文件——
+    // 回放缺它时从裁决器的开启轮补一枚 USER_MESSAGE（桌面发出的轮 PWA 端
+    // 没有 sentAwaitingReply 备份；R66 B1 在途轮泡+卡整条消失）。
+    {
+      const pend = this.arbiter.pendingUserEvents(sessB);
+      if (pend.length) {
+        const have = new Set(
+          this.history
+            .filter((e: any) => e && e.type === 'USER_MESSAGE')
+            .map((e: any) => String(e._ut || e.text || '').replace(/\s+/g, ' ').trim().slice(0, 120)),
+        );
+        for (const pe of pend) {
+          const k = String(pe._ut || pe.text || '');
+          if (k && !have.has(k)) this.history.push(pe);
+        }
+      }
+      // 近完成轮补投：transcript 懒写盘，刚完成的轮几十秒内不在文件回放
+      // 里——切会话/冷连回放会整轮丢或答案裸奔（R105 缺口，与连接路同源）。
+      const donePairs = this.arbiter.recentCompletedEvents(sessB);
+      if (donePairs.length) {
+        const haveU = new Set(
+          this.history
+            .filter((e: any) => e && e.type === 'USER_MESSAGE')
+            .map((e: any) => String(e._ut || '').trim()),
+        );
+        const haveA = new Set(
+          this.history
+            .filter((e: any) => e && e.type === 'AGENT_MESSAGE')
+            .map((e: any) =>
+              String(e._ut || e.text || '')
+                .replace(/\s+/g, ' ')
+                .trim()
+                .slice(0, 80),
+            ),
+        );
+        const haveUByText = new Set(
+          this.history
+            .filter((e: any) => e && e.type === 'USER_MESSAGE')
+            .map((e: any) =>
+              String(e._ut || e.text || '')
+                .replace(/\s+/g, ' ')
+                .trim()
+                .slice(0, 120),
+            ),
+        );
+        // 答案文本前缀键：transcript+sessiondb 双通道投影同一份答案时 _ut
+        // 可能不一致（归属改判），正文同前缀即重复（R112 P2 回放双渲）。
+        const haveAText = new Set(
+          this.history
+            .filter((e: any) => e && e.type === 'AGENT_MESSAGE')
+            .map((e: any) =>
+              String(e.text || '')
+                .replace(/\s+/g, ' ')
+                .trim()
+                .slice(0, 80),
+            ),
+        );
+        for (const ce of donePairs) {
+          if (ce.type === 'USER_MESSAGE') {
+            const k = String(ce._ut || '');
+            const tk = String(ce.text || '')
+              .replace(/\s+/g, ' ')
+              .trim()
+              .slice(0, 120);
+            if (k && !haveU.has(k) && !haveUByText.has(tk)) this.history.push(ce);
+          } else {
+            const ak = String(ce._ut || ce.text || '')
+              .replace(/\s+/g, ' ')
+              .trim()
+              .slice(0, 80);
+            const atk = String(ce.text || '')
+              .replace(/\s+/g, ' ')
+              .trim()
+              .slice(0, 80);
+            if (ak && !haveA.has(ak) && !(atk && haveAText.has(atk)))
+              this.history.push(ce);
+          }
+        }
+      }
+    }
     // file 透传：PWA 回放后据此恢复该会话的滚动位置（切回不从头拉到底）
+    // inFlight：该会话仍有未答开启轮（切走时在途 → 切回）。客户端据此
+    // 维持发送排队 + 不强制完结在途工具卡——否则回放把在途轮渲成「已完成」、
+    // 发送键放开让下一发送插队，原轮答案被归属偷走后丢失（R107 BUG-1）。
+    const inFlight = this.arbiter.openTurnForSession(sessB);
     this.broadcastRaw({
       type: 'HISTORY_REPLAY',
       messages: this.history,
       file: file || undefined,
+      // 标题随回放走：PWA 侧 currentSessionMeta 可能还停在旧会话上，
+      // 没有权威的 msg.title 时它会拿旧会话名做回退 → 切回后标题滞留。
+      title: title || undefined,
+      ...(inFlight ? { inFlight: true, inFlightUt: inFlight.utKey, inFlightTs: inFlight.ts } : {}),
       timestamp: Date.now(),
     });
+    // 回放清空了 feed：该会话挂起的审批卡随回放重投（瞬态事件不在历史里）。
+    // 走 broadcastRaw 绕过裁决器——重投同文确认卡会被内容去重当重复件吞掉。
+    const pcReplay = file ? this.liveConfirmFor(this.confirmSessKey(file)) : null;
+    if (pcReplay) this.broadcastRaw(pcReplay);
   }
 
   /**
@@ -656,8 +975,12 @@ export class BridgeServer {
    * Offline queue only keeps non-history edge events; no double-flush with history.
    * Triggers web-push on AGENT_CONFIRM.
    */
-  sendToPhone(ev: any) {
-    if (!ev || isInternalSystemMessage(ev)) return;
+  /**
+   * 返回该事件是否真的被投递（进历史/广播/离线队列均可——历史会在下次
+   * 回放补上）。false = 在回声/去重/仲裁器处被丢弃，调用方不得记「已投」。
+   */
+  sendToPhone(ev: any): boolean {
+    if (!ev || isInternalSystemMessage(ev)) return false;
     // 0.5.19：仅抑制「手机刚发出」的 JSONL 回声。
     // 注意：短文案（「1」/「2」）会话历史里可能多次出现；若无条件吞掉，
     // 切会话 HISTORY / 桌面侧同文新消息都会在远端消失。
@@ -667,7 +990,7 @@ export class BridgeServer {
       typeof ev.text === 'string' &&
       this.isPhoneEcho(ev)
     ) {
-      return;
+      return false;
     }
     // 双源去重：同一桌面发出的 USER_MESSAGE 会经 transcripts + chatSessions
     // 两个通道各投一次（间隔数秒到 ~45s 落盘延迟）。按文本在窗口内去重，
@@ -680,22 +1003,47 @@ export class BridgeServer {
       }
       if (t) {
         const last = this.recentUserEmits.get(t);
-        if (last != null && now - last <= USER_EMIT_DEDUPE_MS) return;
+        if (last != null && now - last <= USER_EMIT_DEDUPE_MS) return false;
         this.recentUserEmits.set(t, now);
       }
     }
     // 同答跨通道双投压制（在 pushHistory 之前——否则两份都进回放）
-    if (ev.type === 'AGENT_MESSAGE' && this.isDupAgentFinal(ev)) return;
+    if (ev.type === 'AGENT_MESSAGE' && this.isDupAgentFinal(ev)) return false;
+
+    // 服务端裁决：归属戳（_sess/_ut/_seq）、跨通道重投丢弃、DONE 判
+    // stale/ack（判死的直接不广播）/closedUt——客户端据戳渲染，不再各自猜。
+    // markEmitted 按是否真的上公网记名：离线排队的首发不算已投递，
+    // 否则首份排队丢弃/未达 + 重发被当重复 = 净丢一条。
+    const willBroadcast = this.authorizedClientCount() !== 0;
+    const arbitrated = this.arbiter.accept(ev, { markEmitted: willBroadcast });
+    if (!arbitrated) return false;
 
     const stamped = {
-      ...ev,
-      timestamp: ev?.timestamp ?? Date.now(),
+      ...arbitrated,
+      timestamp: arbitrated?.timestamp ?? Date.now(),
     };
 
     this.trackStreamState(stamped);
     this.pushHistory(stamped);
 
-    if (stamped.type === 'AGENT_CONFIRM') this.pendingConfirm = stamped;
+    if (stamped.type === 'AGENT_CONFIRM') {
+      // 同会话已有未决审批卡时，第二份（异通道/cid 异形的重投影）不再广播：
+      // Copilot 同刻只挂一张待批准卡，双卡必为重复投影（R107 BUG-2）。
+      // 老条目 >120s 视为残留放行——真·新一轮确认不被旧残卡堵住。
+      const ckey = this.confirmSessKey(stamped);
+      const prevC = this.pendingConfirms.get(ckey);
+      if (prevC && Date.now() - prevC.at < 120_000) return false;
+      this.pendingConfirms.set(ckey, { ev: stamped, at: Date.now() });
+    } else if (stamped.type === 'COPILOT_DONE' || stamped.type === 'AGENT_CONFIRM_RESOLVED') {
+      // 轮次收尾/被取代（桌面侧批准无事件源，DONE 是唯一可观测的收尸信号）→
+      // 同会话同轮的挂起审批失效；_ut 不匹配（旧轮迟到 DONE）不连坐。
+      const key = this.confirmSessKey(stamped);
+      const pc = this.pendingConfirms.get(key);
+      const doneUt = typeof stamped._ut === 'string' ? stamped._ut : '';
+      const pcUt = typeof pc?.ev?._ut === 'string' ? pc.ev._ut : '';
+      if (pc && (!pcUt || !doneUt || pcUt === doneUt)) this.pendingConfirms.delete(key);
+      if (stamped.type === 'AGENT_CONFIRM_RESOLVED') this.pendingConfirms.clear();
+    }
 
     const skipOffline =
       stamped.type === 'COPILOT_TYPING' ||
@@ -703,7 +1051,7 @@ export class BridgeServer {
       stamped.type === 'TUNNEL_URL' ||
       stamped.type === 'SYSTEM_MESSAGE';
 
-    if (this.authorizedClientCount() === 0) {
+    if (!willBroadcast) {
       // Queue durable + non-stream events for flush on next PHONE_CONNECT.
       // HISTORY_REPLAY also has durable items; PWA dedupes by requestId/streamId,
       // and connect path skips offline items already present in history keys.
@@ -726,6 +1074,24 @@ export class BridgeServer {
       const title = String(stamped.title ?? 'Approval needed');
       const message = String(stamped.message ?? '');
       void this.push?.notify(title, message).catch(() => {});
+    }
+    this.emitSynthetic();
+    return true;
+  }
+
+  /** 裁决器附属合成终态件（如 superseded DONE：parked 待批准轮被新 USER 取代
+      时上游不再发 DONE）：主事件广播后补投，并顺手清理该轮的挂起审批卡。 */
+  private emitSynthetic() {
+    const list = this.arbiter.drainSynthetic();
+    for (const s of list) {
+      if (s.type === 'COPILOT_DONE' || s.type === 'AGENT_CONFIRM_RESOLVED') {
+        const key = this.confirmSessKey(s);
+        const pc = this.pendingConfirms.get(key);
+        const doneUt = typeof s._ut === 'string' ? s._ut : '';
+        const pcUt = typeof pc?.ev?._ut === 'string' ? pc.ev._ut : '';
+        if (pc && (!pcUt || !doneUt || pcUt === doneUt)) this.pendingConfirms.delete(key);
+      }
+      if (this.authorizedClientCount() !== 0) this.broadcastRaw(s);
     }
   }
 
@@ -842,10 +1208,23 @@ export class BridgeServer {
       if (url) this.setPublicUrl(url);
       return;
     }
-    if (ev?.type === 'AGENT_CONFIRM') this.pendingConfirm = ev;
-    this.trackStreamState(ev);
-    this.pushHistory(ev);
-    this.broadcastRaw(ev);
+    // 与 sendToPhone 同走裁决器：注入回执 DONE/过期 DONE 在此打 stale/ack 标记。
+    // markEmitted 同样按真实上公网记名——否则同一条 TOOL_CALL/AGENT_MESSAGE 经
+    // 本路径先过（不记名）再经 sendToPhone 投一遍，wire 双发（R26 TOOL 双投）。
+    const arbitrated = this.arbiter.accept(ev, {
+      markEmitted: this.authorizedClientCount() !== 0,
+    });
+    if (!arbitrated) return;
+    if (arbitrated?.type === 'AGENT_CONFIRM') {
+      const ckey = this.confirmSessKey(arbitrated);
+      const prevC = this.pendingConfirms.get(ckey);
+      if (prevC && Date.now() - prevC.at < 120_000) return;
+      this.pendingConfirms.set(ckey, { ev: arbitrated, at: Date.now() });
+    }
+    this.trackStreamState(arbitrated);
+    this.pushHistory(arbitrated);
+    this.emitSynthetic();
+    this.broadcastRaw(arbitrated);
   }
 
   private broadcastRaw(ev: any) {
@@ -959,9 +1338,13 @@ export class BridgeServer {
       timestamp: Date.now(),
       fromPhone: true,
     };
-    this.pushHistory(ev);
-    this.broadcastRaw(ev);
+    // 手机发起的轮次同样登记进裁决器——否则注入回执 DONE 因缺 openTurn
+    // 判不出 ack，透传给客户端造成提前释放/连发逃逸。
+    const arbitrated = this.arbiter.accept(ev) || ev;
+    this.pushHistory(arbitrated);
+    this.broadcastRaw(arbitrated);
     this.rememberPhoneText(t);
+    this.emitSynthetic();
   }
 
   private isPhoneEcho(ev: any): boolean {
