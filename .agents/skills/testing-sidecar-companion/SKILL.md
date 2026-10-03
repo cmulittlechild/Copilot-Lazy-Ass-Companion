@@ -231,3 +231,13 @@ PWA ↔ VS Code bridge。仓库 `~/repos/sidecar_remote/projects/companion-open`
 - **换 vsix 必须三步齐全才算测到新码**：`--install-extension --force`（更新 extensions 目录）→ Developer: Reload Window（换 ext host，channel.json pid 变更判据）→ Safari ⟳ 拉新 app.js（md5 比对 installed vs repo）。三步缺一仍是旧码。
 - **停止回归点**：双击停止后 wire `DONE closedUt=… reason=phone_stop` ~5s + arm 行 + 「（该轮无回复）」占位；post-stop 发送须正常。
 - **DONE reason 白名单补充**：`inject_soft_unverified` 属 inject_* 正常族，见到不算异常。
+
+## R140 取证心得补充（447fce9 加深轮，mac+win 双平台全绿收官）
+- **phone_stop 不撤回近完成生成（上游现象，非扩展 bug）**：停止打在 ~11s 处但上游 12.65s 仍跑完 → `DONE closedUt reason=phone_stop` → 全答案 ~+39s 经迟投通道回流渲进被停轮（45s 宽限内，占位被真答案替换=良性降级）；**且下一轮答案被上游合并**：sessiondb thinking 明写 "Two requests…respond with both"，response=长文+`c2 ok` 存到 c2 轮下。判据：停止后核对**下一轮**的 AGENT_MESSAGE 文本/sessiondb response——合并属上游，wire 的 ut/DONE 全对。
+- **零 live AGENT_STREAM_* 基线位移（r139 起）**：14 轮全是一发式 `AGENT_MESSAGE`（sessiondb 投影），只见收尾 `STREAM_END len=0`——「流中刷新恢复部分流」这类场景在无流基线下无法成立；停止轮显示「该轮无回复」直到迟答回流。若某轮又见 START/SET/CHUNK 需留意是上游行为切回。
+- **THINKING_STEP 迟到 18-31s 落下一轮窗口**：ut 戳归属正确（<45s 宽限放行属设计）——要盯的是「戳错轮」而非迟到本身。
+- **emoji `type` 会被 macOS 输入链替换码点**（🎧🪐🌊🎡→🌊🎡🚀）：断言一律以 wire 上 `text`/`ut=` 字节为准，不以 type 入参为准。
+- **MODEL_SELECTED 是 unicast**：旁挂监控永远看不到确认帧；判切换看 PWA/桌面 pill + 无 error + MODEL_LIST 重播。
+- **排队泡跨会话驻留（设计）**：排进 S 发件箱后切走不派给后台会话、回选 S 才 FIFO 排空——447fce9 验证：回选回放后 ~0.1s 即发出，孤立重排队 ReferenceError 已死。
+- **5KB+ 文本用 pbcopy+Cmd+V**（type 太慢易碎）；VS Code 前台化会盖住 PWA ☰ 区域，点抽屉前先 refocus Chrome。
+- **注入回执 DONE 现形记**：`inject_soft_unverified` DONE 会落在工具审批停泊轮内 ~14s 处——队列**不再**被它提前释放（等真 DONE），仲裁生效。
