@@ -1,94 +1,75 @@
 # Copilot Lazy Ass Companion
 
-Remote companion for **GitHub Copilot Chat** in VS Code: mirror your active chat session to a phone-friendly **PWA** over the local network, send prompts back to Copilot from your phone, run terminal commands, and switch models / sessions / approval levels — all without touching your desktop.
+把你桌面上的 **GitHub Copilot Chat** 实时镜像到手机（或任意浏览器）——看回复、发指令、批工具调用、切会话、换模型，人不在电脑前也能继续干活。
 
-> 非替换型伴侣扩展：不修改、不替换 `GitHub.copilot-chat`，只读取其本地会话文件并提供一个本地 WebSocket/PWA 桥接。
+> 非替换式伴侣：不修改、不替换 `GitHub.copilot-chat`，只读它落盘的会话文件，自己开一座本地桥。
 
-![screenshot](docs/screenshot-qr-panel.png)
-![screenshot](docs/screenshot-phone-chat.png)
+## What it does
 
-*(screenshots placeholder — replace `docs/screenshot-*.png` before publishing)*
+- **Live mirror** — assistant answers stream to your phone as Copilot generates them: markdown, thinking steps, tool-call cards.
+- **Send from phone** — prompts land in the real Copilot Chat composer and run like you typed them.
+- **Approve tool calls** — Copilot's permission cards (terminal, file writes) confirmable from the phone.
+- **Queue & stop** — fire messages mid-turn; they queue FIFO and auto-send. Double-tap Stop aborts the in-flight turn.
+- **Session drawer** — all chat sessions grouped by workspace, titled, searchable, full-history replay.
+- **Model switcher** — change the active model from the phone.
+- **Push notifications** — get pinged when Copilot finishes a turn.
+- **Terminal panel** — run shell commands remotely via Shell Integration (clipboard read-back fallback).
+- **Optional Cloudflare quick tunnel** — public URL with auto-minted session token, off by default.
+- **Multi-instance discovery** — multiple VS Code windows auto-discovered by the PWA.
 
-## Features
+## How it works
 
-- **Real-time chat mirror** — tails `GitHub.copilot-chat` transcript / `chatSessions` JSONL files with millisecond latency; streaming assistant output, thinking steps, and tool-call cards all rendered.
-- **Send from your phone** — inject prompts into the active VS Code chat session (agent / ask / edit modes) via workbench chat commands, with echo suppression.
-- **QR pairing** — sidebar panel shows a QR code (local URL, or public tunnel URL when enabled); scan and you're connected.
-- **Session & workspace browser** — phone-side drawer lists sessions with LLM-generated titles, grouped by workspace (local + SSH remote), with search.
-- **Model & approval switcher** — enumerate `vscode.lm` models, switch via `workbench.action.chat.changeModel`; 4-step approval levels (default / assisted / autoApprove / autopilot).
-- **Terminal panel** — run shell commands from the phone via Shell Integration (clipboard read-back fallback for WSL / custom prompts).
-- **Web Push notifications** — VAPID push when Copilot finishes, phone PWA subscribe.
-- **Optional Cloudflare quick tunnel** — off by default; when started, a random session token is auto-minted and embedded in the QR / URL.
-- **Multi-instance discovery** — multiple VS Code windows on different ports are auto-discovered by the PWA.
-
-## Requirements
-
-- VS Code **1.93+** with **GitHub Copilot Chat** extension installed and signed in.
-- Node 22-based VS Code (1.99+) enables the SQLite session index (faster permission-level reads); on older hosts it degrades gracefully.
+The extension tails the three async sources Copilot writes (`chatSessions/*.jsonl`, `transcripts`, `session-store.db`), arbitrates them into one ordered, deduplicated event stream (**TurnArbiter**), and relays it over a local bridge (`:3010`, HTTP+WS) to a PWA. Phone messages are injected back via workbench chat commands. All local — no third-party server.
 
 ## Install
 
-**From VSIX (local):**
+Download the vsix from [Releases](https://github.com/cmulittlechild/Copilot-Lazy-Ass-Companion/releases/latest), then **Extensions: Install from VSIX…** (or `code --install-extension copilot-sidecar-companion-1.0.7.vsix`), **Reload Window**.
 
-```bash
-npm install && npm run compile && npm run package
-# macOS app bundle CLI if `code` is not on PATH:
-"/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code" \
-  --install-extension ./copilot-sidecar-companion-0.5.38.vsix --force
-```
+Or build: `npm install && npm run compile && npm run package`.
 
-Reload the window. The status bar shows `Sidecar :3010` and the sidebar gets a **Copilot Lazy Ass → QR / 连接** panel.
+**Requirements**: VS Code 1.93+ (1.99+ recommended for the SQLite session index), GitHub Copilot Chat signed in. macOS + Windows verified.
 
 ## Usage
 
-1. The bridge auto-starts on launch (or run **Copilot Lazy Ass: Start Bridge**).
-2. Open the sidebar panel **QR / 连接** and scan the QR code with your phone.
-3. On the phone, open the PWA (e.g. `http://192.168.x.x:3010/`) and optionally "Add to Home Screen".
-4. Set `copilotSidecar.host` to `0.0.0.0` if your phone can't reach the default `127.0.0.1` binding.
-5. Optional remote access: command **Copilot Lazy Ass: Start Tunnel** (Cloudflare quick tunnel, public URL appears in the QR panel).
+1. Bridge auto-starts (`Sidecar :3010` in status bar).
+2. **Copilot Lazy Ass: Show QR Panel** → scan with your phone (same Wi-Fi).
+3. Chat on the PWA — send/queue/stop/session-switch/model-switch/tool-approval all in-page.
+4. LAN access: `copilotSidecar.host` = `0.0.0.0`. Remote access: **Start Tunnel** (token auto-embedded in QR).
 
-If `copilotSidecar.authToken` is set, append `?token=YOUR_TOKEN` to the URL (the QR code includes it automatically). If the token is empty when a tunnel starts, a random per-session token is generated in memory and embedded in the QR / `?token=` URL — it is never written to settings.
+## Commands
 
-## Settings
+`Start Bridge` · `Stop Bridge` · `Show QR Panel` · `Show Status` · `Copy PWA URL` · `Copy Auth Token` · `Start Tunnel` · `Stop Tunnel` · `Restart Tunnel`
 
-| key | default | note |
+## Settings (`copilotSidecar.*`)
+
+| Key | Default | Note |
 |-----|---------|------|
-| `copilotSidecar.port` | `3010` | HTTP + WebSocket port (auto-scans +20 if busy) |
-| `copilotSidecar.host` | `127.0.0.1` | `0.0.0.0` for LAN access |
-| `copilotSidecar.autoStart` | `true` | start bridge on startup |
-| `copilotSidecar.authToken` | `""` | optional shared token for all clients |
-| `copilotSidecar.defaultMode` | `agent` | default chat mode for phone messages |
-| `copilotSidecar.injectSessionOpen` | `editor` | how target session is opened for injection |
-| `copilotSidecar.liveOnly` | `true` | tail at EOF; `false` replays session history |
-| `copilotSidecar.preferTranscript` | `true` | use realtime transcripts as primary source |
-| `copilotSidecar.enableTunnel` | `false` | auto-start Cloudflare quick tunnel |
-| `copilotSidecar.downloadCloudflared` | `true` | cache cloudflared under `~/.copilot-sidecar-companion/` |
-| `copilotSidecar.tunnelTimeoutMs` | `35000` | wait for trycloudflare URL |
+| `port` | `3010` | bridge port (+20 auto-scan if busy) |
+| `host` | `127.0.0.1` | `0.0.0.0` for LAN |
+| `autoStart` | `true` | start bridge on startup |
+| `authToken` | `""` | shared token — **required for LAN/tunnel** |
+| `defaultMode` | `agent` | chat mode for phone messages |
+| `injectSessionOpen` | `editor` | how target session opens for injection |
+| `pollMs` | `50` | JSONL tail poll interval |
+| `sessionRescanMs` | `2000` | newest-session rescan period |
+| `liveOnly` | `true` | `false` replays full history on connect |
+| `preferTranscript` | `true` | transcripts as primary source |
+| `enableTunnel` | `false` | auto-start Cloudflare tunnel |
+| `downloadCloudflared` | `true` | cache cloudflared under `~/.copilot-sidecar-companion/` |
+| `tunnelTimeoutMs` | `35000` | wait for trycloudflare URL |
 
-## Security
+## Security & privacy
 
-- By default the bridge binds to **127.0.0.1 only** — nothing leaves your machine. Binding `0.0.0.0` exposes it to your LAN: **always set an `authToken`** in that case.
-- The tunnel feature exposes your local bridge through a **public Cloudflare quick tunnel** (`*.trycloudflare.com`). It is unauthenticated infrastructure: anyone who obtains the URL can reach the bridge, so always use it with the auto-minted session token, prefer short-lived sessions, and stop the tunnel when you're done.
-- Terminal execution from the phone runs with your local user privileges — treat the token like a password.
-- Everything is plaintext HTTP/WS (no TLS on LAN); the tunnel provides TLS only between phone and Cloudflare edge.
-
-## Privacy
-
-**All data stays on your machine.** The extension reads local Copilot Chat session files (`chatSessions` / `transcripts` JSONL) and relays them over your local network (or your own Cloudflare quick tunnel) directly to your phone. No third-party servers, no telemetry, no analytics, no data collection. Push notifications go through the browser push service you configured (VAPID keys are generated locally).
+Default binds `127.0.0.1` — nothing leaves the machine. LAN/tunnel exposure: always set `authToken` (tunnel auto-mints one per session). Phone-side terminal execution uses your user privileges. No telemetry, no third-party servers; tunnel TLS covers phone→Cloudflare edge only. VAPID push keys generated locally.
 
 ## Troubleshooting
 
-- **Phone can't connect** — check `copilotSidecar.host` (`0.0.0.0` for LAN), same Wi-Fi, and firewall rules for the port shown in the status bar.
-- **QR shows `127.0.0.1`** — that's the local URL; use the tunnel URL after starting a tunnel, or open the LAN IP manually.
-- **Injection lands in the wrong session** — try `copilotSidecar.injectSessionOpen: "editor"` (default) and check the target session is the active chat editor; see command **Show Status**.
-- **No content after switching sessions on remote workspaces** — expected fallback: remote workspaces have no transcripts dir; the bridge falls back to chatSessions (up to ~60s lag).
-- **Terminal commands fail** — Shell Integration requires a supported shell; the clipboard read-back fallback covers WSL/custom prompts.
-- **Logs** — run **Copilot Lazy Ass: Show Status**; bridge errors surface in the VS Code developer console.
+- Phone can't connect → `host=0.0.0.0`, same Wi-Fi, firewall.
+- Stale PWA behavior → hard-refresh (`Cmd/Ctrl+Shift+R`); version stamps auto-update since 1.0.x.
+- Injection lands in wrong session → `injectSessionOpen: "editor"` + **Show Status**.
+- Remote workspaces lag → no transcripts dir there; chatSessions fallback (~60s).
+- Logs → **Show Status** + VS Code dev console.
 
-## Disclaimer
+## Disclaimer / License
 
-This is an **unofficial, community tool**. It is **not affiliated with, endorsed by, or supported by GitHub or Microsoft**. It reads local VS Code Copilot Chat session files on your own machine; usage is at your own risk and must comply with the **GitHub Copilot Terms of Service** and your organization's policies.
-
-## License
-
-[MIT](LICENSE) — copyright (c) 2026 the project authors.
+Unofficial community tool — **not affiliated with GitHub or Microsoft**. [MIT](LICENSE).

@@ -1,188 +1,107 @@
-# sidecar_remote
+# Copilot Lazy Ass Companion
 
-本目录是 **GitHub Copilot 手机伴生（companion）** 的研究与自建工程空间。
+一个 VS Code 扩展：把你桌面上的 **GitHub Copilot Chat** 实时镜像到手机（或任意浏览器）上——在手机上看回复、发指令、批工具调用、切会话、换模型，人不在电脑前也能继续干活。
 
-目标：
+> 非替换式伴侣：不修改、不替换 `GitHub.copilot-chat`，只读它落盘的会话文件，自己开一座本地桥。
 
-- 调研「手机远程操控 / 镜像 Copilot Chat」类方案的架构与交互
-- 自建开源、**非替换式** 本地 companion：`projects/companion-open`
-- 通过 tail `chatSessions/*.jsonl` 镜像会话，经本机 WebSocket / PWA 在手机上查看与回传 prompt
-- 用 VS Code workbench chat 命令把手机输入注回本机 Copilot Chat
-
-**定位：研究 + 自用原型。** 参考克隆与逆向产物仅供本地学习，不构成对第三方产品的再分发或破解授权。
+English intro below / 中文见「快速上手」。
 
 ---
 
-## 目录结构
+## What it does
 
-```text
-sidecar_remote/
-  README.md                 # 本文件
-  bug_fix.md                # 问题与修复记录
-  projects/
-    companion-open/         # 自研 companion 扩展（当前 0.3.6）
-  references/
-    paid-target/            # 付费对照样本 0.4.1（解包目录 + VSIX）
-    copilot/                # Copilot 远程/侧车类参考克隆（4）
-    claude/                 # Claude 远程类参考克隆（5）
-    terminal/               # 终端远程类参考克隆（2）
-    agents/                 # Agent 相关参考克隆（1）
-  analysis/
-    copilot-remote-0.4.1/   # 对 paid-target 的静态分析报告与伪代码
-  work/
-    copilot-remote-phone-ui/# 手机 UI / 协议 case 工作区
+Copilot Lazy Ass Companion turns your phone into a remote control + live monitor for Copilot Chat in VS Code:
+
+- **Live mirror** — assistant answers stream to your phone as Copilot generates them: markdown, thinking steps, tool-call cards, everything.
+- **Send from phone** — type a prompt on the phone, it lands in the real Copilot Chat composer and runs like you typed it.
+- **Approve tool calls** — Copilot's permission cards (terminal commands, file writes) can be confirmed from the phone.
+- **Queue & stop** — fire messages while a turn is running; they queue and auto-send FIFO. Double-tap Stop aborts the in-flight turn.
+- **Session drawer** — browse all chat sessions (grouped by workspace, titled, searchable), replay full history, switch context.
+- **Model switcher** — change the active model (Claude / GPT / third-party providers) from the phone.
+- **Push notifications** — get pinged on the phone when Copilot finishes a turn.
+
+## How it works (architecture)
+
+```
+Copilot Chat ──(writes)──> chatSessions/*.jsonl + transcripts + session-store.db
+                                   │
+                          extension tails 3 sources
+                                   │
+                       TurnArbiter (dedup/order/stamp)
+                                   │
+                   local bridge  :3010  (HTTP + WebSocket)
+                                   │
+                    phone / any browser  →  PWA
 ```
 
-| 路径 | 说明 |
-|------|------|
-| `projects/` | **我们自己构建的项目** |
-| `references/` | **克隆的第三方参考** + 付费对照样本 |
-| `analysis/` | 对 paid-target 的长期静态逆向知识库 |
-| `work/` | 带 scope/timeline 的 RE case 工单 |
-| `bug_fix.md` | companion 缺陷与修复时间线 |
+The extension watches the three async sources Copilot writes to disk, arbitrates them into one ordered event stream, and relays it to a PWA client. Phone-originated messages are injected back into the chat via VS Code workbench chat commands. Everything runs locally — no third-party server sees your data.
 
----
+## Install (from GitHub Release)
 
-## 自研：`projects/companion-open`
+1. Download `copilot-sidecar-companion-*.vsix` from [**Releases**](https://github.com/cmulittlechild/Copilot-Lazy-Ass-Companion/releases/latest).
+2. In VS Code: `Cmd/Ctrl+Shift+P` → **Extensions: Install from VSIX…** → pick the file — or CLI: `code --install-extension copilot-sidecar-companion-1.0.7.vsix`.
+3. **Developer: Reload Window**. Status bar shows `Sidecar :3010`; the sidebar gets a **Copilot Lazy Ass → QR / 连接** panel.
 
-| 项 | 值 |
-|----|----|
-| 扩展名 | Copilot Sidecar Companion |
-| package | `copilot-sidecar-companion` |
-| 当前版本 | **0.3.6** |
-| 原则 | **不替换** `GitHub.copilot-chat`；只镜像 + 回注；无 license/激活 |
+**Requirements**: VS Code 1.93+ (1.99+ recommended — its Node ≥22.5 enables the faster SQLite session index), **GitHub Copilot Chat** installed & signed in. Works on macOS and Windows.
 
-### 能力摘要
+## 快速上手
 
-- 实时 tail 活跃 Copilot Chat 的 `chatSessions/*.jsonl`（默认 live-only @ EOF）
-- 本机 HTTP + WebSocket 提供手机 PWA
-- 手机 prompt → `workbench.action.chat.open({ query })` 注回
-- 侧栏二维码；可选 cloudflared quick tunnel（默认关）
-- 可选 auth token、Web Push（VAPID）
+1. 扩展装好后桥接自动启动（状态栏 `Sidecar :3010`）。
+2. 命令面板跑 **Copilot Lazy Ass: Show QR Panel**，或点侧栏 QR / 连接。
+3. 手机扫码（同一 Wi-Fi）打开 PWA，可加主屏当 App 用。
+4. 手机上正常聊天即可——发送排队、停止（双击）、切会话、换模型、批工具卡都在页面里。
 
-### 安装
+如果手机连不上：把 `copilotSidecar.host` 设为 `0.0.0.0`，并确认手机和电脑同一局域网、防火墙放行该端口。要在外面用就开 **Start Tunnel**（Cloudflare 快速隧道，自动带一次性 token 到二维码里）。
 
-```bash
-cd projects/companion-open
+## Commands
 
-code --install-extension ./copilot-sidecar-companion-0.3.6.vsix --force
-# macOS 若无 code CLI：
-# "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code" \
-#   --install-extension ./copilot-sidecar-companion-0.3.6.vsix --force
-```
+| Command | 作用 |
+|---------|------|
+| `Copilot Lazy Ass: Start Bridge` / `Stop Bridge` | 启停本地桥 |
+| `Copilot Lazy Ass: Show QR Panel` | 打开二维码连接面板 |
+| `Copilot Lazy Ass: Show Status` | 诊断状态（端口/索引/日志） |
+| `Copilot Lazy Ass: Copy PWA URL` / `Copy Auth Token` | 复制连接地址 / 令牌 |
+| `Copilot Lazy Ass: Start Tunnel` / `Stop Tunnel` / `Restart Tunnel` | 公网隧道开关 |
 
-然后 **Reload Window** → 侧栏 **Copilot Sidecar → QR / 连接**。
+## Settings (`copilotSidecar.*`)
 
-### 开发
+| Key | Default | 说明 |
+|-----|---------|------|
+| `port` | `3010` | 桥接端口（被占自动 +20 探测） |
+| `host` | `127.0.0.1` | 绑定地址；局域网用 `0.0.0.0` |
+| `autoStart` | `true` | 启动 VS Code 即开桥 |
+| `authToken` | `""` | 共享令牌；开 LAN/隧道务必设置 |
+| `defaultMode` | `agent` | 手机消息注入的 chat mode |
+| `injectSessionOpen` | `editor` | 注入时目标会话打开方式 |
+| `pollMs` | `50` | JSONL tail 轮询间隔 |
+| `sessionRescanMs` | `2000` | 最新会话文件重扫周期 |
+| `liveOnly` | `true` | `false` = 连接即回放全历史 |
+| `preferTranscript` | `true` | 以 realtime transcripts 为主源 |
+| `enableTunnel` | `false` | 桥启动即自动开隧道 |
+| `downloadCloudflared` | `true` | 缺 cloudflared 时自动下载到 `~/.copilot-sidecar-companion/` |
+| `tunnelTimeoutMs` | `35000` | 等 trycloudflare URL 的超时 |
 
-```bash
-cd projects/companion-open
-npm install
-npm run compile
-npm run test:e2e
-npm run package
-```
+## Security & privacy
 
-常用命令：`Start Bridge` / `Stop Bridge` / `Show QR Panel` / `Start Tunnel` / `Copy Auth Token`。
+- 默认只绑 `127.0.0.1`，数据不出本机；`0.0.0.0` / 隧道 = 暴露到局域网/公网，**务必设 `authToken`**（隧道会自动发一次性 token 嵌进二维码）。
+- 手机端可执行终端命令（走 Copilot 审批流）——token 当密码对待。
+- 无遥测、无第三方服务器；会话内容只在本机 ⇄ 你的浏览器之间流动。隧道模式下 TLS 由 Cloudflare 边缘到手机这一段提供。
 
-详细说明见 [`projects/companion-open/README.md`](projects/companion-open/README.md)。
+## Troubleshooting
 
----
+- **手机连不上** → `host=0.0.0.0`、同一 Wi-Fi、防火墙放端口。
+- **PWA 装上后行为像旧版** → 硬刷一次（`Cmd/Ctrl+Shift+R`）；1.0.x 起带版本戳，正常会自动更新。
+- **注入落错会话** → `injectSessionOpen: "editor"` + 命令面板 **Show Status** 看目标。
+- **没内容/延迟大** → remote workspace 无 transcripts 目录，自动降级到 chatSessions（最多 ~60s 滞后）。
+- **日志** → **Show Status** + VS Code 开发者控制台。
 
-## 参考：`references/`
+## Repo layout
 
-> **声明：** 下列均为第三方代码或样本，**仅供研究**。  
-> 禁止用于破解授权、绕过付费、再分发闭源二进制或未授权商业用途。  
-> 使用前请自行阅读各项目 LICENSE / 服务条款。
+- `projects/companion-open/` — **发布物**：扩展源码（`src/` TypeScript，`media/pwa/` PWA 前端，`dist/` 编译产物）
+- `references/` `analysis/` `work/` `bug_fix.md` `testplan_r*_*.md` — 研究资料与双平台实测记录（非发布物）
 
-### paid-target
+Dev: `cd projects/companion-open && npm install && npm run compile && npm run package`（产出 vsix）。
 
-| 条目 | 说明 |
-|------|------|
-| `atulhritik.copilot-remote-0.4.1/` | 已解包的 0.4.1 扩展目录 |
-| `atulhritik.copilot-remote-0.4.1.vsix` | 对应 VSIX 原包 |
+## Disclaimer / License
 
-### copilot（4）
-
-| 目录 | 说明 |
-|------|------|
-| `copilot-remote` | himenekocn — VS Code + Android 远程 Copilot |
-| `copilot-remote-control` | Discord bot + relay 远程控 Copilot |
-| `vscode-copilot-chat-sidecar` | Davidobot — Chat sidecar |
-| `vscode-github-copilot-controller` | Yuxi-Labs — 外部 API 控制 Copilot |
-
-### claude（5）
-
-| 目录 | 说明 |
-|------|------|
-| `247-claude-code-remote` | 浏览器/手机远程 Claude Code |
-| `ClaudeRelay-Win` | Windows 托盘 + 手机 PWA 中继 |
-| `claude-remote` | 手机加密 Web UI 远程 Claude |
-| `claude-remote-vscode-edition` | VS Code 形态 Claude 远程 |
-| `remote-claude-code` | ttyd + 手机聊天 PWA |
-
-### terminal（2） / agents（1）
-
-| 目录 | 说明 |
-|------|------|
-| `cerberus-term` | 终端复用 / 远程会话 |
-| `termote` | 手机远程控 CLI agent |
-| `paseo` | 多 agent 统一控制面（含 Copilot） |
-
----
-
-## 分析与工作产物
-
-### `analysis/copilot-remote-0.4.1/`
-
-对 paid-target 的静态逆向：
-
-- `REPORT.md` / `REPORT_ITER2.md` / `REPORT_ITER3.md`
-- `pseudo/` 关键代码片段
-- `jsonl/` / `sim/` / `notes/` / `vsix_extract/`
-
-支撑 companion 的 JSONL 投影、WS 协议、PWA 设计；**不是**授权绕过说明。
-
-### `work/copilot-remote-phone-ui/`
-
-手机显示链路 case：
-
-- `scope.md` / `timeline.md`
-- `findings/PHONE_DISPLAY.md` — 手机 UI 逆向结论
-- `evidence/` / `pseudo/`
-
----
-
-## 快速开始（仅 companion）
-
-```bash
-cd /Users/xin/Desktop/sidecar_remote/projects/companion-open
-code --install-extension ./copilot-sidecar-companion-0.3.6.vsix --force
-```
-
-1. VS Code：**Reload Window**
-2. **Start Bridge**（或依赖 autoStart）
-3. 手机打开 `http://127.0.0.1:3010/?token=…`（同网）或 **Start Tunnel** 后扫码
-4. 用完隧道请 **Stop Tunnel**
-
----
-
-## 重要说明
-
-1. 自研交付物只有 `projects/companion-open/`；`references/` / `analysis/` / `work/` 不是发布物。
-2. companion 依赖本机已有 Copilot Chat；它是伴生桥，不是独立 Copilot 客户端。
-3. 公网隧道会暴露本地桥：务必使用 token，用完即停。
-4. 缺陷与版本修复见 [`bug_fix.md`](bug_fix.md)。
-
----
-
-## 路径速查
-
-| 需求 | 路径 |
-|------|------|
-| 安装/开发 companion | `projects/companion-open/` |
-| companion 详细 README | `projects/companion-open/README.md` |
-| 对照样本 | `references/paid-target/` |
-| 0.4.1 分析报告 | `analysis/copilot-remote-0.4.1/` |
-| 手机 UI 发现 | `work/copilot-remote-phone-ui/findings/PHONE_DISPLAY.md` |
-| 缺陷记录 | `bug_fix.md` |
+Unofficial community tool — **not affiliated with GitHub or Microsoft**. Reads Copilot Chat's local session files on your own machine; use at your own risk within the GitHub Copilot ToS and your org's policies. [MIT](LICENSE).
