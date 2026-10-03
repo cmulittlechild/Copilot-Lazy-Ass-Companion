@@ -1,0 +1,212 @@
+{
+  "name": "copilot-sidecar-companion",
+  "displayName": "%displayName%",
+  "description": "%description%",
+  "version": "1.0.0",
+  "publisher": "local-dev",
+  "license": "MIT",
+  "icon": "icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cmulittlechild/Copilot-Lazy-Ass-Companion"
+  },
+  "engines": {
+    "vscode": "^1.93.0"
+  },
+  "categories": [
+    "AI",
+    "Chat",
+    "Other"
+  ],
+  "keywords": [
+    "copilot",
+    "github copilot",
+    "chat",
+    "remote",
+    "mobile",
+    "phone",
+    "pwa",
+    "websocket",
+    "companion",
+    "sidecar"
+  ],
+  "galleryBanner": {
+    "color": "#1e1e1e",
+    "theme": "dark"
+  },
+  "extensionKind": [
+    "ui"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "copilotSidecar",
+          "title": "%viewContainer%",
+          "icon": "media/pwa/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "copilotSidecar": [
+        {
+          "type": "webview",
+          "id": "copilotSidecar.qrPanel",
+          "name": "%view.qr%"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "copilotSidecar.start",
+        "title": "%cmd.start%"
+      },
+      {
+        "command": "copilotSidecar.stop",
+        "title": "%cmd.stop%"
+      },
+      {
+        "command": "copilotSidecar.showStatus",
+        "title": "%cmd.showStatus%"
+      },
+      {
+        "command": "copilotSidecar.copyWsUrl",
+        "title": "%cmd.copyWsUrl%"
+      },
+      {
+        "command": "copilotSidecar.showQr",
+        "title": "%cmd.showQr%"
+      },
+      {
+        "command": "copilotSidecar.startTunnel",
+        "title": "%cmd.startTunnel%"
+      },
+      {
+        "command": "copilotSidecar.stopTunnel",
+        "title": "%cmd.stopTunnel%"
+      },
+      {
+        "command": "copilotSidecar.restartTunnel",
+        "title": "%cmd.restartTunnel%"
+      },
+      {
+        "command": "copilotSidecar.copyToken",
+        "title": "%cmd.copyToken%"
+      }
+    ],
+    "configuration": {
+      "title": "%configTitle%",
+      "properties": {
+        "copilotSidecar.port": {
+          "type": "number",
+          "default": 3010,
+          "description": "%cfg.port%"
+        },
+        "copilotSidecar.host": {
+          "type": "string",
+          "default": "127.0.0.1",
+          "description": "%cfg.host%"
+        },
+        "copilotSidecar.autoStart": {
+          "type": "boolean",
+          "default": true,
+          "description": "%cfg.autoStart%"
+        },
+        "copilotSidecar.authToken": {
+          "type": "string",
+          "default": "",
+          "description": "%cfg.authToken%"
+        },
+        "copilotSidecar.defaultMode": {
+          "type": "string",
+          "enum": [
+            "agent",
+            "ask",
+            "edit"
+          ],
+          "default": "agent",
+          "description": "%cfg.defaultMode%"
+        },
+        "copilotSidecar.injectSessionOpen": {
+          "type": "string",
+          "enum": [
+            "editor",
+            "sidebar",
+            "focused-only"
+          ],
+          "default": "editor",
+          "description": "%cfg.injectSessionOpen%"
+        },
+        "copilotSidecar.pollMs": {
+          "type": "number",
+          "default": 50,
+          "minimum": 8,
+          "description": "%cfg.pollMs%"
+        },
+        "copilotSidecar.sessionRescanMs": {
+          "type": "number",
+          "default": 2000,
+          "description": "%cfg.sessionRescanMs%"
+        },
+        "copilotSidecar.liveOnly": {
+          "type": "boolean",
+          "default": true,
+          "description": "%cfg.liveOnly%"
+        },
+        "copilotSidecar.preferTranscript": {
+          "type": "boolean",
+          "default": true,
+          "description": "%cfg.preferTranscript%"
+        },
+        "copilotSidecar.enableTunnel": {
+          "type": "boolean",
+          "default": false,
+          "description": "%cfg.enableTunnel%"
+        },
+        "copilotSidecar.downloadCloudflared": {
+          "type": "boolean",
+          "default": true,
+          "description": "%cfg.downloadCloudflared%"
+        },
+        "copilotSidecar.tunnelTimeoutMs": {
+          "type": "number",
+          "default": 35000,
+          "minimum": 5000,
+          "description": "%cfg.tunnelTimeoutMs%"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p .",
+    "watch": "tsc -w -p .",
+    "test:e2e": "npm run compile && node scripts/e2e_local.mjs",
+    "test:e2e:fast": "npm run compile && SKIP_TUNNEL_SMOKE=1 node scripts/e2e_local.mjs",
+    "test:tunnel": "npm run compile && node scripts/e2e_tunnel_smoke.mjs",
+    "test:unit": "npm run compile && node scripts/test_chatcontrol.mjs && node scripts/test_workspaceindex.mjs && node scripts/test_portscan.mjs && node scripts/test_sessionperf.mjs && node scripts/test_dispatch_isolated.mjs && node scripts/test_pin.mjs && node scripts/test_sessionselect.mjs && node scripts/test_bighistory.mjs && node scripts/test_gapfill_pending.mjs && node scripts/test_transcript_order.mjs",
+    "test": "npm run test:unit && SKIP_TUNNEL_SMOKE=1 node scripts/e2e_local.mjs",
+    "probe": "node scripts/probe_live.mjs",
+    "package": "npm run compile && npx --yes @vscode/vsce package",
+    "test:vscode": "npm run compile && tsc -p tsconfig.test.json && node scripts/run_vscode_tests.mjs"
+  },
+  "dependencies": {
+    "qrcode": "^1.5.4",
+    "web-push": "^3.6.7",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^20.11.0",
+    "@types/qrcode": "^1.5.5",
+    "@types/vscode": "^1.93.0",
+    "@types/web-push": "^3.6.4",
+    "@types/ws": "^8.5.10",
+    "@vscode/test-electron": "^3.1.0",
+    "mocha": "^12.0.2",
+    "typescript": "^5.3.3"
+  }
+}

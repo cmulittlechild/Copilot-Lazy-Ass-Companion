@@ -1,0 +1,740 @@
+"use strict";
+/**
+ * Copilot Chat session JSONL projector.
+ * Handles modern Copilot which often rewrites kind=0 full snapshots,
+ * plus kind=1 finalize markers and kind=2 response mutations.
+ */
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.JsonlProjector = void 0;
+exports.textOfUserReq = textOfUserReq;
+exports.isInternalMonologue = isInternalMonologue;
+/** Chrome we never surface as chat text */
+const IGNORE = new Set([
+    // never surface these chrome kinds to phone
+    'thinking',
+    'progressTaskSerialized',
+    'progressTask',
+    'progressMessage',
+    'mcpServersStarting',
+    'undoStop',
+    'prepareToolInvocation',
+    'textEditGroup',
+    'codeblockUri',
+    'codeCitation',
+]);
+const DONE_DEBOUNCE_MS = 450;
+class JsonlProjector {
+    seenRequestIds = new Set();
+    respParts = new Map();
+    lastEmittedText = new Map();
+    activeStreams = new Map();
+    lastToolKey = new Map();
+    lastProgressKey = new Map();
+    lastThinkingKey = new Map();
+    /** toolCallId → true：0.67 的待批形态是 toolInvocationSerialized.isConfirmed={type:0}，
+        不是独立 confirmation kind。type 转非 0（批准/拒绝）时发一次 RESOLVED。 */
+    /** callId → 该确认所属请求下标：请求整体完成（result/elapsedMs/isCanceled
+     *  或嵌带的完成标记）时按此补发 AGENT_CONFIRM_RESOLVED 收尸——新版 Copilot
+     *  对「confirmation 存在但 isConfirmed 永远缺席」的已决调用不落解决态，
+     *  只靠轮终判定才不会让手机端挂一张永远不会被批准的卡。 */
+    pendingToolConfirms = new Map();
+    /** 会话级 hasPendingEdits 标志（kind:1 键）：追踪会话里「编辑已暂存进
+        Keep/Undo 审阅条」的状态。它与「轮被批准门挂起」只有部分相关——
+        待批准门在编辑暂存后仍未决的窗口（暂存+未批准双挂）此标志为 true；
+        但门先于暂存（response 仅 mcpServersStarting）时它为 false，不可见。
+        故只在其翻转且有在途轮时才投影待批准卡：轮已答后审阅条滞留属纯审阅态，
+        发卡会让客户端把空转当 parked 而扣住队列。 */
+    lastPendingEdits = false;
+    /** 最新在途（未见收尾标记）请求下标；-1 = 无在途轮。 */
+    openReqIdx = -1;
+    /** 已收尸的 callId：pending 卡在文件里永远停在「待批准」形态（phone_stop 的轮
+     *  上游不落收尾件），被取代/收尸后若同一 part 再次投影会重复发卡且错序挂到
+     *  更晚轮答案之下（B3 冷回放幽灵卡）。判死后不再重发。 */
+    resolvedToolConfirms = new Set();
+    doneTimers = new Map();
+    doneSink;
+    /** 已投影过错误文本的请求（requestId），避免 kind0 重写/重复收尾重发 */
+    emittedRequestErrors = new Set();
+    /** last kind0 request count to detect growth */
+    lastKind0ReqCount = 0;
+    /**
+     * 已知的会话请求总数，用作 kind=2 append 时推导**真实**请求下标的基准。
+     *
+     * kind=2 的 `k=["requests"]` 变异每次只追加一条请求，载荷内部下标恒为 0。
+     * 若直接拿它当请求序号，所有轮次都会塌到 `requests/0/...`：
+     *   1) streamId 碰撞 → 手机端把多轮回复折叠进同一行；
+     *   2) 收尾标记（kind=1 的 result/elapsedMs）带的是真实下标，
+     *      与注册在 0 上的流对不上 → 流永不收尾（AGENT_MESSAGE / STREAM_END 缺失）。
+     */
+    reqCount = 0;
+    setDoneSink(fn) {
+        this.doneSink = fn;
+    }
+    dispose() {
+        for (const t of this.doneTimers.values())
+            clearTimeout(t);
+        this.doneTimers.clear();
+    }
+    reset() {
+        this.seenRequestIds.clear();
+        this.respParts.clear();
+        this.lastEmittedText.clear();
+        this.activeStreams.clear();
+        this.lastToolKey.clear();
+        this.lastProgressKey.clear();
+        this.lastThinkingKey.clear();
+        this.pendingToolConfirms.clear();
+        this.resolvedToolConfirms.clear();
+        this.lastPendingEdits = false;
+        this.openReqIdx = -1;
+        for (const t of this.doneTimers.values())
+            clearTimeout(t);
+        this.doneTimers.clear();
+        this.lastKind0ReqCount = 0;
+        this.reqCount = 0;
+        this.emittedRequestErrors.clear();
+    }
+    projectLine(obj) {
+        if (!obj || typeof obj !== 'object')
+            return [];
+        const out = [];
+        // kind 0: full session snapshot (modern Copilot often rewrites whole file)
+        if (obj.kind === 0) {
+            out.push(...this.handleKind0Snapshot(obj.v));
+            return out;
+        }
+        const k = obj.k;
+        if (!Array.isArray(k) || k.length === 0)
+            return out;
+        // finalize markers (usually kind=1)
+        if (k.length === 3 &&
+            typeof k[1] === 'number' &&
+            (k[2] === 'elapsedMs' || k[2] === 'result' || k[2] === 'isCanceled')) {
+            const reqIndex = k[1];
+            if (reqIndex === this.openReqIdx)
+                this.openReqIdx = -1;
+            const endEvs = this.endActiveStreamsForRequest(reqIndex);
+            const confEvs = this.resolveConfirmsForRequest(reqIndex);
+            // kind=1 result 收尾标记的 obj.v 就是 result 对象（可含 errorDetails）
+            const errEvs = k[2] === 'result' ? this.errorEventsForRequest({ result: obj.v }, reqIndex) : [];
+            const doneEv = {
+                type: 'COPILOT_DONE',
+                requestIndex: reqIndex,
+                reason: k[2],
+                v: obj.v,
+            };
+            if (this.doneSink) {
+                out.push(...endEvs, ...confEvs, ...errEvs);
+                this.scheduleDone(reqIndex, doneEv);
+                return out;
+            }
+            out.push(...endEvs, ...confEvs, ...errEvs, doneEv);
+            return out;
+        }
+        // 会话级 hasPendingEdits（kind:1）：文件编辑批准挂起/解除的唯一信号——
+        // 待批准期间 response 部件零变化，不投影此事件客户端会把 parked 轮
+        // 当死轮收割（实测工作区外 create_file 挂起 ~75s 后 rr 被强释）。
+        if (k.length === 1 && k[0] === 'hasPendingEdits') {
+            out.push(...this.handlePendingEditsFlag(obj.v === true));
+            return out;
+        }
+        // structural mutations kind===2
+        if (obj.kind !== 2)
+            return out;
+        if (k.length === 1 && k[0] === 'requests') {
+            const v = obj.v;
+            if (!Array.isArray(v))
+                return out;
+            // 真实请求下标：优先用变异自带的 splice 位置 obj.i（权威），
+            // 缺失时回退到累计计数器。切勿使用载荷内部下标（恒为 0）。
+            const base = typeof obj.i === 'number' && obj.i >= 0 ? obj.i : this.reqCount;
+            for (let n = 0; n < v.length; n++) {
+                const gi = base + n;
+                // 更晚请求出现 ⇒ 此前所有挂起待批准卡已被取代（上游对被弃的待批准轮
+                // 不落任何收尾标记，孤儿轮全靠此路径收尸）。
+                out.push(...this.resolveConfirmsBefore(gi));
+                out.push(...this.handleUserRequest(v[n], gi));
+                // if request already has response parts in this mutation, project them
+                if (Array.isArray(v[n]?.response) && v[n].response.length) {
+                    out.push(...this.applyResponseMutation(`requests/${gi}/response`, gi, v[n].response, undefined));
+                }
+                // 新版 Copilot 把整个**已完成**请求一条 append 落盘（elapsedMs/result/
+                // modelState.completedAt 随请求对象同来），不再写独立的
+                // ["requests",N,"elapsedMs"] 收尾标记 → 必须就地补 COPILOT_DONE，
+                // 否则手机端 typing/停止按钮要等 transcript 兜底超时（~120s）才清。
+                const reason = requestDoneReason(v[n]);
+                if (reason) {
+                    if (gi === this.openReqIdx)
+                        this.openReqIdx = -1;
+                    out.push(...this.endActiveStreamsForRequest(gi));
+                    out.push(...this.resolveConfirmsForRequest(gi));
+                    out.push(...this.errorEventsForRequest(v[n], gi));
+                    const doneEv = { type: 'COPILOT_DONE', requestIndex: gi, reason };
+                    if (this.doneSink)
+                        this.scheduleDone(gi, doneEv);
+                    else
+                        out.push(doneEv);
+                }
+                else {
+                    this.openReqIdx = gi;
+                }
+            }
+            this.reqCount = Math.max(this.reqCount, base + v.length);
+            return out;
+        }
+        if (k.length === 3 && typeof k[1] === 'number' && k[2] === 'response') {
+            const pathKey = `requests/${k[1]}/response`;
+            out.push(...this.applyResponseMutation(pathKey, k[1], obj.v, obj.i));
+        }
+        return out;
+    }
+    /** hasPendingEdits 翻转 → 待批准编辑卡投影/收尸。callId 固定 'session-edits'
+        （会话级唯一信号），requestIndex 归最近请求（批准门挂在其上）。 */
+    handlePendingEditsFlag(pending) {
+        if (pending === this.lastPendingEdits)
+            return [];
+        this.lastPendingEdits = pending;
+        const callId = 'session-edits';
+        const ri = this.openReqIdx >= 0 ? this.openReqIdx : Math.max(0, this.reqCount - 1);
+        if (pending) {
+            // 无在途轮 = 轮已答后的审阅条滞留：纯审阅态不投卡（投了会让客户端
+            // parkedConfirmAlive 把空转当 parked 扣住队列）。lastPendingEdits 仍同步，
+            // 后续翻 false 因 pendingToolConfirms 无卡也不发空 RESOLVED。
+            if (this.openReqIdx < 0)
+                return [];
+            this.pendingToolConfirms.set(callId, ri);
+            return [
+                {
+                    type: 'AGENT_CONFIRM',
+                    title: '待批准: 修改文件',
+                    message: 'Copilot 请求批准文件修改（工作区外编辑需在 VS Code 端批准）',
+                    buttons: ['知道了（请在 VS Code 端批准）'],
+                    toolCallId: callId,
+                    requestIndex: ri,
+                },
+            ];
+        }
+        if (!this.pendingToolConfirms.has(callId))
+            return [];
+        this.pendingToolConfirms.delete(callId);
+        this.resolvedToolConfirms.add(callId);
+        return [
+            {
+                type: 'AGENT_CONFIRM_RESOLVED',
+                button: 'edits resolved',
+                toolCallId: callId,
+                requestIndex: ri,
+            },
+        ];
+    }
+    handleKind0Snapshot(v) {
+        if (!v || typeof v !== 'object')
+            return [];
+        const reqs = v.requests;
+        if (!Array.isArray(reqs))
+            return [];
+        const out = [];
+        // Only emit for newly appeared requests, and always refresh the latest request's response
+        // so live UI can catch up after a full rewrite.
+        const start = Math.max(0, reqs.length - 3); // last 3 requests max to avoid flood
+        for (let i = start; i < reqs.length; i++) {
+            const req = reqs[i];
+            out.push(...this.resolveConfirmsBefore(i));
+            out.push(...this.handleUserRequest(req, i));
+            const resp = req?.response;
+            if (Array.isArray(resp) && resp.length) {
+                out.push(...this.applyResponseMutation(`requests/${i}/response`, i, resp, undefined));
+            }
+            // if request looks finished, end streams + DONE（快照路径同因嵌带完成标记）
+            if (req?.response) {
+                const reason = requestDoneReason(req);
+                if (reason) {
+                    if (i === this.openReqIdx)
+                        this.openReqIdx = -1;
+                    out.push(...this.endActiveStreamsForRequest(i));
+                    out.push(...this.resolveConfirmsForRequest(i));
+                    out.push(...this.errorEventsForRequest(req, i));
+                    const doneEv = { type: 'COPILOT_DONE', requestIndex: i, reason };
+                    if (this.doneSink)
+                        this.scheduleDone(i, doneEv);
+                    else
+                        out.push(doneEv);
+                }
+                else if (i === reqs.length - 1) {
+                    // 最新一轮未见收尾 = 在途轮（待批准门挂着的轮亦属此形态）。
+                    this.openReqIdx = i;
+                }
+            }
+        }
+        // 快照里的会话级挂起标志：必须在请求循环之后判——openReqIdx 已反映
+        // 快照最新轮的在途态，冷连重放时待批准卡才有归属可挂。
+        if (typeof v.hasPendingEdits === 'boolean') {
+            out.push(...this.handlePendingEditsFlag(v.hasPendingEdits));
+        }
+        this.lastKind0ReqCount = reqs.length;
+        // 快照重写后同步计数器，使后续 kind=2 append 能接在正确下标上
+        this.reqCount = Math.max(this.reqCount, reqs.length);
+        return out;
+    }
+    scheduleDone(reqIndex, ev) {
+        const prev = this.doneTimers.get(reqIndex);
+        if (prev)
+            clearTimeout(prev);
+        const t = setTimeout(() => {
+            this.doneTimers.delete(reqIndex);
+            this.doneSink?.(ev);
+        }, DONE_DEBOUNCE_MS);
+        this.doneTimers.set(reqIndex, t);
+    }
+    handleUserRequest(t, reqIndex) {
+        const rid = t?.requestId ?? '';
+        if (!rid || this.seenRequestIds.has(rid))
+            return [];
+        this.seenRequestIds.add(rid);
+        const text = textOfUserReq(t);
+        if (!text)
+            return [];
+        return [
+            {
+                type: 'USER_MESSAGE',
+                text,
+                requestId: rid,
+                requestIndex: reqIndex,
+                timestamp: typeof t?.timestamp === 'number' ? t.timestamp : undefined,
+            },
+            { type: 'COPILOT_TYPING', requestId: rid, requestIndex: reqIndex },
+        ];
+    }
+    applyResponseMutation(pathKey, reqIndex, v, i) {
+        let cur = this.respParts.get(pathKey) ?? [];
+        if (typeof i !== 'number') {
+            cur = Array.isArray(v) ? v.slice() : [];
+        }
+        else {
+            if (!Array.isArray(cur))
+                cur = [];
+            const add = Array.isArray(v) ? v : [v];
+            cur.splice(i, 0, ...add);
+        }
+        this.respParts.set(pathKey, cur);
+        const blocks = renderBlocks(cur, this.pendingToolConfirms, reqIndex, this.resolvedToolConfirms);
+        const out = [];
+        let textBlockIdx = 0;
+        let stepIdx = 0;
+        let thinkIdx = 0;
+        for (let n = 0; n < blocks.length; n++) {
+            const b = blocks[n];
+            if (b.type === 'text') {
+                // stable stream id by text-slot index among text blocks only
+                out.push(...this.emitTextStream(`${pathKey}#text#${textBlockIdx}`, b.text, reqIndex));
+                textBlockIdx++;
+            }
+            else if (b.type === 'thinking') {
+                // 0.5.23：内部规划 → THINKING_STEP（不进 AGENT 正文流）
+                const thinkKey = `${pathKey}#think#${thinkIdx}`;
+                const t = String(b.text || '').trim();
+                if (t && this.lastThinkingKey.get(thinkKey) !== t) {
+                    this.lastThinkingKey.set(thinkKey, t);
+                    out.push({
+                        type: 'THINKING_STEP',
+                        text: t,
+                        requestIndex: reqIndex,
+                        stepId: thinkKey,
+                    });
+                }
+                thinkIdx++;
+                stepIdx++;
+            }
+            else if (b.type === 'tool') {
+                const toolKey = `${b.toolId ?? ''}|${b.text}|${b.isComplete ? 1 : 0}`;
+                const mapKey = `${pathKey}#tool#${b.toolId ?? n}`;
+                if (this.lastToolKey.get(mapKey) === toolKey)
+                    continue;
+                this.lastToolKey.set(mapKey, toolKey);
+                out.push({
+                    type: 'TOOL_CALL',
+                    text: b.text,
+                    toolId: b.toolId,
+                    isComplete: b.isComplete,
+                    input: b.input,
+                    isConfirmed: b.isConfirmed,
+                    requestIndex: reqIndex,
+                });
+                stepIdx++;
+            }
+            else if (b.type === 'confirm') {
+                out.push({
+                    type: 'AGENT_CONFIRM',
+                    title: b.title,
+                    message: b.message,
+                    buttons: b.buttons,
+                    toolCallId: b.toolCallId,
+                    requestIndex: reqIndex,
+                });
+            }
+            else if (b.type === 'confirmResolved') {
+                out.push({ type: 'AGENT_CONFIRM_RESOLVED', button: b.title, toolCallId: b.toolCallId, requestIndex: reqIndex });
+            }
+        }
+        return out;
+    }
+    /** 请求整体完成时补发该轮残留待批准卡的 RESOLVED——新版 Copilot 对
+     * 「confirmation 存在 + isConfirmed 缺席」的已决调用不落解决态，
+     * 轮终是唯一能观测的收尸信号（与 bridge 的 pendingConfirms 清理同语义）。 */
+    resolveConfirmsForRequest(reqIndex) {
+        const out = [];
+        for (const [callId, ri] of [...this.pendingToolConfirms.entries()]) {
+            if (ri !== reqIndex)
+                continue;
+            this.pendingToolConfirms.delete(callId);
+            this.resolvedToolConfirms.add(callId);
+            out.push({ type: 'AGENT_CONFIRM_RESOLVED', button: 'completed', toolCallId: callId, requestIndex: reqIndex });
+        }
+        return out;
+    }
+    /** 请求 gi 投影前，所有更早请求上挂的待批准卡一律判被取代——上游对被弃
+     * 待批准轮不落收尾件，孤儿轮的确认卡只能靠「更晚请求出现」收尸。 */
+    resolveConfirmsBefore(reqIndex) {
+        const out = [];
+        for (const [callId, ri] of [...this.pendingToolConfirms.entries()]) {
+            if (ri >= reqIndex)
+                continue;
+            this.pendingToolConfirms.delete(callId);
+            this.resolvedToolConfirms.add(callId);
+            out.push({ type: 'AGENT_CONFIRM_RESOLVED', button: 'superseded', toolCallId: callId, requestIndex: ri });
+        }
+        return out;
+    }
+    emitTextStream(streamId, text, reqIndex) {
+        const prev = this.lastEmittedText.get(streamId);
+        if (prev === text)
+            return [];
+        const out = [];
+        if (prev === undefined) {
+            out.push({ type: 'AGENT_STREAM_START', streamId, requestIndex: reqIndex });
+            out.push({ type: 'AGENT_STREAM_SET', streamId, text, requestIndex: reqIndex });
+            this.activeStreams.set(streamId, reqIndex);
+        }
+        else if (text.startsWith(prev)) {
+            const delta = text.slice(prev.length);
+            if (!delta)
+                return [];
+            out.push({ type: 'AGENT_STREAM_CHUNK', streamId, text: delta, requestIndex: reqIndex });
+            this.activeStreams.set(streamId, reqIndex);
+        }
+        else {
+            out.push({ type: 'AGENT_STREAM_SET', streamId, text, requestIndex: reqIndex });
+            this.activeStreams.set(streamId, reqIndex);
+        }
+        this.lastEmittedText.set(streamId, text);
+        return out;
+    }
+    /**
+     * 收尾**全部**残留的活跃流。
+     *
+     * 仅用于历史回放这类「读取静态完整文件」的场景：真实会话里并非每个请求
+     * 都写了 `result`/`elapsedMs` 收尾标记（实测某会话 6 轮只有 2 个标记，
+     * 且其中一个还早于对应 response 落盘），导致多数回复没有 AGENT_MESSAGE /
+     * AGENT_STREAM_END —— 手机端表现为光标常亮、没有复制按钮。
+     *
+     * 实时 tail 路径**不要**调用它，那里的流确实可能仍在进行中。
+     */
+    finalizeAllStreams() {
+        const out = [];
+        for (const [streamId, idx] of [...this.activeStreams.entries()]) {
+            const finalText = this.lastEmittedText.get(streamId);
+            if (typeof finalText === 'string' && finalText.length) {
+                out.push({ type: 'AGENT_MESSAGE', streamId, text: finalText, requestIndex: idx });
+            }
+            out.push({ type: 'AGENT_STREAM_END', streamId, requestIndex: idx });
+            this.activeStreams.delete(streamId);
+        }
+        return out;
+    }
+    /**
+     * 上游失败/取消的请求把错误文案投影成 AGENT_MESSAGE——桌面端会显示错误块，
+     * 若不投影，手机端只剩孤儿用户泡 + 死寂（实测 503/空响应均如此）。
+     */
+    errorEventsForRequest(req, reqIndex) {
+        const msg = req?.result?.errorDetails?.message ??
+            req?.result?.error?.message ??
+            req?.errorDetails?.message;
+        const text = typeof msg === 'string' ? msg.trim() : '';
+        if (!text)
+            return [];
+        // 以请求下标去重：kind0 快照 / kind2 追加 / kind1 收尾三条路径同一请求共用下标
+        const key = `r${reqIndex}`;
+        if (this.emittedRequestErrors.has(key))
+            return [];
+        this.emittedRequestErrors.add(key);
+        const rid = String(req?.requestId ?? `idx:${reqIndex}`);
+        return [
+            {
+                type: 'AGENT_MESSAGE',
+                streamId: `reqerr/${rid}`,
+                text: `⚠️ ${text}`,
+                requestIndex: reqIndex,
+            },
+        ];
+    }
+    endActiveStreamsForRequest(reqIndex) {
+        const out = [];
+        for (const [streamId, idx] of [...this.activeStreams.entries()]) {
+            if (idx !== reqIndex)
+                continue;
+            const finalText = this.lastEmittedText.get(streamId);
+            if (typeof finalText === 'string' && finalText.length) {
+                out.push({ type: 'AGENT_MESSAGE', streamId, text: finalText, requestIndex: reqIndex });
+            }
+            out.push({ type: 'AGENT_STREAM_END', streamId, requestIndex: reqIndex });
+            this.activeStreams.delete(streamId);
+        }
+        return out;
+    }
+}
+exports.JsonlProjector = JsonlProjector;
+/**
+ * 请求对象自带的完成标记。新版 Copilot（0.67+）把整轮请求以单条
+ * `k=["requests"]` append 落盘，完成态直接写在请求对象上
+ * （elapsedMs/result/modelState.completedAt/isCanceled），
+ * 不再有独立的 [N,"elapsedMs"] 行。
+ */
+function requestDoneReason(req) {
+    if (!req || typeof req !== 'object')
+        return undefined;
+    if (req.isCanceled === true || req.isCanceled === 1)
+        return 'isCanceled';
+    if (req.result != null)
+        return 'result';
+    if (req.elapsedMs != null)
+        return 'elapsedMs';
+    const ms = req.modelState;
+    if (ms && typeof ms === 'object' && ms.completedAt != null)
+        return 'modelState.completedAt';
+    return undefined;
+}
+function textOfUserReq(t) {
+    if (!t || typeof t !== 'object')
+        return '';
+    const msg = t.message;
+    if (msg && typeof msg === 'object') {
+        if (typeof msg.text === 'string')
+            return msg.text;
+        if (typeof msg.value === 'string')
+            return msg.value;
+        if (Array.isArray(msg.parts)) {
+            return msg.parts
+                .map((p) => (typeof p?.text === 'string' ? p.text : typeof p?.value === 'string' ? p.value : ''))
+                .filter(Boolean)
+                .join(' ');
+        }
+    }
+    for (const key of ['text', 'prompt', 'content', 'value']) {
+        if (typeof t[key] === 'string' && t[key])
+            return t[key];
+    }
+    return '';
+}
+function contentValue(c) {
+    if (c == null)
+        return '';
+    if (typeof c === 'string')
+        return c;
+    if (typeof c === 'object') {
+        if (typeof c.value === 'string')
+            return c.value;
+        if (typeof c.text === 'string')
+            return c.text;
+        if (typeof c.content === 'string')
+            return c.content;
+    }
+    return '';
+}
+/**
+ * 0.5.23：识别 chatSessions / transcript 里「模型内部规划」文案。
+ * 这类文本常以独立 {value} 段落写入（无 kind=thinking），桌面 UI 不当正文，
+ * 远程若当 AGENT_MESSAGE 会泄漏英文 monologue / 「用户只是…」自言自语。
+ */
+function isInternalMonologue(text) {
+    const t = String(text || '').trim();
+    if (!t || t.length < 12)
+        return false;
+    // 已是面向用户的 markdown 正文（标题/加粗列表）→ 不当 monologue
+    if (/\n#{1,3}\s/.test(t) || /\*\*[^*\n]{2,40}\*\*/.test(t)) {
+        // 仍可能是 monologue 开头夹带 **；仅当整体像规划句且较短时继续判断
+        if (t.length > 400)
+            return false;
+    }
+    // English planning / tool-prep monologue
+    // 0.5.27：识别 internal monologue，避免将正常回答如 "I will help..." / "Let me check..." 误判为 monologue
+    if (/^(The user|User)\s+(is asking|wants|asked|said|has|provided|requested|just)\b/i.test(t))
+        return true;
+    if (/^I (should|need to) (check|examine|inspect|verify|look into|see if)\b/i.test(t) && t.length < 300)
+        return true;
+    if (/^Let me (check|examine|inspect|verify|look into|see if) (the|if|whether|how|what|where)\b/i.test(t) && t.length < 300)
+        return true;
+    if (/\b(whether the contents are still useful|user is asking|user just said)\b/i.test(t) &&
+        t.length < 600) {
+        return true;
+    }
+    // 中文内部规划（DeepSeek / 部分模型会落进 value）
+    if (/^用户(只是|发了|问|在问|说|打了|发来|提出)/.test(t))
+        return true;
+    if (/这是一个简单的(对话|测试)?请求/.test(t))
+        return true;
+    if (/无需使用工具/.test(t) && t.length < 500)
+        return true;
+    if (/我应该(用中文|简短|简单|直接)/.test(t) && t.length < 600)
+        return true;
+    if (/不需要任何工具/.test(t) && t.length < 500)
+        return true;
+    return false;
+}
+function renderBlocks(parts, pendingToolConfirms, reqIndex, resolvedToolConfirms) {
+    const blocks = [];
+    let textAcc = '';
+    const flushText = () => {
+        if (!textAcc)
+            return;
+        // 防御：整段累计后仍像 monologue（极少见）
+        if (isInternalMonologue(textAcc) && textAcc.length < 1200) {
+            blocks.push({ type: 'thinking', text: textAcc.trim() });
+        }
+        else {
+            blocks.push({ type: 'text', text: textAcc });
+        }
+        textAcc = '';
+    };
+    let stepCount = 0;
+    for (const p of parts || []) {
+        if (!p || typeof p !== 'object')
+            continue;
+        const kind = p.kind ?? '';
+        if (IGNORE.has(kind))
+            continue;
+        // 文件引用节点：Copilot 把 `file.txt` 写成独立 inlineReference part，
+        // 桌面渲成反引号文件名。整体忽略会让答案丢内容（R14 剥壳变体根源）。
+        if (kind === 'inlineReference') {
+            const ref = p.inlineReference ?? p;
+            const fp = (ref && typeof ref === 'object' && ref.fsPath) ||
+                (ref && typeof ref === 'object' && ref.path) ||
+                (ref && typeof ref === 'object' && ref.name) ||
+                '';
+            const base = String(fp).split(/[\\/]/).pop() || '';
+            if (base)
+                textAcc += '`' + base + '`';
+            continue;
+        }
+        // thinking / progressTask* already in IGNORE (Remote parity)
+        if (kind === 'toolInvocationSerialized' || kind === 'toolInvocation') {
+            flushText();
+            const inv = p.invocationMessage ?? p.pastTenseMessage ?? {};
+            const name = typeof inv === 'string' ? inv : inv?.value ?? inv?.content ?? '';
+            stepCount++;
+            const callId = p.toolCallId ?? p.toolId ?? null;
+            const tsd = p.toolSpecificData ?? {};
+            const confType = p.isConfirmed && typeof p.isConfirmed === 'object' && typeof p.isConfirmed.type === 'number'
+                ? p.isConfirmed.type
+                : p.isConfirmed === true
+                    ? 1
+                    : p.isConfirmed === false
+                        ? 0
+                        : // 新版 Copilot（terminal 类工具）：待批准序列化为 toolSpecificData.confirmation
+                            // 存在且完全不带 isConfirmed 字段（批准/拒绝后才补 {type:1|0}）。
+                            // 把「confirmation 存在 + isConfirmed 缺席」视为 pending（0），
+                            // 否则该版本下待批准轮永远拿不到确认卡、被取代时也收不到 superseded DONE。
+                            tsd && typeof tsd === 'object' && tsd.confirmation
+                                ? 0
+                                : null;
+            blocks.push({
+                type: 'tool',
+                toolId: callId,
+                text: name || p.toolId || 'tool',
+                input: p.toolSpecificData ?? p.parameters ?? p.input ?? null,
+                isComplete: p.isComplete !== false && p.isComplete !== 0,
+                isConfirmed: confType != null ? confType !== 0 : p.isConfirmed,
+            });
+            // 0.67 待批：isConfirmed.type 0→非0 翻转即审批落地。首次见 0 发确认卡，
+            // 翻转时补 RESOLVED 让各端收掉卡片（手机按钮仅消卡，审批仍需桌面端）。
+            if (callId) {
+                const cmdLine = (tsd.commandLine && (tsd.commandLine.forDisplay || tsd.commandLine.original)) || '';
+                if (confType === 0 && pendingToolConfirms && !pendingToolConfirms.has(callId) && !resolvedToolConfirms?.has(callId)) {
+                    pendingToolConfirms.set(callId, reqIndex ?? -1);
+                    blocks.push({
+                        type: 'confirm',
+                        title: `待批准: ${name || p.toolId || 'tool'}`,
+                        message: String(cmdLine || name || '').slice(0, 300) || 'Copilot 正在等待批准',
+                        buttons: ['知道了（请在 VS Code 端批准）'],
+                        toolCallId: callId,
+                    });
+                }
+                else if (confType != null && confType !== 0 && pendingToolConfirms && pendingToolConfirms.has(callId)) {
+                    pendingToolConfirms.delete(callId);
+                    resolvedToolConfirms?.add(callId);
+                    blocks.push({ type: 'confirmResolved', title: name || p.toolId || 'tool', toolCallId: callId });
+                }
+            }
+            continue;
+        }
+        if (kind === 'confirmation' || kind === 'confirmationSerialized') {
+            flushText();
+            blocks.push({
+                type: 'confirm',
+                title: p.title || 'Confirmation',
+                message: contentValue(p.message) || contentValue(p) || '',
+                buttons: Array.isArray(p.buttons)
+                    ? p.buttons.map((b) => (typeof b === 'string' ? b : b?.label || b?.title || 'OK'))
+                    : ['Continue', 'Cancel'],
+            });
+            continue;
+        }
+        // textEditGroup = 文件编辑级批准（工作区外文件修改「Allow edits to
+        // sensitive files?」）——toolInvocationSerialized 本身的 isConfirmed 不受
+        // 它门控（实测 type:4 已决态），此部件的 done:false 才是挂起信号。不投影
+        // 时 parked 轮静默无任何事件，客户端 75s 死流看门狗把活轮收割、
+        // 排队消息绕过等待插队。done 翻 true（批准应用）补 RESOLVED 收卡；
+        // 被取代的孤儿轮仍靠 resolveConfirmsBefore/ForRequest 兜底。
+        if (kind === 'textEditGroup') {
+            flushText();
+            const fsPath = (p.uri && typeof p.uri === 'object' && (p.uri.fsPath || p.uri.external)) ||
+                (typeof p.uri === 'string' ? p.uri : '') ||
+                '';
+            const callId = fsPath ? `${fsPath}|r${reqIndex ?? -1}` : `editgroup-${reqIndex ?? -1}`;
+            const done = p.done === true || p.done === 1;
+            if (!done && pendingToolConfirms && !pendingToolConfirms.has(callId) && !resolvedToolConfirms?.has(callId)) {
+                pendingToolConfirms.set(callId, reqIndex ?? -1);
+                const base = fsPath.split(/[\\/]/).pop() || 'file';
+                blocks.push({
+                    type: 'confirm',
+                    title: `待批准: 修改文件 ${base}`,
+                    message: `Copilot 请求批准文件修改（${fsPath || '未知文件'}）`.slice(0, 300),
+                    buttons: ['知道了（请在 VS Code 端批准）'],
+                    toolCallId: callId,
+                });
+            }
+            else if (done && pendingToolConfirms && pendingToolConfirms.has(callId)) {
+                pendingToolConfirms.delete(callId);
+                resolvedToolConfirms?.add(callId);
+                blocks.push({ type: 'confirmResolved', title: 'file edit approved', toolCallId: callId });
+            }
+            continue;
+        }
+        // plain text parts: { value: "..." } or kind markdownContent
+        if (!kind || kind === 'markdownContent' || kind === 'plainText') {
+            const val = typeof p.value === 'string' ? p.value : contentValue(p);
+            if (!val)
+                continue;
+            // 0.5.23：独立 monologue 段 → thinking，不与后续用户可见正文拼接
+            if (isInternalMonologue(val)) {
+                flushText();
+                blocks.push({ type: 'thinking', text: val.trim() });
+                continue;
+            }
+            textAcc += val;
+            continue;
+        }
+    }
+    flushText();
+    return blocks;
+}
+//# sourceMappingURL=jsonl.js.map

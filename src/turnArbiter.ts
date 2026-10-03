@@ -1,0 +1,1269 @@
+/**
+ * 统一事件裁决器：三个数据源（chatSessions / transcripts / session-store.db）
+ * 写盘时机各不相同，同一轮次的内容会经多通道重复、乱序到达。此前客户端
+ * （PWA）要各自猜测归属/去重/定序，竞态层出不穷。
+ *
+ * 这里在广播出口做单一裁决点：
+ *  - 每条内容事件打规范归属：_sess（会话 basename）、_ut（所属用户文本）、
+ *    _seq（单调序）、reqIdx（可推导时）；
+ *  - 跨通道去重：同会话+同轮次+同内容前缀的事件在窗口内只放行第一条；
+ *  - DONE 仲裁：过期 DONE（早于最近 live USER）打 stale 标记；
+ *    注入回执 DONE（发送后 ~2s、无归属）打 ack 标记；停止类 DONE 打
+ *    closedUt 让客户端精确清待答条目。
+ * 客户端仍保留原有防线作兜底，但权威判断从此在服务端。
+ */
+
+const CONTENT_DEDUPE_MS = 120_000;
+const TOOL_DEDUPE_MS = 3_000;
+/** toolId 级长记忆：parked/重投的工具帧 5min 内只许向终态推进。 */
+const TOOL_REPROJ_MS = 300_000;
+const STALE_DONE_SKEW_MS = 2_000;
+const INJECT_ACK_WINDOW_MS = 8_000;
+/** AGENT_MESSAGE 先行判答后，本轮自己的收尾 DONE 仍须放行（客户端拿它
+    释放 requestRunning/出队排队消息）——只杀「轮已答很久/从未注册」的死件。 */
+const DONE_LATE_CLOSE_MS = 45_000;
+/** 已答轮收尾 >45s 后仍到达的 MSG/END/THINKING 帧 = transcript 懒写的
+    重投影（实测被停轮 ~3min 后 transcript 冲出 stray END+MSG，fresh
+    t-sid 不在 endedStreams 册上）——渲出来必是重复/游离泡。真答帧
+    迟到的轮（DONE 先行、sawStream/gotAgent 皆假）不受此门。 */
+const LATE_REPROJ_MS = 45_000;
+const MAX_TRACKED_TURNS = 64;
+/** 「在途」活性窗：开启轮这么久没有任何流/确认活动就不再对外声明
+    inFlight——同文 USER 经慢通道在轮关闭后重投影会再开一个永不作答的
+    幽灵轮，按它声明会让客户端发送键卡死「停止」~75s（R116 S2）。 */
+const INFLIGHT_ALIVE_MS = 120_000;
+
+interface TrackedTurn {
+  utKey: string;
+  ts: number;
+  reqIdx: number | null;
+  answered: boolean;
+  /** 该轮答案全文（裁决过的 AGENT_MESSAGE 文本）——回放补投用 */
+  answerText?: string;
+  /** 判答时刻（AGENT_MESSAGE 或首个 DONE 到达时） */
+  answeredAt?: number;
+  /** 该轮是否已见过流活动（STREAM/THINKING/TOOL）。注入回执 DONE 的特征是
+      发送后 ~2s 即达且此刻该轮还没任何流——用它而不是「无 _ut」判 ack。 */
+  sawStream?: boolean;
+  /** 该轮主流已 END（收到过 AGENT_STREAM_END）。DONE 收尾判定用：流结束后
+      到达的 DONE 是真收尾件而非工具边界——R112H 纯流轮（无 AGENT_MESSAGE
+      判答）的收尾 DONE 曾被 interim 规则误吞，队列停滞 ~170s。 */
+  sawEnd?: boolean;
+  /** 开启轮 USER 原文：回放时若该 pending 轮还没落盘（kind:2 惰性写），
+      用它补投 USER_MESSAGE——否则切走→切回后在途轮泡+卡整条消失（R66 B1）。 */
+  text?: string;
+  /** 该轮挂过待批准确认卡（AGENT_CONFIRM）——parked 轮被新 USER 取代时上游
+      不再发 DONE，需合成收尾否则客户端待答条目/审批卡永久滞留（R96）。 */
+  hasConfirm?: boolean;
+  /** parked 卡的 confirmId（toolCallId/requestId 任一）——supersede 收尸时
+      配套 AGENT_CONFIRM_RESOLVED 精确销卡；缺省时客户端按会话兜底全销。 */
+  confirmId?: string;
+  /** 该轮已归属过一条 AGENT_MESSAGE：sessiondb 行按轮次序投影，「最老未获答轮」
+      FIFO 归属与内容改判据此排除已获答轮（R109：被停轮迟到的作文行）。 */
+  gotAgent?: boolean;
+  /** 最近一次观测到本轮任何活动（流/思考/工具/确认帧）的时刻——inFlight
+      活性判定用；创建即初始化。 */
+  lastAct?: number;
+  sess?: string;
+}
+
+function normText(t: unknown): string {
+  return String(t ?? "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 120);
+}
+
+function sessBaseOf(ev: any): string {
+  const f = String(ev?._sess || ev?.file || ev?.sessionFile || "");
+  if (!f) return "";
+  const base = f.split(/[\\/]/).pop() || "";
+  return base.replace(/\.jsonl$/i, "");
+}
+
+export class TurnArbiter {
+  private seq = 0;
+  private latestUserLiveTs = 0;
+  private latestReqIdx = -1;
+  private openTurns: TrackedTurn[] = [];
+  private emitted = new Map<string, number>();
+  /** 同文不同轮重投影识别：a3 指纹（sess|前缀80）→ 已投递的 _ut。*/
+  private emittedUt = new Map<string, string>();
+  /** toolId → {t, done}：跨轮工具重投影压制（session 域内）。 */
+  private emittedTools = new Map<string, { t: number; done: boolean }>();
+  /** sess|toolId → 归属轮 ut：START 时钉死，进度/完成帧钉回原轮（R66 B3）。 */
+  private toolOwnerUt = new Map<string, string>();
+  /** sess|streamId → 归属轮 ut：首帧钉死，之后的 _ut-less 帧一律钉回原轮——
+      回声开新轮后旧轮的在途流/思考帧不会再被盖成新轮的 ut（R48：A1 作文流
+      在 A2/A3 echo 开新轮后被盖成 M48A3，渲染到 A3 泡下）。 */
+  private streamOwnerUt = new Map<string, string>();
+  /** a2 指纹（sess|前缀80）→ {t, 归属轮, ut}：轮次实例级同文去重。 */
+  private emittedA2 = new Map<string, { t: number; turn: TrackedTurn | undefined; ut: string }>();
+  /** 已 END 的 streamId → 终结时刻。END 后迟到的 START/CHUNK 服务端丢弃——
+      否则客户端流卡已收尾又追加一遍（R64 双渲）且迟到帧会重新置 rr、
+      把队列挂到看门狗（~135s 悬挂）。位置型 sid（requests/N/…）每轮唯一，
+      60s 窗不会误伤下一轮。 */
+  private endedStreams = new Map<string, number>();
+  /** 最近 SESSION_SELECTED 的会话 basename：sess 缺失的轮次（只有手机发出的
+      USER 不带 _sess/file 戳）归到这个会话——否则 pendingUserEvents 会把
+      别会话的 pending 泡补投进任意会话的回放尾部（R96 跨会话泄漏）。 */
+  private boundSess = "";
+  /** 合成待投事件（superseded DONE 等）：accept 只能回一件，附属终态件由
+      桥端在广播主事件后 drain 补投。 */
+  private syntheticOut: any[] = [];
+  /** 最近一次 sessiondb 行内容改判：{原_ut(行 user_message), 改判后_ut, 时刻}。
+      行配对的 DONE 带同一 user_message 戳，随行改判（R109：K 行 DONE 不得
+      提前释放 L 的待答）。 */
+  private lastSdbRebind: { fromUt: string; toUt: string; at: number } | null = null;
+  /** 已投过的待批准确认卡 cid 键（无窗口）：回放副本不论迟到多久都丢——
+      live 卡已渲染，回放重投只会叠出第二张相同待批准卡（R109 P3）。 */
+  private emittedConfirms = new Set<string>();
+
+  /** 会话切换/绑定变更时调用：清本轮状态，避免跨会话误杀。 */
+  private turnMatchesSess(t: TrackedTurn, sessBase: string): boolean {
+    if (!sessBase) return true;
+    const ts = String((t as any).sess || this.boundSess);
+    return ts === sessBase;
+  }
+
+  /** PWA 显式选会话只走 unicast reply（不 broadcast），boundSess 始终
+      不更新——sess='' 的手机轮 turnMatchesSess 恒败，pending/近完成轮
+      补投静默全丢（R122W：停止后轮在懒写窗内切走切回，整泡消失）。
+      PHONE_SESSION_SELECT 调用此方法同步绑定。 */
+  noteSessionSelected(sessBase: string) {
+    if (!sessBase || sessBase === this.boundSess) return;
+    const prev = this.boundSess;
+    // 换绑前把仍无 sess 戳的轮冻结到旧绑定：手机轮在 boundSess 尚未
+    // 记录的窗口发出时 sess=''，不冻结则按换绑后的新 boundSess 追认，
+    // 跨会话补投进别会话回放尾部（幽灵轮跨会话泄漏）。prev='' 为首绑
+    // ——那些轮本就发生在该会话，按 boundSess 兜底照常归属。
+    if (prev) {
+      for (const t of this.openTurns) {
+        if (!(t as any).sess) (t as any).sess = prev;
+      }
+    }
+    this.boundSess = sessBase;
+  }
+
+  /** 当前 sess 的未答开启轮 USER 事件（全文）：供回放尾部补投未落盘的
+      pending 轮 USER（桌面发出的轮 PWA 端无 sentAwaitingReply 备份）。
+      幽灵轮（关闭后重投影再开、永不作答）按活性窗排除，不回放幽灵泡。 */
+  pendingUserEvents(sessBase: string): any[] {
+    const out: any[] = [];
+    const now = Date.now();
+    for (const t of this.openTurns) {
+      if (t.answered || !t.text) continue;
+      if (!this.turnAlive(t, now)) continue;
+      // 严格会话匹配：sess 缺失的轮（手机发出）视同属于绑定会话，
+      // 只在回放目标恰是绑定会话时才补投——不再漏进别会话 feed。
+      if (!this.turnMatchesSess(t, sessBase)) continue;
+      out.push({
+        type: "USER_MESSAGE",
+        text: t.text,
+        timestamp: t.ts,
+        _ut: t.utKey,
+        _sess: (t as any).sess || sessBase,
+        _seq: ++this.seq,
+        pendingTurn: true,
+      });
+    }
+    return out;
+  }
+
+  /** 近 withinMs 内完成的轮 → [USER, AGENT] 事件对：transcript 懒写盘让
+      刚完成的轮几十秒内不在文件回放里（R105 跟进缺口：冷连/刷新回放
+      整轮丢失或答案裸奔无用户泡）。回放构建按内容键去重，缺啥补啥。 */
+  recentCompletedEvents(sessBase: string, withinMs = 120_000): any[] {
+    const out: any[] = [];
+    const now = Date.now();
+    for (const t of this.openTurns) {
+      if (!t.answered || !t.text) continue;
+      if (!t.answeredAt || now - t.answeredAt > withinMs) continue;
+      if (!this.turnMatchesSess(t, sessBase)) continue;
+      // 无答复收尾的轮（停止/失败——answered 但无 answerText）：有可视内容的
+      // 轮（gotAgent/sawStream——流式先行答）不补占位；零内容的补孤儿占位，
+      // 否则懒写窗口内切会话/刷新后该轮整泡消失（R122W 实测：phone_stop 后
+      // ~15s 切走切回，回放无此行 → live 渲的 U+占位被冲掉）。
+      const noAnswer = !t.answerText;
+      if (noAnswer && (t.gotAgent || t.sawStream)) continue;
+      const sess = (t as any).sess || sessBase;
+      out.push({
+        type: "USER_MESSAGE",
+        text: t.text,
+        timestamp: t.ts,
+        _ut: t.utKey,
+        _sess: sess,
+        _seq: ++this.seq,
+        pendingTurn: false,
+      });
+      if (noAnswer) {
+        out.push({
+          type: "AGENT_MESSAGE",
+          streamId: `orphan/${t.reqIdx ?? t.utKey}`,
+          text: "*（该轮无回复——已停止或请求失败）*",
+          timestamp: t.answeredAt,
+          _ut: t.utKey,
+          _sess: sess,
+          _seq: ++this.seq,
+        });
+      } else {
+        out.push({
+          type: "AGENT_MESSAGE",
+          text: t.answerText,
+          timestamp: t.answeredAt,
+          _ut: t.utKey,
+          _sess: sess,
+          _seq: ++this.seq,
+        });
+      }
+    }
+    return out;
+  }
+
+  /** 开启轮是否「观测上仍活着」：待批准 parked 轮天然静默豁免；其余按
+      最近活动时间窗判（R116 S2：幽灵轮据此不再劫持 inFlight 声明）。 */
+  private turnAlive(t: TrackedTurn, now: number): boolean {
+    if (t.hasConfirm) return true;
+    return now - (t.lastAct ?? t.ts) < INFLIGHT_ALIVE_MS;
+  }
+
+  /** 该会话最新未答开启轮（在途轮）：回放据此声明 in-flight 态，让客户端
+      维持发送排队而不把在途轮当已完成（R107 BUG-1）。只声明活着的轮。 */
+  openTurnForSession(sessBase: string): { utKey: string; ts: number } | null {
+    const now = Date.now();
+    for (let i = this.openTurns.length - 1; i >= 0; i--) {
+      const t = this.openTurns[i];
+      if (t.answered) continue;
+      if (sessBase && (t as any).sess && (t as any).sess !== sessBase) continue;
+      if (!this.turnAlive(t, now)) continue;
+      return { utKey: t.utKey, ts: t.ts };
+    }
+    return null;
+  }
+
+  /** 取出并清空合成待投事件队列。 */
+  drainSynthetic(): any[] {
+    const out = this.syntheticOut;
+    this.syntheticOut = [];
+    return out;
+  }
+
+  resetForSession(sessBase?: string) {
+    // openTurns 跨切保留（轮次都带 sess 戳，查找点按 sessBase 过滤）：
+    // 否则「在途轮切走→切回」后 pendingUserEvents 拿不到该轮记录，
+    // 回放无法补投未落盘的 pending USER（R66 B1）。只修剪过老/已答轮。
+    const now0 = Date.now();
+    this.openTurns = this.openTurns.filter(
+      // 刚收尾的轮（含停止/无答复）保留 2min：切会话/刷新回放靠
+      // recentCompletedEvents 补投未落盘的 U+答/占位；此刻剪除该轮
+      // 整泡从 feed 消失（R122W 实测）。已答轮迟到帧反查也要在册。
+      (t) =>
+        (!t.answered || (t.answeredAt != null && now0 - t.answeredAt < 120_000)) &&
+        now0 - t.ts < 30 * 60_000,
+    );
+    this.latestUserLiveTs = 0;
+    this.latestReqIdx = -1;
+    // 位置型 streamId（requests/N/…）每个会话文件从 0 重新计数——换会话必须清
+    this.endedStreams.clear();
+    this.emittedUt.clear();
+    this.emittedTools.clear();
+    this.toolOwnerUt.clear();
+    this.streamOwnerUt.clear();
+    this.emittedA2.clear();
+    this.emittedConfirms.clear();
+    this.lastSdbRebind = null;
+    if (sessBase) this.pruneEmitted(0);
+  }
+
+  private pruneEmitted(now: number) {
+    for (const [k, ts] of this.emitted) {
+      if (now - ts > CONTENT_DEDUPE_MS) this.emitted.delete(k);
+    }
+  }
+
+  /** 内容指纹：类型族 + 会话 + 轮次 + 内容前缀。窗口内重复 → 跨通道重投，丢弃。 */
+  private contentKey(ev: any, sessBase: string, utKey: string): string | null {
+    switch (ev.type) {
+      case "USER_MESSAGE": {
+        const t = normText(ev.text);
+        if (!t) return null;
+        return `u|${sessBase}|${t}`;
+      }
+      case "AGENT_MESSAGE": {
+        const t = normText(ev.text);
+        if (!t) return null;
+        const sid = String(ev.streamId || "");
+        const req =
+          typeof ev.requestIndex === "number" ? `r${ev.requestIndex}` : "";
+        // streamId 相同 = 同一条流终帧在多个通道各发一遍；但 requests/N/...
+        // 这类位置型 sid 跨轮复用，必须再按文本前缀区分才不会误杀新答案。
+        return sid
+          ? `a|${sessBase}|${sid}|${t.slice(0, 40)}`
+          : `a|${sessBase}|${req}|${utKey}|${t.slice(0, 80)}`;
+      }
+      case "AGENT_CONFIRM": {
+        // 同一待批准确认卡在各通道各投一遍（transcript + sessiondb 重投影）——
+        // 客户端每张建一块卡 → feed 双卡。指纹：confirmId/toolCallId 优先，
+        // 否则标题+正文前缀（不同确认文案不同，不会误杀新卡）。
+        const cid = String(
+          ev.confirmId || ev.requestId || ev.toolCallId || ev.id || "",
+        );
+        if (cid) return `c|${sessBase}|${cid}`;
+        const body = normText(`${ev.title || ""} ${ev.message || ""}`);
+        if (!body) return null;
+        return `c|${sessBase}|${utKey}|${body.slice(0, 80)}`;
+      }
+      case "TOOL_CALL":
+      case "AGENT_TOOL_CALL":
+      case "AGENT_TOOL_RESULT":
+      case "TOOL_RESULT": {
+        // 同一工具调用在各通道各投一遍。指纹【不含】状态：两通道副本恰好
+        // running/done 双态不同，含状态会被当不同事件放行（R58 实测）。
+        // 真实 running→done 更新间隔常 >3s，配合 TOOL 短窗去重不伤进度更新。
+        const cid = String(ev.toolId || ev.callId || ev.toolCallId || ev.id || "");
+        if (cid) return `t|${sessBase}|${cid}`;
+        const name = normText(ev.text || ev.name || ev.tool);
+        if (!name) return null;
+        const args = normText(ev.args ?? ev.arguments ?? ev.input).slice(0, 60);
+        return `t|${sessBase}|n:${name}|${args}`;
+      }
+      default:
+        return null;
+    }
+  }
+
+  private newestOpenTurn(sessBase: string): TrackedTurn | undefined {
+    for (let i = this.openTurns.length - 1; i >= 0; i--) {
+      const t = this.openTurns[i];
+      if (t.answered) continue;
+      if (sessBase && (t as any).sess && (t as any).sess !== sessBase) continue;
+      return t;
+    }
+    return undefined;
+  }
+
+  /** 按 _ut 反查轮次（含已答轮）：取最近一个该用户文的轮实例。
+      同题重问的迟到重投影会归到最新同 ut 轮——与 a2 记录的归属轮一致即可判重。 */
+  private lastTurnWithUt(sessBase: string, utKey: string): TrackedTurn | undefined {
+    if (!utKey) return undefined;
+    for (let i = this.openTurns.length - 1; i >= 0; i--) {
+      const t = this.openTurns[i];
+      if (sessBase && (t as any).sess && (t as any).sess !== sessBase) continue;
+      if (t.utKey === utKey) return t;
+    }
+    return undefined;
+  }
+
+  /** _ut 归属的 ts 校正：同文重问使 ut 不唯一——「最新同 ut 轮」不一定是
+      帧所属轮，事件源 ts 早于某轮开启时刻 >2s 时它必不是归属（帧先于该
+      轮发生）。取事件发生时已开启的最晚同 ut 轮；evTs 缺失退回最新轮。
+      R119：上一轮答案的 transcript 帧迟到重投（ts 早于新轮开启）经
+      selfUt/owner 命中最新同 ut 轮，被盖到在途新轮下渲成串位泡。 */
+  private lastTurnWithUtAt(
+    sessBase: string,
+    utKey: string,
+    evTs: number | null,
+  ): TrackedTurn | undefined {
+    if (!utKey) return undefined;
+    if (evTs == null) return this.lastTurnWithUt(sessBase, utKey);
+    for (let i = this.openTurns.length - 1; i >= 0; i--) {
+      const t = this.openTurns[i];
+      if (sessBase && (t as any).sess && (t as any).sess !== sessBase) continue;
+      if (t.utKey !== utKey) continue;
+      if (t.ts <= evTs + 2_000) return t;
+    }
+    return undefined;
+  }
+
+  /** 归属判定用：事件自带源时间戳且早于最新未答轮的开启时刻 >2s → 上一轮
+      经慢通道迟到的重投影，不归本轮（否则盖错 _ut，客户端把旧答案当本轮
+      答案渲染出串位泡）。无 ts 的事件照常归属（只能靠到达序）。 */
+  private openTurnForEvent(sessBase: string, evTs: number | null): TrackedTurn | undefined {
+    const t = this.newestOpenTurn(sessBase);
+    if (!t) return undefined;
+    if (evTs != null && evTs < t.ts - 2_000) return undefined;
+    return t;
+  }
+
+  /** requestIndex 命中已跟踪轮（含已答/已收尾）→ 归该轮。迟到重投影不会
+      错挂到在途轮（D12 BUG-2：同文答案迟滞副本盖在途轮 _ut 逃逸出泡）。 */
+  private turnForRequestIndex(
+    sessBase: string,
+    reqIdx: unknown,
+  ): TrackedTurn | undefined {
+    if (typeof reqIdx !== "number" || reqIdx < 0) return undefined;
+    for (const t of this.openTurns) {
+      if (t.reqIdx === reqIdx && this.turnMatchesSess(t, sessBase)) return t;
+    }
+    return undefined;
+  }
+
+  /**
+   * sid 归属钉住：首帧把 streamId 钉到当时归属轮；之后同 sid 的帧（即使
+   * 到达时更新轮已开启）一律钉回原轮。返回 {t, ownerUt}——ownerUt 是
+   * 钉住的 ut（归属轮可能已被修剪只剩 ut 戳），用它盖戳优先于 t.utKey。
+   * selfUt：事件自带的 _ut 自证——比到达序最新轮更可信，钉 sid 时优先
+   * （R116 S1：停轮后上游续生成的流帧经 transcript 迟到，AGENT_MESSAGE
+   * 自证 ut=K 却把 sid 钉到了刚开启的 L，同 sid 后续 END 帧被盖错 L 戳）。
+   */
+  private turnForStreamEvent(
+    sessBase: string,
+    evTs: number | null,
+    sid: string,
+    selfUt = "",
+    reqIdx: unknown = undefined,
+  ): { t: TrackedTurn | undefined; ownerUt: string } {
+    const pinKey = sid && sessBase ? `${sessBase}|${sid}` : "";
+    const owner = pinKey ? this.streamOwnerUt.get(pinKey) || "" : "";
+    const owned = owner ? this.lastTurnWithUtAt(sessBase, owner, evTs) : undefined;
+    const selfOwned = !owner && selfUt ? this.lastTurnWithUtAt(sessBase, selfUt, evTs) : undefined;
+    // requestIndex 命中已跟踪轮（含已答）→ 归该轮：同文答案的迟滞重投影带
+    // 原 reqIdx 到达时新轮已开启，到达序会把它盖错 _ut 渲成串位泡（D12 BUG-2）。
+    // -1 等无效值由 turnForRequestIndex 挡。
+    const idxOwned =
+      !owner ? this.turnForRequestIndex(sessBase, reqIdx) : undefined;
+    // _ut 自证在同文连发下失效：多个轮共享同一 utKey，ts 解析会把第二轮的
+    // 帧归到已答的首轮而被 gotAgent/answered 门整条丢（R122：同文第 2 发
+    // 答案零广播）。reqIdx 命中轮是更强身份——它在时优先；ut 无歧义或
+    // reqIdx 落空时才退回 ts 归属。上游错标 reqIdx 的情形由后面的
+    // evTs<t.ts-2s 校正兜底（R119W）。
+    const ambiguousUt =
+      selfUt != null &&
+      selfUt !== "" &&
+      this.openTurns.filter(
+        (ot) => ot.utKey === selfUt && this.turnMatchesSess(ot, sessBase),
+      ).length > 1;
+    const selfAmbig =
+      selfOwned && (selfOwned.answered === true || ambiguousUt);
+    let t =
+      owned ??
+      (selfAmbig ? (idxOwned ?? selfOwned) : (selfOwned ?? idxOwned)) ??
+      this.openTurnForEvent(sessBase, evTs);
+    // reqIdx 自证可被上游错标（迟到的 transcript 帧被打上新轮的 requestIndex）：
+    // 解析到的开启轮竟比事件还新（evTs 早于其开启 >2s）——改归事件发生时
+    // 开启的同 ut 旧轮；没有则归还孤儿让调用点按迟到件丢（R119W 实测）。
+    if (t && !t.answered && evTs != null && evTs < t.ts - 2_000) {
+      t = this.lastTurnWithUtAt(sessBase, t.utKey, evTs);
+    }
+    if (pinKey && !owner) {
+      const pin =
+        owner || selfUt || (idxOwned && idxOwned === t ? idxOwned.utKey : "") || (t ? t.utKey : "");
+      if (pin) this.streamOwnerUt.set(pinKey, pin);
+    }
+    if (this.streamOwnerUt.size > 512) {
+      let n = 0;
+      for (const k of this.streamOwnerUt.keys()) {
+        this.streamOwnerUt.delete(k);
+        if (++n >= 64) break;
+      }
+    }
+    return { t, ownerUt: owner };
+  }
+
+  private static tsOf(ev: any): number | null {
+    const v = typeof ev?.timestamp === "number" ? ev.timestamp : typeof ev?.ts === "number" ? ev.ts : null;
+    return v;
+  }
+
+  private static wordTokens(s: string): Set<string> {
+    return new Set(
+      (s.toLowerCase().match(/[a-z0-9]{4,}/g) || []).slice(0, 400),
+    );
+  }
+
+  /** sessiondb 行内容自洽：行的 _ut 是 user_message 字段，上游可能把答案
+      归错行（被停在途生成的内容落到下一请求行）。答案 token 与各轮
+      user_text 比重叠分；最匹配的未获答轮显著领先 _ut 轮自身得分才改判——
+      阈值保守，不干扰「答案复述问题关键词」的正常行。 */
+  private rebindSessionDbTurn(
+    sessBase: string,
+    utKey: string,
+    answerText: string,
+  ): TrackedTurn | undefined {
+    if (!utKey || !answerText) return undefined;
+    const ans = TurnArbiter.wordTokens(answerText.slice(0, 1500));
+    if (!ans.size) return undefined;
+    const scoreOf = (t: TrackedTurn): number => {
+      if (!t.text) return 0;
+      let s = 0;
+      for (const w of TurnArbiter.wordTokens(t.text)) if (ans.has(w)) s++;
+      return s;
+    };
+    const utTurn = this.lastTurnWithUt(sessBase, utKey);
+    const utScore = utTurn ? scoreOf(utTurn) : 0;
+    let best: TrackedTurn | undefined;
+    let bestScore = 0;
+    for (const t of this.openTurns) {
+      if (t === utTurn || t.gotAgent || !t.text) continue;
+      if (!this.turnMatchesSess(t, sessBase)) continue;
+      const s = scoreOf(t);
+      if (s > bestScore) {
+        bestScore = s;
+        best = t;
+      }
+    }
+    if (best && bestScore >= 2 && bestScore >= utScore + 2) return best;
+    return undefined;
+  }
+
+  /** 本会话最老的「还没归属过 AGENT_MESSAGE」的轮：sessiondb 行按轮次序
+      投影，无 _ut 的行 FIFO 归它而不是最新开放轮（R109 停轮作文族）。 */
+  private oldestUnservedTurn(sessBase: string): TrackedTurn | undefined {
+    for (const t of this.openTurns) {
+      if (t.gotAgent) continue;
+      if (!this.turnMatchesSess(t, sessBase)) continue;
+      return t;
+    }
+    return undefined;
+  }
+
+  private markAnswered(sessBase: string, utKey?: string) {
+    for (const t of this.openTurns) {
+      if (t.answered) continue;
+      if (sessBase && (t as any).sess && (t as any).sess !== sessBase) continue;
+      if (utKey && t.utKey !== utKey) continue;
+      t.answered = true;
+      t.answeredAt = Date.now();
+      // utKey 命中也只关「最老一个」匹配轮：同文连发的各轮共享 utKey，
+      // 一条 DONE/MSG 全量标记会把尚未作答的后续同文轮错关（其真答再被
+      // gotAgent/altDup 吞）。FIFO 与答案到达序一致。
+      break;
+    }
+    while (this.openTurns.length > MAX_TRACKED_TURNS) this.openTurns.shift();
+  }
+
+  /**
+   * 裁决一条待广播事件。返回打戳后的事件；返回 null = 丢弃（跨通道重复）。
+   * 非内容类事件（MODEL_LIST/SYSTEM_MESSAGE 等）原样放行，仅打 _seq。
+   * markEmitted=false 表示这条不会立刻上公网（如离线排队）：去重判定照常，
+   * 但不消耗首发名额——首个真正广播出去的副本才有资格记名。
+   */
+  accept(ev: any, opts?: { markEmitted?: boolean }): any | null {
+    const markEmitted = opts?.markEmitted !== false;
+    if (!ev || typeof ev !== "object") return ev;
+    const now = Date.now();
+    this.pruneEmitted(now);
+
+    const sessBase = sessBaseOf(ev);
+    const type = String(ev.type || "");
+    if (type === "SESSION_SELECTED" && sessBase)
+      this.noteSessionSelected(sessBase);
+
+    // 轮次归属键：服务端下发的 _ut 优先；否则归到最新未答轮
+    let utKey = typeof ev._ut === "string" ? normText(ev._ut) : "";
+    let ownerTurn: TrackedTurn | undefined;
+
+    switch (type) {
+      case "USER_MESSAGE": {
+        const t = normText(ev.text);
+        // 迟到重投影去重：sessiondb 行 / kind:2 记录编辑重写会把「同一轮」的
+        // USER 再投一遍（实测 run_in_terminal 待批准轮在其 tool 重试时于
+        // +430s 重投 → 客户端同文用户泡二次渲染）。判定：live 事件与同会话
+        // 「未答开启轮」同文 = 该轮本身，不是新轮——整件丢弃（用户泡早已渲）。
+        // 真同文重问发生在前轮 answered 之后，不受影响；回放/历史事件放行。
+        // fromPhone 豁免：手机 USER 只在真实发送时产生，绝不可能是文件通道
+        // 的重投影——上轮未答时同文再发是合法新轮（排队/steering），判死会
+        // 让该轮永不注册：广播端 `accept||ev` 仍放行泡，但答案归到已答旧
+        // 轮被 altDup/gotAgent 吞（R121 BUG-1：同文第 3 发问答案零广播）。
+        // requestIndex 同理：与开启轮索引不同的 file 通道事件是不同请求。
+        if (t && !ev.replayed && !ev.history && ev.fromPhone !== true) {
+          const evReq =
+            typeof ev.requestIndex === "number" ? ev.requestIndex : null;
+          for (const ot of this.openTurns) {
+            if (ot.answered) continue;
+            if (sessBase && (ot as any).sess && (ot as any).sess !== sessBase) continue;
+            if (ot.utKey !== t) continue;
+            if (evReq != null && ot.reqIdx != null && evReq !== ot.reqIdx) continue;
+            // 手机轮 reqIdx=null：文件通道同文重投影判死时回填真实
+            // requestIndex——此后 requests/N 投影帧（thinking/答案）才能
+            // 按 idx 命中本轮，不再落到最新开启轮（思考卡错锚实测）。
+            if (evReq != null && evReq >= 0 && ot.reqIdx == null) ot.reqIdx = evReq;
+            return null;
+          }
+          // 已答轮的迟到重投影：上游懒写（实测 ~85-106s）把早已收尾的轮的
+          // USER 再投一遍——同文未答轮匹配落空后兜底：命中同文已答轮（reqIdx
+          // 相同，或本侧未记录索引/事件未带索引）即判死丢弃。不重开幽灵在途
+          // 轮——幽灵轮永无答案，inFlight 压住发送队列到 120s 收尸窗（实测
+          // 排队卡 83s）。真同文重问走新 requestIndex，不受影响。
+          for (const ot of this.openTurns) {
+            if (!ot.answered) continue;
+            if (sessBase && (ot as any).sess && (ot as any).sess !== sessBase) continue;
+            if (ot.utKey !== t) continue;
+            if (evReq != null && evReq >= 0 && ot.reqIdx != null && ot.reqIdx >= 0 && evReq !== ot.reqIdx) continue;
+            if (evReq != null && evReq >= 0 && ot.reqIdx == null) ot.reqIdx = evReq;
+            return null;
+          }
+        }
+        const reqIdx =
+          typeof ev.requestIndex === "number" ? ev.requestIndex : null;
+        if (reqIdx != null && reqIdx > this.latestReqIdx) this.latestReqIdx = reqIdx;
+        if (!ev.replayed && !ev.history) this.latestUserLiveTs = Math.max(this.latestUserLiveTs, now);
+        const turn: TrackedTurn = {
+          utKey: t,
+          ts: now,
+          reqIdx,
+          answered: false,
+          text: typeof ev.text === "string" ? ev.text : undefined,
+          lastAct: now,
+        };
+        // sess 缺失 = 手机发出的轮（watcher 事件恒带文件戳）——归到绑定会话，
+        // 否则 openTurns 里 sess='' 的轮跨会话泄漏（pendingUserEvents/R96）。
+        (turn as any).sess = sessBase || this.boundSess;
+        if (!sessBase && this.boundSess && !(ev as any)._sess) {
+          (ev as any)._sess = this.boundSess;
+        }
+        const turnSess = String((turn as any).sess || "");
+        this.openTurns.push(turn);
+        if (this.openTurns.length > MAX_TRACKED_TURNS) this.openTurns.shift();
+        // parked 待批准轮被取代：同会话新 live USER 到达时，挂确认卡的旧轮
+        // 上游永不发 DONE（工具调用被弃）——合成 superseded DONE 让客户端
+        // 释放该轮的待答条目+清审批卡（ack:true 不碰新轮的在途态）。
+        // steering 合轮不受影响：那类轮没挂确认卡。
+        if (!ev.replayed && !ev.history) {
+          for (const ot of this.openTurns) {
+            if (ot === turn || ot.answered || !ot.hasConfirm) continue;
+            if (String((ot as any).sess || "") !== turnSess) continue;
+            ot.answered = true;
+            ot.answeredAt = now;
+            this.syntheticOut.push({
+              type: "COPILOT_DONE",
+              reason: "superseded",
+              ack: true,
+              _ut: ot.utKey,
+              _sess: turnSess,
+              timestamp: now,
+            });
+            // 配套 RESOLVED 销审批卡：DONE 只放客户端待答状态，feed 里的待
+            // 批准卡无 RESOLVED 会永久挂「待批准」（jsonl 的 resolveConfirms
+            // Before 依赖新 USER 走文件投影径渲染才触发——经 sessiondb 镜像
+            // 先渲/排队出队注入的新 USER 会绕过该径，实测卡不被收）。
+            this.syntheticOut.push({
+              type: "AGENT_CONFIRM_RESOLVED",
+              button: "superseded",
+              toolCallId: ot.confirmId || null,
+              _ut: ot.utKey,
+              _sess: turnSess,
+              timestamp: now,
+            });
+          }
+        }
+        utKey = t;
+        break;
+      }
+      case "AGENT_STREAM_START":
+      case "AGENT_STREAM_SET":
+      case "AGENT_STREAM_CHUNK": {
+        const sid = String(ev.streamId || "");
+        const endedAt = sid ? this.endedStreams.get(sid) : undefined;
+        if (endedAt != null && now - endedAt < 60_000) return null;
+        // 整帧迟到的流事件（源 ts 老于 30s）：已结束轮次的慢通道重投影，
+        // 广播出去会重新武装 rr 并渲第二份答文——直接丢（R64/R33 同族）。
+        const evTs = TurnArbiter.tsOf(ev);
+        if (evTs != null && now - evTs > 30_000) return null;
+        const { t, ownerUt } = this.turnForStreamEvent(
+          sessBase,
+          evTs,
+          sid,
+          utKey,
+          ev.requestIndex,
+        );
+        if (!t) {
+          // 孤儿流帧：归属不到任何开启轮。CHUNK 在「全轮已答」后到达 =
+          // 已收尾轮的迟到重投影——客户端会为它新建永不收尾的 ghost 卡
+          // （requests/N 投影在答案落线 ~55s 后补帧实测）。ts 早于开启轮
+          // 的 START/SET 同理是旧轮迟到件。openTurns 全空不可判——放行，
+          // 以免吞掉 USER 尚未登记的桌面新轮。钉主(ownerUt)存在但无轮可
+          // 配同样按孤儿判——钉可能来自被上游错标 _ut 的首帧（实测
+          // transcript 帧带上一段旧文 _ut，sid 被钉到无该文的轮上）。
+          const staleVsOpen =
+            evTs != null && this.newestOpenTurn(sessBase) != null;
+          // noOpenButKnown 需按会话数轮（openTurns 现跨切保留——别会话的轮
+          // 不该把本会话的孤儿 CHUNK 判成迟到重投影）。
+          const anyTurnHere = this.openTurns.some(
+            (ot) =>
+              !sessBase || !(ot as any).sess || (ot as any).sess === sessBase,
+          );
+          const noOpenButKnown =
+            this.newestOpenTurn(sessBase) == null && anyTurnHere;
+          if (type === "AGENT_STREAM_CHUNK" ? staleVsOpen || noOpenButKnown : staleVsOpen)
+            return null;
+        }
+        // 归属到「已答轮」的流帧 = 已收尾轮的迟到重投影（同文重问时第二轮
+        // 开启后第一轮的 transcript 副本才到）——广播会渲串位泡（R119）。
+        // 但「被 DONE 提前判答、正文从未上过线」的轮（!gotAgent && !sawStream）
+        // 其真帧不是重投影——同文连发时中间轮 DONE 先到、答案帧后到，answered
+        // 单独判死会让真答零广播（R122）。只丢「已投过内容」的轮的迟到件。
+        if (t && t.answered && (t.gotAgent || t.sawStream)) return null;
+        if (t && (!ownerUt || t.utKey === ownerUt)) {
+          t.sawStream = true;
+          t.lastAct = now;
+        }
+        if (!utKey) utKey = ownerUt || (t ? t.utKey : "");
+        break;
+      }
+      case "AGENT_STREAM_END": {
+        const sid = String(ev.streamId || "");
+        if (sid) {
+          // 同一 sid 的 END 在 60s 内重投 = transcript/慢通道把已收尾流再投
+          // 一遍（实测发送后 ~2s 带单数位 ridx 的游离 END，无对应 START）——
+          // 客户端再收一遍会把它当新收尾信号处理。只放行首个 END。
+          const prevEnd = this.endedStreams.get(sid);
+          if (prevEnd != null && now - prevEnd < 60_000) return null;
+          this.endedStreams.set(sid, now);
+          if (this.endedStreams.size > 128) {
+            for (const [k, ts] of this.endedStreams) {
+              if (now - ts > 60_000) this.endedStreams.delete(k);
+            }
+          }
+        }
+        {
+          const { t, ownerUt } = this.turnForStreamEvent(
+            sessBase,
+            TurnArbiter.tsOf(ev),
+            sid,
+            utKey,
+            ev.requestIndex,
+          );
+          if (
+            t &&
+            t.answered &&
+            t.answeredAt != null &&
+            now - t.answeredAt > LATE_REPROJ_MS
+          )
+            return null;
+          if (t && (!ownerUt || t.utKey === ownerUt)) {
+            t.sawStream = true;
+            t.sawEnd = true;
+            t.lastAct = now;
+          }
+          if (!utKey) utKey = ownerUt || (t ? t.utKey : "");
+        }
+        break;
+      }
+      case "TOOL_CALL":
+      case "AGENT_TOOL_CALL":
+      case "AGENT_TOOL_RESULT":
+      case "TOOL_RESULT": {
+        // 上一轮的迟滞重投：ts 早于最新 live USER 10s+ → 该事件属于旧轮，
+        // 丢弃（R90：上轮工具调 ~37s 后漏进下一轮窗口渲成杂散工具卡）。
+        const evTs = TurnArbiter.tsOf(ev);
+        if (
+          evTs != null &&
+          this.latestUserLiveTs > 0 &&
+          evTs < this.latestUserLiveTs - 10_000
+        ) {
+          return null;
+        }
+        // 工具归属钉死：START 帧记录 toolId→归属轮 ut；随后的进度/完成帧（即使
+        // 该轮已被新 USER 取代、或 ts 缺失的慢通道重投）一律钉回原轮——否则
+        // isComplete 会盖上新轮 _ut，渲成串位的孤儿工具卡（R66 B3）。
+        const tidPin = String(
+          ev.toolId || ev.callId || ev.toolCallId || ev.id || ""
+        );
+        const evComplete = ev.isComplete === true;
+        if (tidPin && sessBase) {
+          const k = `${sessBase}|${tidPin}`;
+          const owner = this.toolOwnerUt.get(k);
+          if (owner && !utKey) utKey = owner;
+          if (!evComplete && utKey) this.toolOwnerUt.set(k, utKey);
+          if (evComplete) this.toolOwnerUt.delete(k);
+          if (this.toolOwnerUt.size > 256) {
+            const cut = this.toolOwnerUt.keys();
+            for (const key of cut) this.toolOwnerUt.delete(key);
+            // Map 键序即插入序——全清过度但不误伤（极少到 256）。
+            break;
+          }
+        }
+        const t = this.openTurnForEvent(sessBase, evTs);
+        if (t) {
+          t.sawStream = true;
+          t.lastAct = now;
+          if (!utKey) utKey = t.utKey;
+          if (tidPin && sessBase && !evComplete) {
+            this.toolOwnerUt.set(`${sessBase}|${tidPin}`, t.utKey);
+          }
+        }
+        break;
+      }
+      case "AGENT_THINKING":
+      case "THINKING_START":
+      case "THINKING_END":
+      case "COPILOT_TYPING": {
+        const { t, ownerUt } = this.turnForStreamEvent(
+          sessBase,
+          TurnArbiter.tsOf(ev),
+          String(ev.streamId || ""),
+          utKey,
+          ev.requestIndex,
+        );
+        if (t && (!ownerUt || t.utKey === ownerUt)) {
+          t.sawStream = true;
+          t.lastAct = now;
+        }
+        if (!utKey) utKey = ownerUt || (t ? t.utKey : "");
+        break;
+      }
+      case "THINKING_STEP":
+      case "PROGRESS_STEP": {
+        const evTs = TurnArbiter.tsOf(ev);
+        const { t, ownerUt } = this.turnForStreamEvent(
+          sessBase,
+          evTs,
+          String(ev.streamId || ""),
+          utKey,
+          ev.requestIndex,
+        );
+        const hadStream = t?.sawStream === true;
+        if (
+          t &&
+          t.answered &&
+          t.answeredAt != null &&
+          now - t.answeredAt > LATE_REPROJ_MS
+        )
+          return null;
+        if (t && (!ownerUt || t.utKey === ownerUt)) {
+          t.sawStream = true;
+          t.lastAct = now;
+        }
+        if (!utKey) utKey = ownerUt || (t ? t.utKey : "");
+        if (!t && !ownerUt && evTs != null && this.newestOpenTurn(sessBase)) {
+          // 存在开启轮但事件 ts 早于其开启 >2s：上一轮经慢通道迟到的
+          // 思考/进度帧——归属轮已收尾，放出去客户端只会为它新建流卡并
+          // 贴到 feed 底部（实测两枚旧轮 thinking 泡串进新轮下）。
+          return null;
+        }
+        // 迟到帧的第二种形态：上游把旧轮 thinking 以「新鲜 ts」在归属轮判答
+        // 后 1-2s 重投（实测 R96A 答 DONE 后 +1s 到达，>2s stale-ts 门兜不住）。
+        // 到达序把它归到刚开启、尚无流的新轮 → 错锚渲染在新用户泡下。
+        // 无 _ut/rid 自证且新轮未见流时，同会话另一轮 3s 内刚判答 → 判旧轮残骸丢。
+        // 新轮自身首帧思考通常在其 DONE 数秒后才可能产出，窗口内不误伤。
+        if (
+          t &&
+          !ownerUt &&
+          !hadStream &&
+          !ev.replayed &&
+          !ev.history
+        ) {
+          for (const ot of this.openTurns) {
+            if (ot === t || !ot.answeredAt) continue;
+            if (sessBase && (ot as any).sess && (ot as any).sess !== sessBase)
+              continue;
+            if (now - ot.answeredAt < 3000) return null;
+          }
+        }
+        break;
+      }
+      case "AGENT_CONFIRM": {
+        // 待批准卡归属到当前开启轮：其 DONE 携带的 _ut 才能与 pendingConfirms
+        // 的卡片 ut 对齐（bridge 按 ut 配对清理）；确认卡不视为「回答」。
+        // hasConfirm 标记 parked 轮：被新 USER 取代时合成收尾 DONE 的依据。
+        const t = this.openTurnForEvent(sessBase, TurnArbiter.tsOf(ev));
+        if (t) {
+          t.hasConfirm = true;
+          t.lastAct = now;
+          t.confirmId = String(
+            (ev as any).toolCallId || (ev as any).confirmId || (ev as any).requestId || (ev as any).id || "",
+          ) || t.confirmId;
+          if (!utKey) utKey = t.utKey;
+        }
+        break;
+      }
+      case "AGENT_MESSAGE": {
+        const { t, ownerUt } = this.turnForStreamEvent(
+          sessBase,
+          TurnArbiter.tsOf(ev),
+          String(ev.streamId || ""),
+          utKey,
+          ev.requestIndex,
+        );
+        if (!utKey) utKey = ownerUt || (t ? t.utKey : "");
+        // 去重归属：_ut 自证优先（已答轮也能反查回自己的实例）；
+        // 无 _ut 的才落到到达序最新未答轮。ts 校正使同文重问的迟到副本
+        // 归回事件发生时开启的同 ut 旧轮而非在途新轮（R119）。
+        ownerTurn = utKey
+          ? this.lastTurnWithUtAt(sessBase, utKey, TurnArbiter.tsOf(ev)) ?? t
+          : t;
+        if (String(ev.streamId || "").startsWith("sessiondb/")) {
+          // 行内容自洽：sessiondb 行的 _ut 来自 user_message 字段，但 Copilot
+          // 上游会把「被停在途生成」的内容写进下一请求的行（R109：K 被停后其
+          // 作文落到 L 的行，盖 ut=L 渲在 L 泡下、L 被判已答真答再无归属）。
+          // 答案 token 与各轮 user_text 计重叠分，最佳候选显著领先 _ut 轮时
+          // 改判真实归属轮（该轮可能已答/已停——内容归属不因停止而改变）。
+          const ownUt = utKey;
+          const rebound = this.rebindSessionDbTurn(sessBase, utKey, String(ev.text || ""));
+          if (rebound) {
+            utKey = rebound.utKey;
+            ownerTurn = rebound;
+            // 行自带的错 _ut 必须改写——out._ut 只在缺失时打戳，不改写的话
+            // 客户端拿到的还是错归属（列 user_message 原文）。
+            (ev as any)._ut = rebound.utKey;
+            if (ownUt && ownUt !== rebound.utKey) {
+              this.lastSdbRebind = { fromUt: ownUt, toUt: rebound.utKey, at: now };
+            }
+          } else if (!utKey) {
+            // 无 _ut 的 sessiondb 行按轮次序 FIFO 归最老未获答轮——行即轮次
+            // 记录、投影有序，「最新开放轮」兜底会让迟到旧行被新轮抢走。
+            const fifo = this.oldestUnservedTurn(sessBase);
+            if (fifo) {
+              utKey = fifo.utKey;
+              ownerTurn = fifo;
+            }
+          } else {
+            // 同文连发的 sessiondb 行：_ut 在多个轮间无判别力，ts 归属会把
+            // 中间轮的真行盖到已投过答案的首轮 → gotAgent 判死整条丢
+            // （R122：同文第 2 发答案零广播）。行即轮次记录按序投影——
+            // 有同 ut 未获答轮时 FIFO 归它；全部已获答才退回 ts 结果
+            // （那种情形本就是重投影，交给 gotAgent 门丢）。
+            let multi = false;
+            let unserved: TrackedTurn | undefined;
+            for (const ot of this.openTurns) {
+              if (ot.utKey !== utKey || !this.turnMatchesSess(ot, sessBase))
+                continue;
+              if (!ot.gotAgent) {
+                if (unserved) multi = true;
+                else unserved = ot;
+              } else if (!unserved) {
+                multi = true;
+              }
+            }
+            if (multi && unserved && ownerTurn !== unserved) ownerTurn = unserved;
+          }
+        }
+        if (ownerTurn) {
+          ownerTurn.sawStream = true;
+          ownerTurn.lastAct = now;
+        }
+        // 已答且已投过答案的轮再进 MSG = 迟到重投影（transcript/requests
+        // 文件懒写把同一份答案再投一遍，上游 _ut/reqIdx 还可能错标到他
+        // 轮）——广播必渲成重复泡（stray bubble 实测 i=98 型）。
+        if (ownerTurn && ownerTurn.gotAgent) return null;
+        // 已答轮收尾 >45s 后的首条 MSG：stop/DONE 判答后 transcript 懒写
+        // 把已流完的残篇再以新 sid 投一遍（R134：g2 停后 ~3min 的 MSG——
+        // gotAgent 为假盖不住，因该轮内容全走流通道）。已上线过内容的轮
+        // （sawStream/gotAgent）此时收到的必是重投影；DONE 先行而正文
+        // 从未上线的轮（R122 族）不拦。
+        if (
+          ownerTurn &&
+          ownerTurn.answered &&
+          ownerTurn.answeredAt != null &&
+          now - ownerTurn.answeredAt > LATE_REPROJ_MS &&
+          (ownerTurn.sawStream === true || ownerTurn.gotAgent === true)
+        )
+          return null;
+        // 无轮可配的迟到件：本会话轮次在册而该 MSG 归不到任何轮 → 错归属
+        // （transcript 帧 _ut 被上游错标上一段的旧文实测——i=92 型 stray；
+        // transcript MSG 天生无 _ut，归不到轮时同文重问下盖到在途新轮
+        // ——R120W 复测 prairie-1 迟到 MSG 渲在 prairie-2 下实测），广播
+        // 只能落成游离/串位泡。限迟到 >25s 的事件且会话有在册轮——新轮
+        // 首答/无 ts 的 MSG、以及 arbiter 重启后无册可参照的情形不误伤。
+        const evTsMsg = TurnArbiter.tsOf(ev);
+        if (
+          !ownerTurn &&
+          evTsMsg != null &&
+          now - evTsMsg > 25_000 &&
+          // 覆盖门：会话在册轮 OR 无 sess 轮（手机发的轮在 boundSess 未定时
+          // sess=''，turnMatchesSess 判不归属——R120W+1 实测同文重问下迟到
+          // transcript MSG 借此洞逃逸广播成串位泡）。轮册全非空才可能是
+          // 上游迟到重投影；空册（重启后）放行让回放/首答正常落。
+          this.openTurns.some(
+            (ot) => this.turnMatchesSess(ot, sessBase) || !(ot as any).sess,
+          )
+        ) {
+          return null;
+        }
+        break;
+      }
+      case "COPILOT_DONE": {
+        // 扩展自产的注入终态信号（inject_* reason）不是上游轮次事件——死注入
+        // 路径上目标轮从未注册，过裁决会被 !doneTurn/!recentClose 判死整条丢，
+        // 客户端永远收不到终态（实测空窗口死桥上 inject_soft_unverified 即被丢，
+        // 其送达核验解除逻辑从未触发）。
+        if (typeof ev.reason === "string" && ev.reason.startsWith("inject_"))
+          return ev;
+        // requestIndex 负数是 Copilot 的「无归属」哨兵（裸答案 DONE 实测带 -1）——
+        // 按无索引处理：否则 -1 < latestReqIdx 被误判陈旧 DONE，该轮释放信号整条丢。
+        const reqIdx =
+          typeof ev.requestIndex === "number" && ev.requestIndex >= 0
+            ? ev.requestIndex
+            : null;
+        const doneTs =
+          typeof ev.ts === "number" ? ev.ts : typeof ev.timestamp === "number" ? ev.timestamp : now;
+        const immediate =
+          ev.reason === "phone_stop" || ev.reason === "isCanceled";
+
+        // 行配对 DONE 随行改判：sessiondb 在 AGENT 后同刻补一条 DONE，其 _ut
+        // 与行 user_message 相同——行内容已被改判的，DONE 跟着改（R109：否则
+        // K 行的 DONE 仍盖 L 戳，把 L 的待答提前释放）。
+        if (
+          utKey &&
+          this.lastSdbRebind &&
+          now - this.lastSdbRebind.at < 5_000 &&
+          utKey === this.lastSdbRebind.fromUt
+        ) {
+          utKey = this.lastSdbRebind.toUt;
+          (ev as any)._ut = this.lastSdbRebind.toUt;
+        }
+
+        // 过期 DONE：归属旧轮次，不得释放当前在途状态。
+        // staleByTs 与 reqIdx 解耦——各通道 requestIndex 编号域不同
+        // （sessiondb 行号 / transcript turnSeq / chatSessions 请求序），
+        // 跨通道的「同号」其实属于旧轮：ts 早于最近 live USER 即 stale，
+        // 不论它带不带 requestIndex。
+        const staleByIdx = reqIdx != null && this.latestReqIdx > reqIdx;
+        const staleByTs =
+          !immediate &&
+          Number.isFinite(doneTs) &&
+          doneTs + STALE_DONE_SKEW_MS < this.latestUserLiveTs;
+        if (staleByIdx || staleByTs) ev.stale = true;
+
+        // 注入回执 DONE：发送后 ~2s 必到——特征不是「无 _ut」（回显带上戳后
+        // 它也会带归属），而是「目标轮此刻还没见过任何流事件」。
+        // 携 _ut 的对应到自己那轮；无 _ut 的对应最新未答轮。
+        const doneTurn = utKey
+          ? this.openTurns.find((t) => !t.answered && t.utKey === utKey)
+          : this.newestOpenTurn(sessBase);
+        if (
+          !immediate &&
+          doneTurn &&
+          !doneTurn.sawStream &&
+          now - doneTurn.ts < INJECT_ACK_WINDOW_MS
+        ) {
+          ev.ack = true;
+        }
+
+        // 中间 DONE：归属轮仍在流式产出（见过流、未判答）时到达的 DONE 是
+        // 工具步/子轮边界件而非本请求收尾——放行会让客户端拿它提前释放
+        // 发送队列（R26：queued 消息在答案落线前 ~18s 逃逸上链），同时
+        // markAnswered 会把轮错关、放走后续同类 DONE。直接丢。
+        // reason==='result' 是请求级权威收尾，豁免；从未见过流的轮
+        // （无流模型）其 turnSeq DONE 是唯一收尾件，也豁免。
+        if (
+          !immediate &&
+          ev.reason !== "result" &&
+          doneTurn &&
+          doneTurn.sawStream === true &&
+          doneTurn.sawEnd !== true
+        ) {
+          ev.interim = true;
+          return null;
+        }
+
+        // 停止类 DONE：终止最新未答轮，记 closedUt 让客户端精确清条目
+        const newest = this.newestOpenTurn(sessBase);
+        if (immediate && !utKey && newest) {
+          ev.closedUt = newest.utKey;
+          this.markAnswered(sessBase, newest.utKey);
+        } else if (utKey) {
+          this.markAnswered(sessBase, utKey);
+        }
+        // 无归属的普通 DONE 不妄关轮次——它可能属于更早的轮（迟到件），
+        // 错关最新轮会让后续 ack 判定失去 openTurns 依据。
+
+        // 判死 DONE：doneTurn 落空有两种——死件（轮早答/从未注册，
+        // elapsedMs/迟到通道重投）与合法件（AGENT_MESSAGE 先行判答，
+        // 本 DONE 就是它自己的收尾）。后者必须放行：客户端靠它释放
+        // requestRunning、出队 pendingSendQueue；杀掉会把连发第二条
+        // 卡死在队列里。只对「判答 ≤45s 内的同轮 DONE」放行。
+        if (!immediate && !doneTurn) {
+          let recentClose = false;
+          for (let i = this.openTurns.length - 1; i >= 0; i--) {
+            const t = this.openTurns[i];
+            if (!t.answeredAt) continue;
+            if (sessBase && (t as any).sess && (t as any).sess !== sessBase) continue;
+            if (utKey && t.utKey !== utKey) continue;
+            recentClose = now - t.answeredAt! <= DONE_LATE_CLOSE_MS;
+            break;
+          }
+          if (!recentClose) return null;
+        }
+        // 服务端判死的 DONE（stale/ack）不带任何可拼接信息（无 _ut/closedUt）
+        // 时，根本没有投递价值——客户端只会拿它做释放判断且一律压制，
+        // 广播出去反而多一条可被竞态利用的释放触发。直接丢。
+        if (!immediate && (ev.stale === true || ev.ack === true)) return null;
+        break;
+      }
+      default:
+        break;
+    }
+
+    // 跨通道去重：AGENT_MESSAGE 与 TOOL_* 事件按指纹在窗口内只放行首发。
+    // （USER 另有 recentUserEmits 文本窗去重——同题重问是合法行为，这里不拦。）
+    const isTool = type.endsWith("TOOL_CALL") || type.endsWith("TOOL_RESULT");
+    if (isTool) {
+      // parked 轮（桌面确认挂起的工具）会被慢通道以 fresh ts 重投——
+      // stale-ts 门拦不住 → 工具卡串进新轮 feed。toolId 级 5min 记忆：
+      // 同 id 再投仅放行「向终态推进」的更新（isComplete/done），
+      // 重复 running 帧直接丢。
+      const tid = String(ev.toolId || ev.callId || ev.toolCallId || ev.id || "");
+      if (tid) {
+        const prev = this.emittedTools.get(`${sessBase}|${tid}`);
+        if (prev) {
+          const advancing =
+            (ev.isComplete === true || ev.status === "done" || ev.status === "completed") &&
+            !prev.done;
+          if (!advancing && now - prev.t < TOOL_REPROJ_MS) return null;
+          if (advancing) {
+            prev.done = true;
+            prev.t = now;
+          }
+        }
+        if (!prev && markEmitted) {
+          this.emittedTools.set(`${sessBase}|${tid}`, {
+            t: now,
+            done: ev.isComplete === true || ev.status === "done" || ev.status === "completed",
+          });
+          if (this.emittedTools.size > 256) {
+            const cutoff = now - TOOL_REPROJ_MS;
+            for (const [k, v] of this.emittedTools) if (v.t < cutoff) this.emittedTools.delete(k);
+          }
+        }
+      }
+    }
+    if (
+      type === "AGENT_MESSAGE" ||
+      type === "AGENT_CONFIRM" ||
+      type.endsWith("TOOL_CALL") ||
+      type.endsWith("TOOL_RESULT")
+    ) {
+      const key = this.contentKey(ev, sessBase, utKey);
+      // AGENT_MESSAGE 再配一条「轮次+前缀」副指纹：sessiondb 位置型 streamId
+      // （requests/N/）与实时流 id 不同，同一答文经异构 sid 双通道到会各渲一
+      // 张卡片（R58 长答双渲）。同轮同前缀即重复，无论 sid 形态。
+      // 副指纹按「轮次实例」判重而非 ut 文本：同一条答案经双通道重投，
+      // 两副本都归同一个 TrackedTurn → 压；同题重问产生新轮，同文新答的
+      // ownerTurn 不同 → 放行（R92：ut 键会把第二答当重投影吞掉）。
+      // 待批准卡的异构 id 副本：transcript/sessiondb 各投一遍但 cid 不同
+      // → c|sess|cid 两键各放行 → 双卡（R132 F5）。内容指纹 c2 跨通道判重；
+      // 同文案的真实新审批 >30s 窗不受影响（文案含命令/路径，异卡不同文）。
+      const confirmBody =
+        type === "AGENT_CONFIRM"
+          ? normText(`${ev.title || ""} ${ev.message || ""} ${ev.text || ""}`)
+          : "";
+      const altKey =
+        type === "AGENT_MESSAGE"
+          ? `a2|${sessBase}|${normText(ev.text).slice(0, 80)}`
+          : type === "AGENT_CONFIRM" && confirmBody
+            ? `c2|${sessBase}|${confirmBody.slice(0, 80)}`
+            : null;
+      // AGENT_CONFIRM 用 30s 窗：吃双通道同刻重投，但不误杀数分钟后同文案的
+      // 真实新一轮待批准（同窗口只在「真·同一张卡」上才误伤）。
+      const window =
+        type === "AGENT_MESSAGE"
+          ? CONTENT_DEDUPE_MS
+          : type === "AGENT_CONFIRM"
+            ? 30_000
+            : TOOL_DEDUPE_MS;
+      const altPrev = altKey ? this.emittedA2.get(altKey) : undefined;
+      // 幻影重投影纠偏（R20 BUG-4）：上轮答案经变体重投到达时被盖到新开启轮
+      // 的 _ut 下——事件自证不了归属（无 requestIndex 或下标落后于已见最新），
+      // 而同一文本在窗口内已投给别的轮实例。此时 _ut 拨回其真实归属轮：
+      // a2 按轮次实例判重会把迟到的幻影自然吃掉。
+      // 前提：事件自己没有权威 _ut（sessiondb 行带 r.user_message 是自证归属——
+      // 同题重问的第二答_ut 相同但轮实例不同，拨回旧轮会把它误杀）。
+      const evReqIdx =
+        typeof ev.requestIndex === "number" ? ev.requestIndex : null;
+      const unproven = evReqIdx == null || evReqIdx < this.latestReqIdx;
+      const hadOwnUt = typeof ev._ut === "string" && normText(ev._ut) !== "";
+      // 同文新轮的真答豁免纠偏：归属已解析到一个「事件发生时已存在的开启
+      // 轮」（源 ts ≥ 该轮创建——答案不可能先于问题产生），它不是旧轮重投
+      // 影；纠偏会把真答改写归旧轮后被 altDup 整条吞（R132 F2/F3：同文×N
+      // 连发时第 N 发答案+其 DONE 永久零广播，仅回放可愈）。
+      const evTsCorr = TurnArbiter.tsOf(ev);
+      const genuineNewTurn =
+        ownerTurn != null &&
+        ownerTurn.answered !== true &&
+        evTsCorr != null &&
+        evTsCorr >= (ownerTurn.ts || 0);
+      if (
+        type === "AGENT_MESSAGE" &&
+        unproven &&
+        !hadOwnUt &&
+        altPrev &&
+        altPrev.turn != null &&
+        ownerTurn !== altPrev.turn &&
+        now - altPrev.t <= window &&
+        !genuineNewTurn
+      ) {
+        utKey = altPrev.ut;
+        ownerTurn = altPrev.turn;
+      }
+      const altDup =
+        !!altPrev &&
+        now - altPrev.t <= window &&
+        (type === "AGENT_CONFIRM" ||
+          altPrev.turn === ownerTurn ||
+          (altPrev.turn == null && ownerTurn == null && altPrev.ut === utKey));
+      // 再配一条「同文不同轮」指纹：旧轮答案经慢通道重投影时被盖上当轮的
+      // _ut（openTurnForEvent 的 ts 门挡不住无 ts 的件），ut 不同但文本同。
+      // 只在事件无法自证属于当前轮时启用（无 requestIndex 或下标落后）——
+      // 否则同题重问拿到的同文新答会被误杀。
+      // sessiondb 行不查 a3：行即轮次记录、user_message 即本题——同文答案
+      // 落到不同行 = 不同轮的真实新答（R17：M17B 撞 M17A 文本指纹被杀，
+      // 且 requestIndex 恒 -1 使 unproven 恒真 → 该通道永远无法自证）。
+      // sessionDbEmittedIds + a|sid 键已挡同行重投，a3 对它只有误伤。
+      const isSessionDb = String(ev.streamId || "").startsWith("sessiondb/");
+      // 注册与检查分开：sessiondb 行自己不被 a3 查（R17 误杀族），但长文
+      // （≥200）的行要登记指纹——transcript 慢通道把同一聚合尾段盖上新轮
+      // _ut 重投时才能查到 prior 归属并丢弃（R107 ANOMALY-3：sessiondb dump
+      // 与 t1m dump 同前缀各渲一遍）。短文不登记：同文短答是合法重问。
+      const a3Txt = type === "AGENT_MESSAGE" ? String(ev.text || "") : "";
+      const reprojKey =
+        type === "AGENT_MESSAGE" &&
+        utKey &&
+        unproven &&
+        (!isSessionDb || a3Txt.length >= 200)
+          ? `a3|${sessBase}|${normText(ev.text).slice(0, 80)}`
+          : null;
+      const reprojUt = reprojKey ? this.emittedUt.get(reprojKey) : undefined;
+      const reprojDup = !isSessionDb && reprojUt != null && reprojUt !== utKey;
+      // 回放副本的待批准卡：live 已投过的同卡不论隔多久都丢（emitted 120s
+      // 窗会被回放甩开）。live 卡不进此分支——30s 窗照常走 emitted 去重。
+      if (
+        type === "AGENT_CONFIRM" &&
+        (ev.replayed || ev.history) &&
+        ((key && this.emittedConfirms.has(key)) ||
+          (altKey && this.emittedConfirms.has(altKey)))
+      ) {
+        return null;
+      }
+      const isDup =
+        (key && (this.emitted.get(key) ?? 0) && now - this.emitted.get(key)! <= window) ||
+        altDup ||
+        reprojDup;
+      if (isDup) {
+        return null;
+      }
+      // 只在「真的会广播」时记名：离线排队/被后续闸丢弃的首发不算已投递，
+      // 否则首份被吞、重发又被当重复——净丢一条消息。
+      if (markEmitted) {
+        if (key) this.emitted.set(key, now);
+        if (altKey) this.emittedA2.set(altKey, { t: now, turn: ownerTurn, ut: utKey });
+        if (reprojKey && utKey) this.emittedUt.set(reprojKey, utKey);
+        if (type === "AGENT_CONFIRM" && key) this.emittedConfirms.add(key);
+        if (type === "AGENT_CONFIRM" && altKey) this.emittedConfirms.add(altKey);
+      }
+      if (type === "AGENT_MESSAGE") {
+        this.markAnswered(sessBase, utKey);
+        // 记答案全文：回放补投刚完成的轮用（transcript 懒写盘缺口）
+        const full = String(ev.text || "");
+        if (full) {
+          const tt = this.openTurns.find(
+            (x) => x.answered && x.utKey === utKey,
+          );
+          if (tt && !tt.answerText) tt.answerText = full;
+        }
+        // 归属标记：sessiondb FIFO/内容改判的「未获答轮」游标据此前移。
+        const served = ownerTurn ?? this.lastTurnWithUt(sessBase, utKey);
+        if (served) served.gotAgent = true;
+      }
+    }
+
+    const out = { ...ev, _seq: ++this.seq };
+    if (sessBase && !out._sess) out._sess = sessBase;
+    else if (type === "USER_MESSAGE" && !out._sess && this.boundSess) {
+      out._sess = this.boundSess;
+    }
+    if (utKey && !out._ut) out._ut = utKey;
+    return out;
+  }
+}
